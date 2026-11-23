@@ -13,6 +13,8 @@
 |---|---|---|---|
 | sevenz-rust2 | 7z | Apache-2.0 | 源码依赖 |
 | zip | ZIP | MIT | 源码依赖 |
+| encoding_rs | 编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 源码依赖 |
+| crossbeam-channel | 有界队列 | MIT OR Apache-2.0 | 源码依赖 |
 | rayon | 并行 | MIT/Apache-2.0 | 源码依赖 |
 | aes / sha2 / crc32fast | 加密/校验 | MIT/Apache-2.0 | 源码依赖 |
 | serde / thiserror / clap | 序列化/错误/CLI | MIT/Apache-2.0 | 源码依赖 |
