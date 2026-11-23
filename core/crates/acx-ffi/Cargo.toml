@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-repository.workspace = true
 description = "ArchCracker C ABI for desktop, Android (JNI) and HarmonyOS (NAPI) frontends"
 
 [lib]
