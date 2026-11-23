@@ -71,11 +71,11 @@ native/unrar?            不随包；运行时检测用户安装的 WinRAR/UnRAR
 ### 5.2 调用
 
 ```text
-UnRAR.exe t -p- "<archive>"        # 密码通过 stdin 提供，避免出现在 argv
-UnRAR.exe x -p- "<archive>" "<out>" # 命中后确认/解压
+UnRAR.exe t -p "<archive>"         # -p 触发提示；密码通过 stdin 提供，避免出现在 argv
+UnRAR.exe x -p "<archive>" "<out>" # 命中后确认/解压
 ```
 
-- 密码不写命令行；用 stdin/管道，日志脱敏。
+- 密码不写命令行；用 stdin/管道，日志脱敏。`-p-` 在部分版本表示“禁用密码”，不要使用；`-p` 的 stdin 行为需在 W1 用实际 UnRAR 版本验证；若不接受 stdin，改用临时密码文件/命名管道，仍避免 argv。
 - 超时/取消：杀进程树；错误输出映射为 `ACX_ERR_*`。
 - `t` 只用于**确认**；候选筛选优先用自研 RAR 头/密钥探针，避免每候选起进程。
 - 路径含空格/中文：参数用 `CommandLineToArgvW` 兼容的引用；不要拼接 shell 字符串。
