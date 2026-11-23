@@ -1,7 +1,6 @@
 # local sample tools used for the initial analysis — never commit
-/解密1/
-/解密2/
-/解密3/
+/解密*/
+
 
 # local toolchains / caches
 /.tools/
@@ -56,3 +55,15 @@ desktop.ini
 .env
 .env.*
 !.env.example
+
+# never commit samples/archives/dictionaries anywhere
+*.7z
+*.rar
+*.zip
+*.001
+*.r00
+*.r01
+*.part*.rar
+*.dict
+/tests/corpus/*
+!/tests/corpus/README.md

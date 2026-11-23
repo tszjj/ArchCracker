@@ -2,16 +2,16 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：M0（仓库/工具链/内核骨架）**。Rust workspace 与最小 C ABI 已可构建；攻击流水线与三套前端将在 P1–P6 落地。
+> **状态：M0（Windows 全栈优先）**。Rust workspace 与最小 C ABI 已可构建；当前迭代只做 Windows 全栈（CLI → GUI → 安装包），Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
 ## 目标
 
-- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/256；AES 支持待 P1 实测）、RAR4/RAR5（仅桌面，需用户自装 `unrar`；移动端首发不含 RAR），以及分卷、SFX。
+- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/256；AES 支持待 P1 实测）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；解压 RAR 本身符合 unRAR 许可，GPL 分发边界见 `docs/licensing.md`），以及分卷、SFX。
 - **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、字典+掩码混合；规则引擎为 P2。
-- **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后官方引擎复核；多核/多进程并行、断点续跑。
-- **形态**：同一 Rust 内核 + C ABI；桌面 Avalonia，Android Jetpack Compose，HarmonyOS ArkTS/ArkUI；CLI 可独立运行。
+- **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎完整解压复核；多核/多进程并行、断点续跑。
+- **形态**：同一 Rust 内核 + C ABI；Windows 用 Avalonia 12；CLI 可独立运行。Android/HarmonyOS 前端后续再做。
 - **隐私**：默认零网络、无遥测、无强制更新。
 
 ## 架构
@@ -33,24 +33,35 @@
 │  platform: file access / process / threads (no UI deps)          │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
-        sevenz-rust2 · zip · unrar-rs(external) · rayon · aes/sha2
+        sevenz-rust2 · zip · 外部 unrar（Windows，仅进程调用） · rayon · aes/sha2
 ```
 
 - **内核**：Rust workspace，纯逻辑、可交叉编译；不依赖任何 UI 框架。
-- **前端**：只通过 C ABI（桌面 P/Invoke、Android JNI、HarmonyOS NAPI）调用内核；崩溃隔离可选用 sidecar 进程。
-- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 因 unRAR 许可与 GPL-3.0 存在冲突，默认走**外部 `unrar`/可选插件**，不静态链接进 GPL 内核（详见 `docs/licensing.md`）。
+- **前端**：Windows 用 Avalonia 12，通过 P/Invoke 调 C ABI；崩溃隔离可选用 sidecar 进程。Android JNI / HarmonyOS NAPI 的接口保留，后续实现。
+- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 的**解压用途**由 unRAR 许可允许，当前只处理 GPL-3.0 下的链接/分发边界：Windows 调用用户已安装的 WinRAR/`UnRAR.exe`，不把 unRAR 链进 GPL 内核（详见 `docs/licensing.md`）。
+
+## 当前优先级：Windows 全栈
+
+本迭代按“能装、能用、能卸载”的 Windows 产品推进：
+
+1. Rust 内核 + CLI：ZIP/7z/RAR（外部）+ 字典/掩码/暴力 + 多线程 + 断点。
+2. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、自动解压。
+3. Windows 交付：MSIX/Inno 安装包、代码签名、崩溃转储、zh/en。
+4. 测试/基准：1M 字典、1GB 归档、缺卷/损坏/未加密分类。
+
+Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排期、不引入 SDK**；Windows 发布后再逐平台移植。
 
 ## 平台矩阵
 
-| 平台 | 前端 | 内核交付 | 首发阶段 | 备注 |
+| 平台 | 前端 | 内核交付 | 阶段 | 备注 |
 |---|---|---|---|---|
-| Windows 10/11 x64 | Avalonia 12（.NET 10） | `acx.dll` + CLI | P0 | 首要开发/验证平台 |
-| Linux x64/arm64 | Avalonia 12 | `libacx.so` + CLI | P2 | AppImage/Flatpak |
-| macOS 13+ arm64/x64 | Avalonia 12 | `libacx.dylib` + CLI | P2 | 公证、hardened runtime；不上 Mac App Store |
-| Android 11+ | Kotlin + Compose | `libacx.so`（JNI） | P3 | SAF、前台服务、按 ABI 打包 |
-| HarmonyOS 6+ | ArkTS/ArkUI | `libacx.so`（NAPI） | P4 | DevEco 签名、前台任务 |
+| **Windows 10/11 x64** | Avalonia 12（.NET 10） | `acx.dll` + CLI | **当前（W1–W5）** | 唯一排期平台；全栈交付 |
+| Linux x64/arm64 | Avalonia 12 | `libacx.so` + CLI | 后续 | Windows 发布后 |
+| macOS 13+ arm64/x64 | Avalonia 12 | `libacx.dylib` + CLI | 后续 | 公证；不上 Mac App Store |
+| Android 11+ | Kotlin + Compose | `libacx.so`（JNI） | 后续 | SAF、前台服务 |
+| HarmonyOS 6+ | ArkTS/ArkUI | `libacx.so`（NAPI） | 后续 | DevEco 签名 |
 
-> 版本号（.NET 10、Avalonia 12、HarmonyOS 6+）随调研时间点确定，落地时以实际 SDK 为准。
+> 版本号（.NET 10、Avalonia 12）以实际 SDK 为准。RAR 在 Windows 通过已安装的 WinRAR/UnRAR 工作；其他平台后续同样走外部 `unrar`，移动端暂不排期。
 
 ## 仓库结构
 
@@ -97,7 +108,7 @@ cargo test --workspace
 cargo run -p acx-cli -- --help
 ```
 
-Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在 P3/P4 前单独安装，脚本会给出检查项而不是强行下载数 GB 的 IDE。
+Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在后续平台启动前单独安装；当前 Windows 阶段不下载数 GB 的 IDE，脚本只给出检查项。
 
 ## 文档
 
@@ -113,7 +124,7 @@ Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在 P3/P4 前单
 
 本项目以 **GPL-3.0-only** 发布，见 [LICENSE](LICENSE)。
 
-第三方组件与特殊说明见 [docs/licensing.md](docs/licensing.md)。其中 RAR 支持涉及 unRAR 许可，默认不静态链接进 GPL 内核；在法务结论明确前，发布物不得捆绑 `unrar` 代码或二进制。
+第三方组件与特殊说明见 [docs/licensing.md](docs/licensing.md)。其中 RAR 支持涉及 unRAR 许可：解压 RAR 本身是许可允许的用途；本项目不链接（静态/动态）、不随包、不自动下载 unRAR 代码或二进制，Windows 首发调用用户已安装的 WinRAR/UnRAR。
 
 ## 参与
 

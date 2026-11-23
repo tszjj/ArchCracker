@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 ArchCracker contributors
 // DSH workflow body: fan out research angles, then return a structured summary.
 // Usage: pass this file's contents as `script` to the workflow tool.
 // args = { question: string, angles: [{ id: string, prompt: string }] }

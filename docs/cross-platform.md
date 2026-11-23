@@ -1,5 +1,7 @@
 # 跨平台开发策略（五系统）
 
+> **2026-11-24 修订**：当前只排期 **Windows 全栈（W0–W5）**。本文的 Linux/macOS/Android/HarmonyOS 内容是后续参考，**D1–D3 Deferred**；不引入移动 SDK。
+
 > 目标：同一 Rust 内核覆盖 Windows、Linux、macOS、Android、HarmonyOS；不是五套产品，而是**一套内核 + 三套前端 + 五个打包通道**。
 
 ## 1. 需求拆解
@@ -10,7 +12,7 @@
 | 契约 | `acx.h`、错误码、攻击参数、测试向量 | 无 |
 | 前端 | 交互流程、设计 token、i18n | UI 框架、文件选择、权限、通知、后台 |
 | 打包 | 版本/许可/源码 | 签名、安装器、商店 |
-| RAR | 仅桌面外部 `unrar` | 移动端不支持/后续 add-on |
+| RAR | Windows 外部 `unrar`（首发） | 其他平台 deferred / 后续 add-on |
 
 **结论**：跨平台成本应集中在“三套 UI + 平台胶水”，而不是复制算法。
 

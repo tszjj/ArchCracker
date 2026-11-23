@@ -1,6 +1,8 @@
 # ArchCracker 跨平台总体架构
 
 > 状态：Accepted（M0 基线） · 更新：2026-11-24
+>
+> **排期：Windows 全栈优先（W0–W5）。** 其他平台的接口保留，但 D1–D3 为 Deferred；本文的跨平台设计不等于当前迭代范围。
 > 相关：[ADR-0001 Rust 内核](adr/0001-rust-core.md) · [ADR-0002 前端拆分](adr/0002-frontend-split.md) · [ADR-0003 RAR 许可](adr/0003-rar-licensing.md)
 
 ## 1. 目标与约束
@@ -37,7 +39,7 @@
 └──────────────────────────────┬───────────────────────────────────────┘
 ┌──────────────────────────────▼───────────────────────────────────────┐
 │ 依赖                                                                  │
-│  sevenz-rust2（Apache-2.0） · zip（MIT） · unrar-rs/外部 unrar（许可待定）│
+│  sevenz-rust2（Apache-2.0） · zip（MIT） · 外部 unrar（Windows，仅进程）    │
 │  rayon · aes · sha2 · crc32fast · serde · thiserror                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -54,8 +56,8 @@
 结论来自 2026-11 的技术调研（见 ADR-0001）：
 
 - 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。
-- ZIP：`zip` crate 支持 ZipCrypto 与 WinZip AES（AE-1/AE-2）；多卷需自建容器层。
-- RAR：`unrar-rs` 是纯 Rust 的 UnRAR 移植，覆盖 RAR4/5、`-p`/`-hp`、多卷、SFX；但受 unRAR 许可约束，不能默认静态链接进 GPL 内核。
+- ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2）能力，**P1 差分确认前不对外宣传**；多卷需自建容器层。
+- RAR：解压用途由 unRAR 许可允许；本项目 Windows 首发调用用户已安装的 `UnRAR.exe`（仅进程），不把 unRAR 链接进 GPL 内核。`unrar-rs` 仅本地实验，不是依赖。
 - 平台：Rust Android 为 Tier 2；`aarch64-unknown-linux-ohos` 为 Tier 2 with host tools，可用 OHOS clang 作为 linker。
 - 内存安全与 AI 可维护性显著优于 C++；性能上限高于 Go。
 
@@ -69,8 +71,8 @@
 |---|---|---|---|---|
 | 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
 | ZIP | ZipCrypto、WinZip AES-128/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | WinZip AES 支持需 P1 实测确认；multi-disk 由我们补 |
-| RAR4 | AES-128、头加密 | 外部 `unrar` / 可选 `unrar-rs` | 外部引擎处理 | 仅桌面；用户自装，不随包 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar` / 可选 `unrar-rs` | 外部引擎处理 | 仅桌面；用户自装，不随包 |
+| RAR4 | AES-128、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
 | SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
 
 ### 4.2 快筛与确认
@@ -81,23 +83,23 @@
    ├─ 结构判据：verifier / 头 CRC / 压缩流头 / 首块解码失败 → 可靠否决
    ├─ 内容判据（可选快速模式）：文件签名表 → 可能漏，标注“未确认”
    ▼
-疑似命中 → 官方参考引擎完整解压最小条目 → CRC/文件尾校验 → 发布
+疑似命中 → 内置引擎完整解压最小条目 → CRC/文件尾校验 → 发布
 ```
 
 - 默认快速模式：store 条目用签名表（性能前提）；压缩条目用结构判据。
 - 严格模式：store 条目完整解压/CRC；慢但不会漏。
-- 任何命中必须由 7-Zip/unrar 参考实现确认，保证零误报。
+- 命中由内置引擎（sevenz-rust2/zip）完整解压复核；CI 再用 7-Zip/unrar 做差分 oracle。设计目标是零误报，但不把绝对保证写进产品文案。
 - 快筛误否决只在“快速模式”出现；UI 必须显示“未确认”，并提供严格模式复核。
 
 ### 4.3 RAR 许可策略（重要）
 
-unRAR 许可的“不得用于开发 RAR 兼容压缩器”与 GPL-3.0 §10 的额外限制冲突。因此：
+先澄清：**解压 RAR 本身是 unRAR 许可允许的用途，不违反 RAR 协议**。这里的限制只发生在 GPL-3.0 的链接/分发层面：unRAR 许可的“不得用于开发 RAR 兼容压缩器”等条款与 GPL-3.0 §10 的额外限制冲突。因此：
 
-1. **内核不静态链接 unRAR/7-Zip RAR 代码，也不随包分发/自动下载**；
-2. 默认通过**用户自行安装的外部 `unrar`/`UnRAR.exe` 进程**完成 RAR 确认与解压；
-3. `unrar-rs` 仅作为**可选 feature**，构建时显式开启，发布物需单独评估/法务确认；
+1. **内核不链接（静态或动态）unRAR/7-Zip RAR 代码，也不随包分发/自动下载**；
+2. Windows 首发通过**用户自行安装的 WinRAR/`UnRAR.exe` 进程**完成 RAR 确认与解压；功能不受影响；
+3. `unrar-rs` 仅作为**本地实验**，不是依赖、默认不启用、不随发布物；
 4. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
-5. Android/HarmonyOS 首发不内置 RAR；Android 可引导用户用已安装的 RAR 应用打开，后续再评估独立许可 add-on。
+5. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
 > 该策略在 `docs/adr/0003-rar-licensing.md` 中记录，许可结论出来前不得放宽。
 
@@ -106,10 +108,11 @@ unRAR 许可的“不得用于开发 RAR 兼容压缩器”与 GPL-3.0 §10 的�
 ### 5.1 原则
 
 - 稳定、可版本化；结构体带 `size`/`version` 字段；未知字段忽略。
-- 字符串一律 UTF-8 + 长度；不依赖 C 字符串结尾（兼容含 NUL 的路径？路径不允许 NUL）。
+- v0 字符串：UTF-8、NUL 结尾（路径不允许 NUL）；二进制 blob 用 `ptr + len`。移动端前再评估是否需要统一的 `(ptr,len)` 形式。
 - 句柄不透明；创建/销毁成对；回调在 `stop` 返回后不再触发。
 - Rust panic 不跨 FFI：`catch_unwind` → `ACX_ERR_PANIC`。
 - 线程安全：一个 handle 同时只允许一个 `start`；`pause/resume/stop` 可从任意线程调用。
+- **v0 范围**：只覆盖 Windows/桌面路径；在 D2/D3 之前必须扩展 `AcxInput{path|fd|uri}`、`on_finished`、`AcxStatusInfo` 与 `struct_size`，并补 JNI/NAPI 生命周期测试。
 
 ### 5.2 草案
 
@@ -233,7 +236,7 @@ const char* acx_last_error(AcxHandle* h); /* thread-local copy */
 
 - 文件 Picker 授权随进程失效，需即时使用；长任务前台 + 断点。
 - `libacx.so`（arm64-v8a）经 NAPI 导出；DevEco 签名生成 HAP。
-- 首发功能与桌面一致，但 RAR 视许可/外部引擎方案而定。
+- 其他平台当前 Deferred；未来功能与桌面一致，RAR 仍只走外部引擎/独立许可 add-on。
 
 ### 7.4 共享
 
@@ -260,7 +263,7 @@ cargo test --workspace
 | core-macos | macos-latest | test/build（arm64） |
 | desktop | windows/ubuntu/macos | Avalonia build（M1 后） |
 | android | ubuntu + NDK | `cargo ndk` + Gradle（P3） |
-| harmony | 手动/自托管 | DevEco/NAPI 构建（P4，需华为工具链） |
+| harmony | 手动/自托管 | DevEco/NAPI 构建（D3，后续） |
 
 Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台矩阵，移动端用 `workflow_dispatch` 手动任务。
 
@@ -291,7 +294,7 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| RAR 许可 | 无法默认支持 RAR | 外部 unrar/可选插件；法务确认；RAR 快筛自研 |
+| RAR 许可 | 不链接/不随包 | Windows 用用户自装外部 unrar；GPL 分发边界见 ADR-0003；RAR 快筛自研 |
 | sevenz-rust2 边界 | 加密头/PPMd/异常包差异 | 差分测试（7-Zip oracle）；语料矩阵 |
 | HarmonyOS Rust 工具链 | 构建/加载不稳定 | 先 C ABI + 最小 NAPI spike；保留纯 ArkTS 降级 |
 | 移动端后台限制 | 长任务被挂起 | 前台服务/常亮/断点续算；不承诺后台 |

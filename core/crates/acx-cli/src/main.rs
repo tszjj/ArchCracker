@@ -1,31 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 ArchCracker contributors
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
-fn print_help() {
-    println!(
-        "{}\n\
-         \n\
-         Usage:\n\
-           acx --version\n\
-           acx --help\n\
-         \n\
-         M0: the attack pipeline is not implemented yet.\n\
-         Planned: -f <archive> -m dict -d <dict> -t <threads>",
-        acx_core::version_string()
-    );
-}
+const HELP: &str = r#"ArchCracker command-line interface
+
+Usage:
+  acx --version
+  acx --help
+  acx -f <archive> -m dict -d <dictionary> -t <threads>
+
+M0: the attack pipeline is not implemented yet.
+Planned: dictionary, mask, brute force, resume, auto-extract.
+"#;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
-    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
-        print_help();
+    if args.is_empty() {
+        eprintln!("{HELP}");
+        return ExitCode::from(2);
+    }
+
+    let has = |flag: &str| args.iter().any(|a| a.to_string_lossy() == flag);
+
+    if has("--help") || has("-h") {
+        print!("{HELP}");
         return ExitCode::SUCCESS;
     }
 
-    if args.iter().any(|a| a == "--version" || a == "-V") {
+    if has("--version") || has("-V") {
         println!("{}", acx_core::version_string());
         return ExitCode::SUCCESS;
     }

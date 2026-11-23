@@ -15,7 +15,7 @@ authors = ["ArchCracker contributors"]
 description = "Cross-platform archive password recovery core"
 
 [profile.release]
+# Keep unwind so the C ABI can catch panics and return ACX_ERR_PANIC.
+# Symbols are kept for crash dumps; strip them in the packaging pipeline instead.
 lto = "thin"
 codegen-units = 1
-panic = "abort"
-strip = "symbols"

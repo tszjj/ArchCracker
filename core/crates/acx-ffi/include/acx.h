@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+/* ABI revision; bump on breaking struct/layout changes. */
+#define ACX_ABI_VERSION 0
+
 #if defined(_WIN32) && defined(ACX_SHARED)
 #  if defined(ACX_BUILD)
 #    define ACX_API __declspec(dllexport)
@@ -32,7 +35,8 @@ typedef enum AcxStatus {
     ACX_ERR_MISSING_VOLUME = 5,
     ACX_ERR_CANCELLED = 6,
     ACX_ERR_INTERNAL = 7,
-    ACX_ERR_PANIC = 8
+    ACX_ERR_PANIC = 8,
+    ACX_ERR_UNKNOWN = 9
 } AcxStatus;
 
 ACX_API const char* acx_product(void);

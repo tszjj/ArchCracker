@@ -27,7 +27,11 @@
 - **7-Zip / p7zip 含 RAR 代码的二进制**：unRAR restriction，不随 GPL 核心分发。仅本机/CI 作为 oracle 时使用。
 - **`unrar-rs`**：默认不启用；如未来启用，需单独许可评审。
 
-## 通知
+## 通知与商标
+
+- Apache-2.0 组件：随发布物保留其 `NOTICE`（如有）与许可证文本；MIT 组件保留版权行与许可文本。完整清单由 CI 的 `cargo about`/`cargo deny` 生成。
+- RAR、WinRAR、WinZip、7-Zip 等名称是其各自权利人的商标；本项目与 RARLAB、WinZip、7-Zip 官方无隶属关系，名称仅用于说明兼容性。
+- 本项目不随包分发 unRAR/7-Zip RAR 代码；RAR 仅调用用户自行安装的 WinRAR/`UnRAR.exe`。
 
 - GPL-3.0 全文见 `LICENSE`。
 - 发布二进制时附本文件、`LICENSE`、对应源码链接/构建说明。

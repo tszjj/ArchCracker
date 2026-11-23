@@ -14,7 +14,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 1. **只做授权恢复**：仅处理用户本人拥有或已获明确授权的归档；不实现在线撞库/共享密码/绕过 DRM。
 2. **内核/前端分离**：核心不得依赖 UI、不得调用平台 GUI API；前端只通过 C ABI / JNI / NAPI 调用核心。
 3. **默认离线**：无遥测、无强制更新、无静默网络请求。
-4. **许可干净**：GPL-3.0-only；第三方组件逐个登记；RAR 许可未决前不得把 unRAR 代码/二进制静态链接或随包分发。
+4. **许可干净**：GPL-3.0-only；第三方组件逐个登记；RAR 解压用途本身允许，但内核不链接（静态/动态）、不随包、不自动下载 unRAR 代码/二进制。
 5. **可验证**：每个功能有测试或可复现的验证步骤；性能结论必须有基准数据。
 
 ---
@@ -26,7 +26,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 | 许可证 | GPL-3.0-only | `LICENSE` |
 | 内核语言 | Rust（workspace + C ABI） | `docs/adr/0001-rust-core.md` |
 | 前端拆分 | Avalonia 12（桌面三平台）/ Compose（Android）/ ArkUI（HarmonyOS） | `docs/adr/0002-frontend-split.md` |
-| RAR 策略 | 仅桌面调用用户自装外部 `unrar`；不链接、不随包、不自动下载；移动首发无 RAR | `docs/adr/0003-rar-licensing.md` |
+| RAR 策略 | Windows 首发调用用户自装 WinRAR/UnRAR；不链接、不随包、不自动下载；其他平台 Deferred | `docs/adr/0003-rar-licensing.md` |
 | 首发平台 | Windows 10/11 x64，先 CLI 后 GUI | `docs/roadmap.md` |
 | 开发方式 | 多 Agent 分工 + 分支/PR + 评审门禁 | 本文件第 6 节 |
 
@@ -36,14 +36,14 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 
 ## 3. 当前阶段
 
-**M0 进行中（部分完成）**：
+**M0 进行中（部分完成，Windows 全栈优先）**：
 
 - 仓库、许可证、文档、ADR、Agent 协作规范已建立；
 - Windows 用户级工具链（Rust GNU/MinGW、.NET 10、CMake、Ninja、gh）已装好；
 - `core/` 已有可编译的 Rust workspace + C ABI 最小实现，`cargo test` 通过；
-- 三套前端尚未落地；下一步是 P1：ZIP/7z 字典攻击 + 多线程 + 断点 + 基准语料。
+- Windows GUI 尚未开始；下一步是 W1：ZIP/7z/RAR（外部）+ 字典 + 多线程 + 断点 + 基准语料。其他平台 Deferred。
 
-在 M0 完成前，不要大规模写 UI，不要引入移动端 SDK，不要提交未经证实的性能数字。
+W1 完成前不要提前铺 GUI；移动端 SDK 一律不引入；不要提交未经证实的性能数字。
 
 ---
 
@@ -198,7 +198,7 @@ RISKS: <licensing/perf/cross-platform>
 
 - **不执行** `解密1/2/3` 目录中的二进制；它们只作静态分析样本，且已被 `.gitignore` 排除。
 - 不运行来源不明的压缩包/字典；测试语料必须由仓库脚本生成或来自可信公开数据集。
-- 不把 `unrar`、7-Zip RAR 代码、破解版工具提交进仓库；RAR 只通过外部进程/可选插件，许可结论见 `docs/licensing.md`。
+- 不把 `unrar`、7-Zip RAR 代码、破解版工具提交进仓库；RAR 只通过用户自装的外部进程，不链接/不随包；边界见 `docs/licensing.md`。
 - 不加入遥测、崩溃上报、在线密码查询；日志默认不记录完整密码。
 - 解压路径做规范化，防 Zip Slip；DLL/so 从程序目录加载并校验哈希。
 - 发现安全问题时走私密渠道（`SECURITY.md`），不要在公开 issue 贴利用细节。
@@ -207,7 +207,7 @@ RISKS: <licensing/perf/cross-platform>
 
 ## 10. 性能与正确性
 
-- 正确性优先：任何“找到密码”必须由官方参考引擎（7-Zip/unrar）完整解压确认；快筛只用于否决候选。
+- 正确性优先：任何“找到密码”必须由内置引擎完整解压复核；CI 再用 7-Zip/unrar 做差分 oracle。快筛只用于否决候选。
 - 快筛的分层：结构判据（verifier/压缩流头/CRC）可靠；文件签名启发式可能漏，必须标注“未确认”，并提供严格模式。
 - 基准：同机、同语料、同电源模式；报告 p/s、CPU、内存、ETA 误差；不引用未复现的第三方数字作为本项目结论。
 - 移动端 ETA 用滑动窗口，不假设可持续满载。

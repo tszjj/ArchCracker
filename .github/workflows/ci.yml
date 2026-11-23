@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 ArchCracker contributors
+
 name: ci
 
 on:
@@ -36,13 +39,76 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: build
-        run: cargo build --workspace --release
+        run: cargo build --workspace --release --locked
 
-      - name: ffi artifact
-        run: cargo build -p acx-ffi --release
+      - name: C header smoke (C99 + C++)
+        if: runner.os == 'Linux'
+        run: |
+          gcc -std=c99 -Wall -Wextra -Werror -I crates/acx-ffi/include -c crates/acx-ffi/tests/header_smoke.c -o /tmp/acx_header_c.o
+          c++ -std=c++17 -Wall -Wextra -Werror -I crates/acx-ffi/include -c crates/acx-ffi/tests/header_smoke.c -o /tmp/acx_header_cpp.o
+
+      - name: upload ffi artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: acx-ffi-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: |
+            core/target/release/acx.dll
+            core/target/release/acx.exe
+            core/target/release/libacx.so
+            core/target/release/libacx.dylib
+            core/crates/acx-ffi/include/acx.h
+
+  windows-gnu:
+    name: rust (windows-latest, gnu)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2/MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Install Rust (GNU target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+          components: rustfmt, clippy
+
+      - name: test (GNU)
+        working-directory: core
+        run: cargo test --workspace --locked --target x86_64-pc-windows-gnu
+
+  msrv:
+    name: rust (msrv 1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@1.85
+
+      - name: test
+        working-directory: core
+        run: cargo test --workspace --locked
+
+  licenses:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+          manifest-path: core/Cargo.toml
+          arguments: --all-features

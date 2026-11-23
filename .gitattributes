@@ -8,6 +8,10 @@
 *.zip binary
 *.7z binary
 *.rar binary
+*.001 binary
+*.r00 binary
+*.part*.rar binary
+*.z01 binary
 *.dll binary
 *.so binary
 *.dylib binary

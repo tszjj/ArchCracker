@@ -5,12 +5,11 @@
 //!
 //! Contract:
 //! - All returned `const char*` are static, NUL-terminated UTF-8; do not free.
-//! - Functions never panic across the boundary; M0 has no fallible calls yet.
+//! - Functions never panic across the boundary; fallible calls return a status
+//!   code and write a message retrievable via the future `acx_last_error`.
 
-use std::ffi::c_char;
-
-static PRODUCT_C: &[u8] = concat!("ArchCracker", "\0").as_bytes();
-static VERSION_C: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
+use std::ffi::{c_char, CString};
+use std::sync::OnceLock;
 
 /// Numeric status codes shared with `include/acx.h`.
 pub const ACX_OK: i32 = 0;
@@ -22,20 +21,32 @@ pub const ACX_ERR_MISSING_VOLUME: i32 = 5;
 pub const ACX_ERR_CANCELLED: i32 = 6;
 pub const ACX_ERR_INTERNAL: i32 = 7;
 pub const ACX_ERR_PANIC: i32 = 8;
+pub const ACX_ERR_UNKNOWN: i32 = 9;
+
+static PRODUCT_C: OnceLock<CString> = OnceLock::new();
+static VERSION_C: OnceLock<CString> = OnceLock::new();
+
+fn product_c() -> &'static CString {
+    PRODUCT_C.get_or_init(|| CString::new(acx_core::PRODUCT).unwrap_or_default())
+}
+
+fn version_c() -> &'static CString {
+    VERSION_C.get_or_init(|| CString::new(acx_core::VERSION).unwrap_or_default())
+}
 
 /// Product name, e.g. `ArchCracker`.
 #[no_mangle]
 pub extern "C" fn acx_product() -> *const c_char {
-    PRODUCT_C.as_ptr().cast()
+    product_c().as_ptr()
 }
 
 /// Core version, e.g. `0.0.1`.
 #[no_mangle]
 pub extern "C" fn acx_version() -> *const c_char {
-    VERSION_C.as_ptr().cast()
+    version_c().as_ptr()
 }
 
-/// Stable name for a status code.
+/// Stable name for a status code. Unknown codes return `ACX_ERR_UNKNOWN`.
 #[no_mangle]
 pub extern "C" fn acx_status_name(status: i32) -> *const c_char {
     let s: &[u8] = match status {
@@ -48,6 +59,7 @@ pub extern "C" fn acx_status_name(status: i32) -> *const c_char {
         ACX_ERR_CANCELLED => b"ACX_ERR_CANCELLED\0",
         ACX_ERR_INTERNAL => b"ACX_ERR_INTERNAL\0",
         ACX_ERR_PANIC => b"ACX_ERR_PANIC\0",
+        ACX_ERR_UNKNOWN => b"ACX_ERR_UNKNOWN\0",
         _ => b"ACX_ERR_UNKNOWN\0",
     };
     s.as_ptr().cast()
@@ -58,17 +70,34 @@ mod tests {
     use super::*;
     use std::ffi::CStr;
 
+    fn cstr(p: *const c_char) -> String {
+        // SAFETY: the pointers returned by this crate point to static CStrings.
+        unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+    }
+
     #[test]
-    fn exposes_version() {
-        let p = acx_version();
-        let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
-        assert_eq!(s, env!("CARGO_PKG_VERSION"));
+    fn exposes_product_and_version_from_core() {
+        assert_eq!(cstr(acx_product()), acx_core::PRODUCT);
+        assert_eq!(cstr(acx_version()), acx_core::VERSION);
     }
 
     #[test]
     fn status_names_are_stable() {
-        let p = acx_status_name(ACX_ERR_MISSING_VOLUME);
-        let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
-        assert_eq!(s, "ACX_ERR_MISSING_VOLUME");
+        let cases = [
+            (ACX_OK, "ACX_OK"),
+            (ACX_ERR_INVALID_ARG, "ACX_ERR_INVALID_ARG"),
+            (ACX_ERR_IO, "ACX_ERR_IO"),
+            (ACX_ERR_UNSUPPORTED, "ACX_ERR_UNSUPPORTED"),
+            (ACX_ERR_ARCHIVE, "ACX_ERR_ARCHIVE"),
+            (ACX_ERR_MISSING_VOLUME, "ACX_ERR_MISSING_VOLUME"),
+            (ACX_ERR_CANCELLED, "ACX_ERR_CANCELLED"),
+            (ACX_ERR_INTERNAL, "ACX_ERR_INTERNAL"),
+            (ACX_ERR_PANIC, "ACX_ERR_PANIC"),
+            (ACX_ERR_UNKNOWN, "ACX_ERR_UNKNOWN"),
+        ];
+        for (code, name) in cases {
+            assert_eq!(cstr(acx_status_name(code)), name);
+        }
+        assert_eq!(cstr(acx_status_name(99)), "ACX_ERR_UNKNOWN");
     }
 }

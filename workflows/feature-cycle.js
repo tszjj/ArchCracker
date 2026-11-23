@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 ArchCracker contributors
 // DSH workflow body: plan -> implement -> review -> verify for one scoped task.
 // Usage: pass this file's contents as `script` to the workflow tool.
 // args = {

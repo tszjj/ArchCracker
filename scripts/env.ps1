@@ -1,7 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 ArchCracker contributors
+#
 # ArchCracker dev environment for the current PowerShell session.
-# Usage:  . .\scripts\env.ps1
+# Usage:  Set-ExecutionPolicy -Scope Process Bypass -Force
+#         . .\scripts\env.ps1
 # Safe to source repeatedly; it does not install anything.
 
+$previousPreference = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -19,14 +24,23 @@ foreach ($p in $parts) {
 }
 $env:Path = ($clean -join ';')
 
-$env:RUSTUP_HOME = Join-Path $env:USERPROFILE '.rustup'
-$env:CARGO_HOME = Join-Path $env:USERPROFILE '.cargo'
+# Do not override an existing custom toolchain location.
+if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $env:USERPROFILE '.rustup' }
+if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $env:USERPROFILE '.cargo' }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
-Write-Host "ArchCracker env loaded."
-Write-Host ("  cargo : " + (Get-Command cargo).Source)
-Write-Host ("  rustc : " + (Get-Command rustc).Source)
-Write-Host ("  gcc   : " + (Get-Command gcc).Source)
-Write-Host ("  cmake : " + (Get-Command cmake).Source)
-Write-Host ("  dotnet: " + (Get-Command dotnet).Source)
+function Show-Cmd([string]$Name) {
+    $c = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($c) { Write-Host ("  {0,-7}: {1}" -f $Name, $c.Source) }
+    else { Write-Host ("  {0,-7}: (missing)" -f $Name) -ForegroundColor Yellow }
+}
+
+Write-Host 'ArchCracker env loaded.'
+Show-Cmd 'cargo'
+Show-Cmd 'rustc'
+Show-Cmd 'gcc'
+Show-Cmd 'cmake'
+Show-Cmd 'dotnet'
+
+$ErrorActionPreference = $previousPreference
