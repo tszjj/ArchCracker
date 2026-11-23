@@ -2,7 +2,7 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：M0（Windows 全栈优先）**。Rust workspace 与最小 C ABI 已可构建；当前迭代只做 Windows 全栈（CLI → GUI → 安装包），Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通；下一步补齐 deflate/AES/7z/RAR 与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 

@@ -8,3 +8,8 @@ authors.workspace = true
 description.workspace = true
 
 [dependencies]
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
+crc32fast = "1.5"
+thiserror = "2"
+encoding_rs = "0.8"
+crossbeam-channel = "0.5"
