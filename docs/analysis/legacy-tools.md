@@ -952,19 +952,20 @@ ldstr [" -o"]
 
 说明：命中判断基于 `7z t` 的文本输出，解压用 `7z x`；密码循环在单个 `BackgroundWorker` 内。
 
-### A.2 解密2 1.5.8 的核心循环（上游同 tag 源码）
+### A.2 解密2 1.5.8 的核心循环（行为伪代码）
 
-```csharp
-string[] Dictionary = File.ReadAllLines(Config.Dictionary);
-Parallel.ForEach(Dictionary, (i, loopState) =>
-{
-    using var temp = new SevenZipExtractor(ArchiveFile, i);
-    Test.Increment((double)1 / DictionaryCount * 100);
-    if (temp.Check()) { EncryptArchivePassword = i; loopState.Break(); }
-});
+> 为避免把上游 GPL 源码带入本仓库，这里只保留伪代码，不复制实现。
+
+```text
+lines = read_all_lines(dictionary)          # 全量入内存
+parallel_for_each(lines, password => {
+    archive = open(archive_path, password)  # 每个候选重新打开
+    result  = archive.test()                # 全量校验
+    if (result.ok) { hit(password); break; }
+})
 ```
 
-说明：每个候选重新构造 `SevenZipExtractor`；字典全量入内存；无快筛、无断点。
+说明：每个候选重新构造归档对象；字典全量入内存；无快筛、无断点。
 
 ### A.3 解密3 的 `.urp`（`default.urp`）
 
@@ -990,7 +991,7 @@ StartLine=1
 - CPU：Intel Core i5-14600K，14 核（6P+8E）/ 20 线程；
 - 已安装 WinRAR（`C:\Program Files\WinRAR\UnRAR.exe` 可用于生成/校验 RAR 语料）；
 - 未安装 7-Zip（7z.dll 随工具提供）；
-- **未安装 .NET SDK**，只有 .NET 6.0 运行时；M0 需先安装 .NET 8 SDK（`winget install Microsoft.DotNet.SDK.8` 或官方安装器），否则无法编译。
+- 已安装 .NET 10 SDK（10.0.404，用户级）；Rust 使用 1.100 GNU 工具链。
 
 ---
 
