@@ -1,0 +1,50 @@
+# Optional DSH agent presets for ArchCracker.
+# NOT applied automatically. This file is a template only.
+#
+# Why not ready-to-use: a preset owns its tool list. A preset that only mounts
+# @deepseek-ai/dsh-persona has no tools. To create a role preset, copy the
+# complete `plugins:` list from the standard preset (in the dsh-web-app bundle),
+# then add the persona line below.
+#
+# Before applying:
+#   1. Backup %USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml
+#   2. Add the preset rows (and registry if missing)
+#   3. Restart DSH; presets only affect new sessions
+#   4. If anything breaks, restore the backup
+#
+# For most work, prefer the built-in `subagent` + docs/agents/roles/*.md prompts.
+#
+# - id: agent-preset-registry
+#   name: '@deepseek-ai/dsh-agent-preset-registry'
+#   config:
+#     default: standard
+#
+# - id: preset-archcracker-architect
+#   name: '@deepseek-ai/dsh-agent-preset'
+#   config:
+#     id: archcracker-architect
+#     name: ArchCracker 架构师
+#     description: 架构/ADR/接口/跨平台约束；不写业务代码
+#     plugins:
+#       # TODO: copy tool plugin rows from the `standard` preset here
+#       - name: '@deepseek-ai/dsh-persona'
+#         config:
+#           prefix: |
+#             你是 ArchCracker 的架构师。先读仓库 AGENTS.md 与 docs/agents/roles/architect.md。
+#             你不写业务代码；你维护 ADR、C ABI 契约、跨平台能力矩阵与任务拆分。
+#             对许可（unRAR/RAR）、性能声明、未验证平台保持严格。
+#
+# - id: preset-archcracker-core
+#   name: '@deepseek-ai/dsh-agent-preset'
+#   config:
+#     id: archcracker-core
+#     name: ArchCracker 内核工程师
+#     description: Rust core / engines / scheduler / FFI
+#     plugins:
+#       # TODO: copy tool plugin rows from the `standard` preset here
+#       - name: '@deepseek-ai/dsh-persona'
+#         config:
+#           prefix: |
+#             你是 ArchCracker 的 Rust 内核工程师。先读 AGENTS.md 与 docs/agents/roles/core-engineer.md。
+#             只在 core/ 范围内改动；不引入 unRAR/RAR 代码；每候选不重开归档；
+#             测试/基准证据必须真实；不确定的写"未验证"。

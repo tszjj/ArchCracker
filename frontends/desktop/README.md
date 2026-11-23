@@ -1,0 +1,29 @@
+# Desktop frontend (Avalonia 12 / .NET 10)
+
+Planned for P3. Windows first, then Linux/macOS with the same codebase.
+
+## Scope
+
+- Drag/drop or pick archive; show format/encryption/volume info.
+- Tabs: dictionary / mask / brute / rules.
+- Thread count, fast/strict mode, auto-extract.
+- Progress, rate, ETA, pause/resume/stop.
+- Result: password, copy, report, auto-extract.
+- Error classification: unencrypted/empty/corrupt/missing volume/unsupported/header-encrypted.
+
+## Integration
+
+- P/Invoke `acx.dll`/`libacx.so`/`libacx.dylib` via `[LibraryImport]`.
+- Callbacks: progress/hit/log; keep delegates alive; no UI work on native threads.
+- Keep a sidecar mode switch for crash isolation (P3).
+- Long operations never on the UI thread.
+
+## Packaging
+
+- Windows: MSIX or Inno Setup; EV/OV signing; Defender false-positive check.
+- macOS: universal binary, hardened runtime, notarization, DMG; not Mac App Store.
+- Linux: AppImage + Flatpak.
+
+## Status
+
+Not scaffolded yet. M0 only defines the C ABI and docs.

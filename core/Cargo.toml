@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/acx-core",
+    "crates/acx-cli",
+    "crates/acx-ffi",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+authors = ["ArchCracker contributors"]
+repository = "https://github.com/ARCHCRACKER/ArchCracker"
+description = "Cross-platform archive password recovery core"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

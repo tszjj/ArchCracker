@@ -1,0 +1,58 @@
+# local sample tools used for the initial analysis — never commit
+/解密1/
+/解密2/
+/解密3/
+
+# local toolchains / caches
+/.tools/
+/.cache/
+/tmp/
+/artifacts/
+/dist/
+
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+
+# Node / web
+node_modules/
+.pnpm-store/
+*.log
+
+# Android
+.gradle/
+local.properties
+**/*.apk
+**/*.aab
+**/*.ap_
+captures/
+.cxx/
+
+# HarmonyOS
+oh_modules/
+.hvigor/
+**/*.hap
+**/*.hsp
+**/*.app
+**/*.har
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# Local secrets / env
+.env
+.env.*
+!.env.example

@@ -1,0 +1,16 @@
+[package]
+name = "acx-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ArchCracker C ABI for desktop, Android (JNI) and HarmonyOS (NAPI) frontends"
+
+[lib]
+name = "acx"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+acx-core = { path = "../acx-core" }
