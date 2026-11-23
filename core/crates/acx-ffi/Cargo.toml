@@ -12,4 +12,4 @@ name = "acx"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-acx-core = { path = "../acx-core" }
+acx-core = { path = "../acx-core", version = "0.0.1" }
