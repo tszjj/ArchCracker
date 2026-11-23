@@ -144,4 +144,5 @@ cargo run -p acx-cli -- --version
   2. 零长度加密条目 CRC=0 造成假命中 → 跳过空条目；仅有空条目时明确报 Unsupported。
 - 手工复测 reviewer 语料：deflated 正确密码 exit 0、5000 错误密码 exit 1；空条目 exit 3。
 - 验证：`cargo test --workspace`（24 core + 4 CLI + 4 集成 + 2 FFI）通过；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 通过。
-- 未覆盖：真实 AES ZIP、>64 MiB 条目、非 Windows 平台、1M 字典 p/s 基准（W1 后续）。
+- 基线：`docs/benchmarks/w1-zipcrypto.md`（1M 错误候选，release/4 线程约 1.6 s；极小条目，不能外推）。
+- 未覆盖：真实 AES ZIP、>64 MiB 条目、非 Windows 平台、大归档 p/s 基准（W1 后续）。
