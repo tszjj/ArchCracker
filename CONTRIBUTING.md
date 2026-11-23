@@ -1,6 +1,6 @@
 # 贡献指南
 
-ArchCracker 以 **GPL-3.0-only** 发布。提交代码即表示你同意以该许可证分发你的贡献。
+ArchCracker 以 **Apache-2.0** 发布。提交代码即表示你同意以该许可证分发你的贡献。
 
 ## 1. 环境
 
@@ -41,7 +41,7 @@ cargo run -p acx-cli -- --version
 - 新文件头：
 
 ```rust
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 ```
 

@@ -13,7 +13,7 @@
 1. CI 矩阵：Windows/Linux/macOS；移动端手动/自托管。
 2. 构建产物：CLI、`acx.dll`/`so`/`dylib`、桌面安装包、AAB/APK、HAP。
 3. 签名/公证：Windows EV/OV、macOS hardened runtime/notarization、Android/HarmonyOS 签名。
-4. 合规：源码归档、`THIRD_PARTY_NOTICES`、GPL 通知、无 unRAR 代码检查。
+4. 合规：源码归档、`THIRD_PARTY_NOTICES`、LICENSE/NOTICE、无 unRAR 代码检查。
 5. 发布说明/回滚/哈希/校验和。
 6. 供应链：锁定依赖、`cargo deny`、构建可复现。
 
@@ -21,7 +21,7 @@
 
 - 不跳过测试/评审；不为发版临时禁用检查。
 - 不把密钥写入仓库；使用 CI secrets。
-- 不把 unrar/7-Zip RAR 代码打进 GPL 包。
+- 不把 unrar/7-Zip RAR 代码打进主项目包。
 - macOS 不上 App Store；Android/HarmonyOS 先内测/侧载。
 - 发布物必须附对应源码链接/许可。
 

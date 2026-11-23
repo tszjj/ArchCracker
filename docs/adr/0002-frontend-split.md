@@ -32,7 +32,7 @@
 - **桌面效率**：Avalonia XAML + MVVM 对 C#/AI Agent 最友好，P/Invoke 调 C ABI 直接；Windows 11 24H2 为 Tier 1。
 - **移动原生体验**：Compose 在 Android 是官方一等；ArkUI 是鸿蒙唯一稳定选择；文件选择/前台服务/权限都需原生胶水。
 - **成本可控**：三套 UI 各 3–5 屏，90% 复杂度在核心；共享契约与测试向量避免三份逻辑。
-- **许可**：Avalonia MIT、Compose Apache-2.0、ArkUI 随 HarmonyOS SDK；与 GPL-3.0 兼容。
+- **许可**：Avalonia MIT、Compose Apache-2.0、ArkUI 随 HarmonyOS SDK；与 Apache-2.0 兼容。
 
 ## 备选与不选原因
 
@@ -56,7 +56,7 @@
 
 - 三套 UI 需维护；共享设计 token/测试向量来降低漂移。
 - .NET 10/Avalonia 12 较新，需锁定版本并验证。
-- macOS 不上 App Store（GPL 冲突），走官网 + 公证。
+- macOS 当前走官网 + 公证；App Store 后续再评估（审核/签名成本）。
 - 鸿蒙 NAPI/打包需真机验证，CI 难自动化。
 
 ## 验证方式

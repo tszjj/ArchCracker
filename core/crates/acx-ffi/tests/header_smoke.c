@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: Apache-2.0
  * Copyright (C) 2026 ArchCracker contributors
  *
  * Compile-only smoke test: the header must be valid C99 and C++.

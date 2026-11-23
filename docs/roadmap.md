@@ -28,7 +28,7 @@
 
 **目标**：让任何 Agent 在新机器上 30 分钟内跑起 `cargo test`。
 
-- [ ] 仓库初始化：GPL-3.0、README、AGENTS.md、ADR、目录骨架
+- [ ] 仓库初始化：Apache-2.0、README、AGENTS.md、ADR、目录骨架
 - [ ] 用户级工具链脚本：Rust GNU + MinGW + CMake/Ninja + .NET SDK + gh
 - [ ] Rust workspace：`acx-core`/`acx-cli`/`acx-ffi` 空壳，`cargo test` 通过
 - [ ] `acx.h` v0 草案 + 错误码
@@ -176,7 +176,7 @@
 - [ ] 线程数/亲和性平台差异（macOS 无线程亲和）
 - [ ] 路径/大小写/编码/换行测试
 - [ ] CI：三平台构建 + 冒烟
-- [ ] 不上 Mac App Store（GPL 与商店条款冲突）
+- [ ] 暂不上 Mac App Store（审核/签名成本；后续再评估）
 
 **退出标准**
 
@@ -252,7 +252,7 @@ W0 ──► W1 ──► W2 ──► W3 ──► W4 ──► W5 ──► Wi
 ```
 
 - **W1 是最大风险**：ZIP/7z 加密、会话复用、断点、性能基线必须先打通。
-- **RAR**：解压用途符合 unRAR 许可；Windows 只调用用户已装 WinRAR/UnRAR，不链接、不随包（GPL 分发边界见 ADR-0003）。
+- **RAR**：解压用途符合 unRAR 许可；Windows 只调用用户已装 WinRAR/UnRAR，不链接、不随包（许可边界见 ADR-0003）。
 - **其他平台**依赖 C ABI 稳定（W3 末冻结）；D1–D3 在 Windows 发布后再启动。
 - **UI 工作量**：当前只做 Windows 一套（Avalonia）；移动端后续再评估。
 

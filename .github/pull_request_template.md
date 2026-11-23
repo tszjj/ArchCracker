@@ -30,7 +30,7 @@ cargo test --workspace
 ## 检查清单
 
 - [ ] 遵循 `AGENTS.md` 与对应角色文件
-- [ ] 新增文件带 `SPDX-License-Identifier: GPL-3.0-only`
+- [ ] 新增文件带 `SPDX-License-Identifier: Apache-2.0`
 - [ ] 新依赖已登记 `docs/licensing.md`
 - [ ] 未提交样本/密钥/生成物
 - [ ] 未把"未验证"写成"已完成"

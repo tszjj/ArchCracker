@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
 //! Minimal C ABI surface for M0. The attack API lands in P3.

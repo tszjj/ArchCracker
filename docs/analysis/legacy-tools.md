@@ -1,6 +1,6 @@
 # 从三款旧工具到 ArchCracker：压缩包密码恢复工具分析与架构规划
 
-> **历史文档（2026-11-24 前的分析与规划）**：当前策略以 `AGENTS.md`、`docs/adr/0001-rust-core.md`、`docs/adr/0003-rar-licensing.md`、`docs/licensing.md` 为准。
+> **历史文档（2026-11-24 前的分析与规划）**：项目许可证已由 GPL-3.0 改为 Apache-2.0；当前策略以 `AGENTS.md`、`docs/adr/0001-rust-core.md`、`docs/adr/0003-rar-licensing.md`、`docs/licensing.md` 为准。
 >
 > 本文中“动态链接 7z.dll/unrar.dll、随包分发、附上第三方许可即可”的旧方案**已废弃，不得实施**。RAR 解压用途本身是 unRAR 许可允许的；Windows 首发只用用户自行安装的 WinRAR/UnRAR，不链接、不随包、不自动下载。
 

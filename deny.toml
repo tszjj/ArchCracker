@@ -1,8 +1,8 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 ArchCracker contributors
 #
 # Dependency/license gate. Keep the allow-list limited to licenses that are
-# compatible with GPL-3.0-only. RAR/unRAR code is never a dependency; see
+# compatible with Apache-2.0. RAR/unRAR code is never a dependency; see
 # docs/adr/0003-rar-licensing.md.
 
 [licenses]
@@ -15,7 +15,6 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
-    "GPL-3.0-only",
 ]
 confidence-threshold = 0.8
 

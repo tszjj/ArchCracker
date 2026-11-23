@@ -8,7 +8,7 @@
 
 ## 目标
 
-- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/256；AES 支持待 P1 实测）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；解压 RAR 本身符合 unRAR 许可，GPL 分发边界见 `docs/licensing.md`），以及分卷、SFX。
+- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/256；AES 支持待 P1 实测）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
 - **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、字典+掩码混合；规则引擎为 P2。
 - **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎完整解压复核；多核/多进程并行、断点续跑。
 - **形态**：同一 Rust 内核 + C ABI；Windows 用 Avalonia 12；CLI 可独立运行。Android/HarmonyOS 前端后续再做。
@@ -38,7 +38,7 @@
 
 - **内核**：Rust workspace，纯逻辑、可交叉编译；不依赖任何 UI 框架。
 - **前端**：Windows 用 Avalonia 12，通过 P/Invoke 调 C ABI；崩溃隔离可选用 sidecar 进程。Android JNI / HarmonyOS NAPI 的接口保留，后续实现。
-- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 的**解压用途**由 unRAR 许可允许，当前只处理 GPL-3.0 下的链接/分发边界：Windows 调用用户已安装的 WinRAR/`UnRAR.exe`，不把 unRAR 链进 GPL 内核（详见 `docs/licensing.md`）。
+- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 的**解压用途**由 unRAR 许可允许，当前只处理 Apache-2.0 下的组件边界：Windows 调用用户已安装的 WinRAR/`UnRAR.exe`，不把 unRAR 链进主项目（详见 `docs/licensing.md`）。
 
 ## 当前优先级：Windows 全栈
 
@@ -80,7 +80,7 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 ├─ docs/
 │  ├─ architecture.md    # 跨平台总体架构
 │  ├─ roadmap.md         # 分阶段开发计划
-│  ├─ licensing.md       # GPL-3.0 与第三方许可
+│  ├─ licensing.md       # Apache-2.0 与第三方许可
 │  ├─ adr/               # 架构决策记录
 │  ├─ agents/            # 子智能体角色与协作规范
 │  └─ analysis/          # 旧工具分析与历史规划（内部研究）
@@ -88,7 +88,7 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 ├─ scripts/              # 环境/语料/构建脚本
 ├─ tests/                # 跨语言测试向量与语料索引
 ├─ AGENTS.md             # 所有 Agent 的入口指令
-├─ LICENSE               # GPL-3.0
+├─ LICENSE               # Apache-2.0
 └─ README.md
 ```
 
@@ -123,7 +123,7 @@ Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在后续平台�
 
 ## 许可
 
-本项目以 **GPL-3.0-only** 发布，见 [LICENSE](LICENSE)。
+本项目以 **Apache-2.0** 发布，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
 第三方组件与特殊说明见 [docs/licensing.md](docs/licensing.md)。其中 RAR 支持涉及 unRAR 许可：解压 RAR 本身是许可允许的用途；本项目不链接（静态/动态）、不随包、不自动下载 unRAR 代码或二进制，Windows 首发调用用户已安装的 WinRAR/UnRAR。
 

@@ -46,7 +46,7 @@ git push -u origin main
 - **Actions**：允许 GitHub Actions；fork PR 默认只读 token。
 - **Security**：启用 Private vulnerability reporting、Dependabot alerts、secret scanning。
 - **Topics**：`archive`、`password-recovery`、`rust`、`cross-platform`、`android`、`harmonyos`。
-- **Releases**：附源码归档、SHA-256、第三方 notices、GPL 声明。
+- **Releases**：附源码归档、SHA-256、第三方 notices、LICENSE/NOTICE。
 
 ## 4. 公开发布前清单
 

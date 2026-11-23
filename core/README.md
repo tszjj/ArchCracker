@@ -20,4 +20,4 @@ Windows uses the GNU toolchain (`x86_64-pc-windows-gnu`) with MinGW-w64 from
 
 ## License
 
-GPL-3.0-only. New files need the SPDX header.
+Apache-2.0. New files need the SPDX header.

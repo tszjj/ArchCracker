@@ -13,7 +13,7 @@
 | 两段式 | `core`（Rust 内核 + CLI + C ABI）与 `frontends`（桌面/Android/HarmonyOS）分离 |
 | 格式 | 7z、ZIP、RAR4/RAR5；分卷、SFX、头加密 |
 | 性能 | 会话复用、首块判错、多核并行、断点续跑 |
-| 许可 | GPL-3.0-only；RAR/unRAR 单独处理，不污染内核 |
+| 许可 | Apache-2.0；RAR/unRAR 单独处理，不污染内核 |
 | 体验 | 简洁、离线、无遥测；Windows 首发 |
 | 可维护 | 90% 复杂度在核心；前端各 3–5 屏；跨平台差异只在胶水层 |
 
@@ -57,7 +57,7 @@
 
 - 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。
 - ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2）能力，**P1 差分确认前不对外宣传**；多卷需自建容器层。
-- RAR：解压用途由 unRAR 许可允许；本项目 Windows 首发调用用户已安装的 `UnRAR.exe`（仅进程），不把 unRAR 链接进 GPL 内核。`unrar-rs` 仅本地实验，不是依赖。
+- RAR：解压用途由 unRAR 许可允许；本项目 Windows 首发调用用户已安装的 `UnRAR.exe`（仅进程），不把 unRAR 链接进主项目。`unrar-rs` 仅本地实验，不是依赖。
 - 平台：Rust Android 为 Tier 2；`aarch64-unknown-linux-ohos` 为 Tier 2 with host tools，可用 OHOS clang 作为 linker。
 - 内存安全与 AI 可维护性显著优于 C++；性能上限高于 Go。
 
@@ -93,7 +93,7 @@
 
 ### 4.3 RAR 许可策略（重要）
 
-先澄清：**解压 RAR 本身是 unRAR 许可允许的用途，不违反 RAR 协议**。这里的限制只发生在 GPL-3.0 的链接/分发层面：unRAR 许可的“不得用于开发 RAR 兼容压缩器”等条款与 GPL-3.0 §10 的额外限制冲突。因此：
+先澄清：**解压 RAR 本身是 unRAR 许可允许的用途，不违反 RAR 协议**。本项目是 Apache-2.0，没有 GPL 的 copyleft 冲突；但 unRAR 许可自身仍有“不得开发 RAR 兼容压缩器”等限制。为保持组件边界清晰：
 
 1. **内核不链接（静态或动态）unRAR/7-Zip RAR 代码，也不随包分发/自动下载**；
 2. Windows 首发通过**用户自行安装的 WinRAR/`UnRAR.exe` 进程**完成 RAR 确认与解压；功能不受影响；
@@ -101,7 +101,7 @@
 4. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
 5. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-> 该策略在 `docs/adr/0003-rar-licensing.md` 中记录，许可结论出来前不得放宽。
+> 该策略在 `docs/adr/0003-rar-licensing.md` 中记录；若要随包 UnRAR.exe，按独立程序单独评审。
 
 ## 5. C ABI 设计
 
@@ -285,8 +285,8 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 
 ## 10. 许可
 
-- 本项目 GPL-3.0-only。
-- `sevenz-rust2` Apache-2.0、`zip` MIT、`rayon` MIT/Apache-2.0、`aes`/`sha2` MIT/Apache-2.0：与 GPL-3.0 兼容。
+- 本项目 Apache-2.0。
+- `sevenz-rust2` Apache-2.0、`zip` MIT、`rayon` MIT/Apache-2.0、`aes`/`sha2` MIT/Apache-2.0：与 Apache-2.0 兼容。
 - unRAR/7-Zip RAR：不兼容/受限；见 ADR-0003 与 `docs/licensing.md`。
 - 前端：Avalonia MIT、Compose Apache-2.0、ArkUI 随 HarmonyOS SDK（需遵守华为条款）。
 
@@ -294,7 +294,7 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| RAR 许可 | 不链接/不随包 | Windows 用用户自装外部 unrar；GPL 分发边界见 ADR-0003；RAR 快筛自研 |
+| RAR 许可 | 不链接/不随包 | Windows 用用户自装外部 unrar；许可边界见 ADR-0003；RAR 快筛自研 |
 | sevenz-rust2 边界 | 加密头/PPMd/异常包差异 | 差分测试（7-Zip oracle）；语料矩阵 |
 | HarmonyOS Rust 工具链 | 构建/加载不稳定 | 先 C ABI + 最小 NAPI spike；保留纯 ArkTS 降级 |
 | 移动端后台限制 | 长任务被挂起 | 前台服务/常亮/断点续算；不承诺后台 |

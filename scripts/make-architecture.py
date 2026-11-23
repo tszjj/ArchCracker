@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 ArchCracker contributors
 from PIL import Image, ImageDraw, ImageFont
 import os, math
@@ -49,10 +49,10 @@ def band(y, h, label, sub=""):
 # header
 text(55, 30, "ArchCracker", 42, (17,24,39), True)
 text(55 + d.textlength("ArchCracker", font=font(42, True)) + 16, 44, "跨平台压缩包密码恢复工具 · 架构 v0.2", 22, (75,85,99))
-text(55, 92, "Rust 内核 + C ABI + 三套原生前端 · 五平台 · GPL-3.0-only", 16, MUTED)
+text(55, 92, "Rust 内核 + C ABI + 三套原生前端 · 五平台 · Apache-2.0", 16, MUTED)
 
 rounded(1310, 38, 445, 50, 25, (232,245,233), (129,199,132), 2)
-text(1532, 52, "GPL-3.0-only · 离线 · 无遥测", 15, (46,125,50), True, "ma")
+text(1532, 52, "Apache-2.0 · 离线 · 无遥测", 15, (46,125,50), True, "ma")
 
 # OS chips
 os_list = [
@@ -119,7 +119,7 @@ eng = [
 ]
 for (ex, ey, ew, eh, t, lines, fill, border) in eng:
     box(ex, ey, ew, eh, t, lines, fill, border, 16, 12)
-text(825, 1044, "RAR 许可冲突：GPL-3.0 §10 vs unRAR restriction", 12, (170,40,40), True)
+text(825, 1044, "RAR 许可边界：Apache-2.0 主项目 vs unRAR restriction", 12, (170,40,40), True)
 
 # infra
 band(1080, 120, "⑤ 质量与交付", "CI · 语料 · 签名 · 许可扫描")

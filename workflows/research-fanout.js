@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 // DSH workflow body: fan out research angles, then return a structured summary.
 // Usage: pass this file's contents as `script` to the workflow tool.
@@ -17,7 +17,7 @@ const results = await parallel(
   args.angles.map((angle) => async () => {
     const text = await agent(
       [
-        'You are a research subagent for ArchCracker (GPL-3.0, cross-platform archive password recovery).',
+        'You are a research subagent for ArchCracker (Apache-2.0, cross-platform archive password recovery).',
         'Repository: D:\\AI Project\\p',
         'Do not modify files. Use web search/fetch when facts matter, and cite URLs.',
         '',

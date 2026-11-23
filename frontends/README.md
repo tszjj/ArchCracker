@@ -15,7 +15,7 @@
 - 进度回调限流 ~10 Hz；UI 线程不做解密。
 - 文件访问走平台原生（Windows 路径 / macOS 书签 / Android SAF / HarmonyOS Picker）。
 - 三端对同一归档 + 字典 + 参数必须得到一致结果（共享测试向量）。
-- 不加入遥测/在线查询；不上 Mac App Store（GPL 冲突）。
+- 不加入遥测/在线查询；暂不上 Mac App Store（审核/签名成本）。
 
 ## 构建顺序
 

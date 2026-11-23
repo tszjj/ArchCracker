@@ -42,7 +42,7 @@ core/
 4. **性能**
    - 与 C++ 同量级；SIMD/AES-NI 可通过 `std::arch`/`aes` crate 使用；线程用 `rayon` 或显式 worker。
 5. **许可**
-   - 自有代码 GPL-3.0-only；Apache-2.0/MIT 依赖兼容。
+   - 自有代码 Apache-2.0；Apache-2.0/MIT 依赖兼容。
    - RAR 部分单独处理，不污染内核。
 
 ## 备选与不选原因

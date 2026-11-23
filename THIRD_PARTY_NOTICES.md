@@ -24,7 +24,7 @@
 ## 明确不分发
 
 - **unRAR / libunrar / unrar CLI**：unRAR license（非自由），不链接、不随包、不自动下载。RAR 仅调用用户自装的外部程序。见 `docs/adr/0003-rar-licensing.md`。
-- **7-Zip / p7zip 含 RAR 代码的二进制**：unRAR restriction，不随 GPL 核心分发。仅本机/CI 作为 oracle 时使用。
+- **7-Zip / p7zip 含 RAR 代码的二进制**：unRAR restriction，不随主项目分发。仅本机/CI 作为 oracle 时使用。
 - **`unrar-rs`**：默认不启用；如未来启用，需单独许可评审。
 
 ## 通知与商标
@@ -33,7 +33,7 @@
 - RAR、WinRAR、WinZip、7-Zip 等名称是其各自权利人的商标；本项目与 RARLAB、WinZip、7-Zip 官方无隶属关系，名称仅用于说明兼容性。
 - 本项目不随包分发 unRAR/7-Zip RAR 代码；RAR 仅调用用户自行安装的 WinRAR/`UnRAR.exe`。
 
-- GPL-3.0 全文见 `LICENSE`。
+- Apache-2.0 全文见 `LICENSE`；版权与归属见 `NOTICE`。
 - 发布二进制时附本文件、`LICENSE`、对应源码链接/构建说明。
 - 如使用 LGPL 组件（未来可选），附其许可证与源码获取方式，并允许重链接。
 

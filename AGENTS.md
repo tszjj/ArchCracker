@@ -14,7 +14,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 1. **只做授权恢复**：仅处理用户本人拥有或已获明确授权的归档；不实现在线撞库/共享密码/绕过 DRM。
 2. **内核/前端分离**：核心不得依赖 UI、不得调用平台 GUI API；前端只通过 C ABI / JNI / NAPI 调用核心。
 3. **默认离线**：无遥测、无强制更新、无静默网络请求。
-4. **许可干净**：GPL-3.0-only；第三方组件逐个登记；RAR 解压用途本身允许，但内核不链接（静态/动态）、不随包、不自动下载 unRAR 代码/二进制。
+4. **许可干净**：Apache-2.0；第三方组件逐个登记；RAR 解压用途本身允许，但内核不链接（静态/动态）、不随包、不自动下载 unRAR 代码/二进制。
 5. **可验证**：每个功能有测试或可复现的验证步骤；性能结论必须有基准数据。
 
 ---
@@ -23,7 +23,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 
 | 决策 | 内容 | 记录 |
 |---|---|---|
-| 许可证 | GPL-3.0-only | `LICENSE` |
+| 许可证 | Apache-2.0 | `LICENSE` |
 | 内核语言 | Rust（workspace + C ABI） | `docs/adr/0001-rust-core.md` |
 | 前端拆分 | Avalonia 12（桌面三平台）/ Compose（Android）/ ArkUI（HarmonyOS） | `docs/adr/0002-frontend-split.md` |
 | RAR 策略 | Windows 首发调用用户自装 WinRAR/UnRAR；不链接、不随包、不自动下载；其他平台 Deferred | `docs/adr/0003-rar-licensing.md` |
@@ -165,7 +165,7 @@ RISKS: <licensing/perf/cross-platform>
 - 平台相关代码放 `#[cfg(target_os = ...)]` 小模块，不污染核心逻辑。
 - 候选密码以字节处理；不假设 UTF-8。
 - 热路径避免每候选分配：`ArrayPool` 等价物用 `Vec` 复用/`SmallVec`，批量 4096。
-- 不引入 GPL 不兼容依赖；新增依赖必须在 PR 中登记到 `docs/licensing.md`。
+- 不引入与 Apache-2.0 不兼容的依赖；新增依赖必须在 PR 中登记到 `docs/licensing.md`。
 
 ### 前端
 
@@ -231,6 +231,6 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dict> -t 14
 - 为了跑通而 `unwrap()`、吞错误、跳过测试。
 - 引入 `unrar`/7-Zip RAR 代码“先跑起来再说”。
 - 把“未验证”写成“已完成”；把估算写成实测。
-- 复制 GPL 不兼容代码或从破解版工具提取资源。
+- 复制许可不兼容代码或从破解版工具提取资源。
 - 在 UI 线程做解密；每候选新建归档会话；无界 `Parallel.ForEach`。
 - 提交大文件/样本/字典；把令牌写进仓库。

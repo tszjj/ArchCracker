@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 // DSH workflow body: plan -> implement -> review -> verify for one scoped task.
 // Usage: pass this file's contents as `script` to the workflow tool.
@@ -25,7 +25,7 @@ const common = [
   'Acceptance:',
   ...acceptance.map((x, i) => '  ' + (i + 1) + '. ' + x),
   'Rules: do not touch files outside scope; no new dependencies unless explicitly required;',
-  'do not claim unrun tests passed; do not introduce unRAR/7-Zip RAR code; keep GPL-3.0-only headers.',
+  'do not claim unrun tests passed; do not introduce unRAR/7-Zip RAR code; keep Apache-2.0 headers.',
 ].join('\n');
 
 phase('Plan');
