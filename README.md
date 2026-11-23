@@ -112,6 +112,7 @@ Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在后续平台�
 
 ## 文档
 
+- [Windows 全栈开发计划](docs/windows-plan.md)
 - [总体架构](docs/architecture.md)
 - [跨平台开发策略](docs/cross-platform.md)
 - [开发路线图](docs/roadmap.md)

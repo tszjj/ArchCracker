@@ -2,6 +2,8 @@
 
 > 目标：**先完成 Windows 全栈**（内核 + CLI + GUI + 安装包 + 自动解压），再把同一 Rust 内核扩展到 Linux/macOS/Android/HarmonyOS。
 > 时间以“1 名人类维护者 + 多个 AI Agent 并行”估算；Agent 吞吐高但评审/集成仍是瓶颈。
+>
+> Windows 的具体任务/验收见 [`docs/windows-plan.md`](windows-plan.md)。
 
 ## 0. 阶段总览（2026-11-24 修订：Windows 优先）
 
