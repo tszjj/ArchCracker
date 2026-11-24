@@ -71,8 +71,8 @@
 |---|---|---|---|---|
 | 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
 | ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
-| RAR4 | AES-128、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
+| RAR4 | AES-128、头加密 | 外部 `unrar`（Windows 首发，W1-003 已接入整包 `t`） | 外部引擎处理 | 用户自装，不链接/不随包 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar`（Windows 首发，W1-003 已接入整包 `t`） | 外部引擎处理 | 用户自装，不链接/不随包 |
 | SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
 
 ### 4.2 快筛与确认
@@ -100,6 +100,8 @@
 3. `unrar-rs` 仅作为**本地实验**，不是依赖、默认不启用、不随发布物；
 4. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
 5. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
+
+W1-003 已实现 `engines::external` + `archive::rar`：Windows 发现用户自装 `UnRAR.exe`，密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
 
 > 该策略在 `docs/adr/0003-rar-licensing.md` 中记录；若要随包 UnRAR.exe，按独立程序单独评审。
 

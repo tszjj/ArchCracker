@@ -19,6 +19,7 @@ dependencies = [
  "crossbeam-channel",
  "encoding_rs",
  "thiserror",
+ "windows-sys",
  "zip",
 ]
 

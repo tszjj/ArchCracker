@@ -13,6 +13,7 @@
 | `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 源码依赖 |
 | `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 源码依赖 |
 | `clap` | CLI 参数解析 | MIT OR Apache-2.0 | 源码依赖 |
+| `windows-sys`（仅 Windows） | OEM 代码页转换 | MIT OR Apache-2.0 | 源码依赖 |
 
 ## 计划引入（需在 PR 中更新）
 
