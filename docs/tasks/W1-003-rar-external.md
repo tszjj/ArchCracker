@@ -57,7 +57,7 @@ cargo test --workspace
 - 新增 `archive::rar`：RAR4/RAR5 magic、`RarSession`/`RarFactory`、整包 `unrar t` 验证；预检用 `t -p-` 区分未加密/加密，再用 `l -p-` 覆盖头加密；退出码 0/11/其他映射为 Hit/Miss/External。
 - `ArchiveInfo` 增加 `whole_archive`，CLI 显示 “whole archive (external RAR test)”；按格式选择 ZIP/RAR factory。
 - 密码不进 argv：参数只为 `-p`（无值），密码写 stdin；单测断言参数不含测试密码；日志/错误只带 UnRAR stderr 摘要。
-- 测试：core 36（含 RAR magic、参数安全、缺失引擎、external 截断）+ CLI 4 + 集成 7（ZIP 6 + RAR 1）+ FFI 2。RAR 集成测试仅在本地存在 `UnRAR.exe` + `Rar.exe` 时运行，CI 无引擎时明确 skip。
+- 测试：core 37（含 RAR magic、参数安全、缺失引擎、external 截断/超时 kill）+ CLI 4 + 集成 7（ZIP 6 + RAR 1）+ FFI 2。RAR 集成测试仅在本地存在 `UnRAR.exe` + `Rar.exe` 时运行，CI 无引擎时明确 skip。
 - 手工验证（WinRAR 7.22 / RAR5）：文件加密命中/错误字典、头加密命中、未加密 exit 3、缺失引擎 exit 3、密码不在 argv。
 - 验证命令：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、`cargo +1.89 test --workspace --locked`、`cargo deny check licenses bans sources`。
 - 未验证：RAR4 真实样本、RAR5 非 ASCII/含换行密码、缺卷/损坏分类、大归档、真实超时 kill、Linux/macOS 实际 RAR（CI 无引擎）。
