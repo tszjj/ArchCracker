@@ -24,8 +24,8 @@ UnRAR 进程，纯属重复工作。
 - `core/crates/acx-core/src/archive/rar.rs`
   - `RarFactory` 增加 `info: ArchiveInfo` 缓存与 `info()` 访问器。
   - `RarFactory::new()` / `with_engine()` 创建时预检一次。
-  - `RarFactory::from_info()` 接收已探测的 `ArchiveInfo`，只重新发现引擎路径，不启动进程。
-  - `RarFactory::with_cached_info()` 供测试/诊断注入元数据。
+  - `RarFactory::from_info()` 接收已探测的 `ArchiveInfo`，校验格式与路径，只重新发现引擎路径，不启动进程。
+  - `RarFactory::with_cached_info()` 为私有测试构造，注入元数据时不启动引擎。
   - `ArchiveSessionFactory::open()` 不再调用 `detect_format` / `preflight`，只复制缓存。
 - `core/crates/acx-cli/src/main.rs`
   - RAR 分支改用 `RarFactory::from_info(cli.file, info)`。
@@ -44,7 +44,7 @@ UnRAR 进程，纯属重复工作。
 CLI
   archive::preflight(path)          # 1 次 t -p-（加密再 1 次 l -p-）
     -> ArchiveInfo
-  RarFactory::from_info(path, info) # 只 find_unrar，不启动进程
+  RarFactory::from_info(path, info) # 校验格式/路径 + find_unrar，不启动进程
     -> RarFactory { path, engine, info }
   scheduler -t N
     worker open()                   # clone info，0 次 UnRAR
@@ -65,7 +65,7 @@ cargo test --workspace --locked
 
 - [x] 加密 RAR、`-t N`：预检进程数从约 `2 + 2N` 降为 `2`（与 N 无关）。
 - [x] `RarFactory::open()` 不再启动 UnRAR；用不存在的 engine 路径 + 缓存元数据打开两个 session 仍成功。
-- [x] `from_info()` 拒绝非 RAR 元数据。
+- [x] `from_info()` 拒绝非 RAR 元数据，以及属于其他路径的元数据。
 - [x] CLI RAR 命中/未命中/未加密、Unicode 密码集成测试保持通过。
 - [x] 现有 ZIP/FFI/CLI 测试全部通过。
 - [x] 无 Cargo 依赖、无许可边界变化。
@@ -75,7 +75,7 @@ cargo test --workspace --locked
 - `cargo fmt --all -- --check`：通过。
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过。
 - `cargo test --workspace --locked`：
-  - `acx-core` 单元 41（原 39，新增 2）；
+  - `acx-core` 单元 42（原 39，新增 3）；
   - CLI 单元 4；
   - 集成 8（ZIP 6 + RAR 2，本机 WinRAR 7.22 可用，未跳过）；
   - FFI 2。
@@ -85,7 +85,7 @@ cargo test --workspace --locked
 
 ## 风险
 
-- `from_info()` 信任调用方传入的元数据；目前只有 CLI 在 `archive::preflight`
-  之后立即调用，路径一致。若后续增加调用方，应改为返回 `(ArchiveInfo, EnginePath)`
-  的预检结果，避免重复发现引擎或元数据错配。
+- `from_info()` 校验了格式与路径，但缓存是**创建时的快照**：攻击期间归档若被替换或修改，
+  元数据（尤其 `whole_archive`）可能过期。当前要求运行期间归档不变；后续可加 size/mtime
+  或哈希复核，或改为返回 `(ArchiveInfo, EnginePath)` 的预检结果，避免重复发现引擎。
 - 预检本身仍可能因损坏/大归档失败；错误分类优化仍在 W2。

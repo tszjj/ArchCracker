@@ -104,6 +104,8 @@ impl ArchiveSession for RarSession {
 /// engine processes before `-t N` tests any candidate.
 #[derive(Debug)]
 pub struct RarFactory {
+    /// Archive path. Changing it after construction leaves `info` stale; create
+    /// a new factory instead.
     pub path: PathBuf,
     engine: PathBuf,
     info: ArchiveInfo,
@@ -130,9 +132,16 @@ impl RarFactory {
     /// Reuse metadata returned by [`super::preflight`] without probing again.
     ///
     /// The CLI already probes to print the archive summary; this constructor
-    /// keeps that single probe instead of paying for a second one.
+    /// keeps that single probe instead of paying for a second one. The metadata
+    /// must have been produced for `path`; a mismatch is rejected so a stale
+    /// `whole_archive` flag cannot turn an unencrypted archive into a hit.
     pub fn from_info(path: PathBuf, info: ArchiveInfo) -> Result<Self> {
         ensure_rar(info.format)?;
+        if !same_archive(&path, &info.path) {
+            return Err(AcxError::Unsupported(
+                "cached RAR metadata belongs to a different archive".to_string(),
+            ));
+        }
         let engine = external::find_unrar()?;
         Ok(Self::with_cached_info(path, engine, info))
     }
@@ -140,8 +149,10 @@ impl RarFactory {
     /// Build a factory around already-probed metadata.
     ///
     /// No engine process is started here or in [`ArchiveSessionFactory::open`].
-    /// The caller is responsible for passing metadata produced for `path`.
-    pub fn with_cached_info(path: PathBuf, engine: PathBuf, info: ArchiveInfo) -> Self {
+    /// The caller is responsible for passing metadata produced for `path`, and
+    /// must not modify the archive while this factory is in use: the metadata
+    /// is a snapshot, not a live view.
+    fn with_cached_info(path: PathBuf, engine: PathBuf, info: ArchiveInfo) -> Self {
         Self { path, engine, info }
     }
 
@@ -159,6 +170,18 @@ impl ArchiveSessionFactory for RarFactory {
             self.engine.clone(),
             self.info.clone(),
         )))
+    }
+}
+
+/// Compare two paths, resolving them when possible so `.\a.rar` and `a.rar`
+/// are recognized as the same archive on Windows.
+fn same_archive(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -355,6 +378,21 @@ mod tests {
         };
         let error = RarFactory::from_info(PathBuf::from("archive.zip"), info)
             .expect_err("ZIP metadata must be rejected");
+        assert!(matches!(error, AcxError::Unsupported(_)));
+    }
+
+    #[test]
+    fn from_info_rejects_metadata_for_a_different_archive() {
+        let info = ArchiveInfo {
+            path: PathBuf::from("one.rar"),
+            format: ArchiveFormat::Rar5,
+            encryption: Encryption::Rar,
+            selected: None,
+            whole_archive: true,
+            entries: Vec::new(),
+        };
+        let error = RarFactory::from_info(PathBuf::from("two.rar"), info)
+            .expect_err("metadata for another archive must be rejected");
         assert!(matches!(error, AcxError::Unsupported(_)));
     }
 
