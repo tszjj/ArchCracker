@@ -2,7 +2,7 @@
 
 - 分支：`fix/w1-003c-rar4-ma4`
 - 角色：core-engineer（主对话实现）、reviewer（独立评审）
-- 状态：实现完成，待 PR/评审
+- 状态：完成（PR #7，reviewer APPROVE，CI 6/6）
 - 前置：[W1-003](W1-003-rar-external.md)（RAR 外部引擎）
 
 ## 背景
