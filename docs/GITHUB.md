@@ -61,7 +61,7 @@ git push -u origin main
 ## 5. 当前状态
 
 - 远端：**已创建（私有）**，`origin` 指向 `tszjj/ArchCracker`；默认分支 `main`。
-- 已合并 PR #1–#5（ZIP、AES、RAR、Full 随包文档、RAR 预检缓存）。
+- 已合并 ZIP、AES、RAR、Full 随包文档、RAR 预检缓存等 PR（详见 `docs/PROJECT-GUIDE.md` §5）。
 - CI：6 个 job（Windows MSVC/GNU、Ubuntu、macOS、MSRV 1.89、cargo-deny），最近一次 main 全绿。
 - 分支保护、Dependabot、secret scanning、Private vulnerability reporting 是否已开启**未在仓库内验证**；按 §3 在 GitHub Settings 中核对。
 - 仓库仍为私有；转公开前逐项检查 §4。
