@@ -537,6 +537,27 @@ mod tests {
     }
 
     #[test]
+    fn small_non_empty_aes_entry_is_ae2_and_verifies() {
+        // The zip writer selects AE-2 for entries under 20 bytes and AE-1 for
+        // larger ones. This covers the AE-2 non-empty path (CRC disabled).
+        let bytes = aes_zip(
+            &[("tiny.txt", b"tiny")],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        let (_temp, mut session) = open_session(&bytes, "aes-ae2");
+
+        assert_eq!(
+            session.test_password(PASSWORD).expect("correct password"),
+            PasswordTest::Hit
+        );
+        assert_eq!(
+            session.test_password(b"wrong").expect("wrong password"),
+            PasswordTest::Miss
+        );
+    }
+
+    #[test]
     fn zero_length_aes_entry_can_be_verified() {
         // AES authenticates empty plaintext with an HMAC, so an all-empty AES
         // archive is safer to probe than the ZipCrypto equivalent.

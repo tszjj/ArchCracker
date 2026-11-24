@@ -200,6 +200,37 @@ fn dictionary_attack_finds_aes_password() {
 }
 
 #[test]
+fn wrong_aes_dictionary_exits_one() {
+    let temp = TempDir::new("aes-miss");
+    let zip = temp.join("encrypted-aes.zip");
+    let dict = temp.join("dictionary.txt");
+    write_aes_zip(&zip);
+    write_dictionary(&dict, &["wrong1", "wrong2", "wrong3"]);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("-m")
+        .arg("dict")
+        .arg("-d")
+        .arg(&dict)
+        .arg("-t")
+        .arg("2")
+        .output()
+        .expect("run acx");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("NOT FOUND"), "stdout: {stdout}");
+    assert!(!stdout.contains("FOUND: "), "stdout: {stdout}");
+}
+
+#[test]
 fn wrong_dictionary_exits_one() {
     let temp = TempDir::new("miss");
     let zip = temp.join("encrypted.zip");

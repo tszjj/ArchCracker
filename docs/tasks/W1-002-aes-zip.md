@@ -51,6 +51,6 @@ cargo test --workspace
 - `zip` 开启 `aes-crypto`；AES 预检改用 crate 的中央目录 `aes_settings()`（与 `by_index_decrypt` 同源），不再只扫本地 extra 字段，避免“标记 AES、实际按 ZipCrypto 解”的错位。
 - 验证链路：PBKDF2-HMAC-SHA1 → 2 字节 verifier → 完整读取条目 → HMAC-SHA1-80 认证码。verifier 通过但 HMAC 失败映射 `Miss`；AES 不使用 CRC（AE-2 CRC=0）。
 - 支持 AES-128/192/256、AE-1/AE-2 读取路径、stored/deflated；零长度 AES 条目可凭 HMAC 验证，零长度 ZipCrypto 仍拒绝。
-- 测试：core 28（新增 5 个 AES 用例）+ CLI 4 + 集成 5 + FFI 2；含 stored/deflated 篡改认证码用例。
+- 测试：core 29（新增 6 个 AES 用例）+ CLI 4 + 集成 6 + FFI 2；含 AE-1（≥20 字节条目）与 AE-2（<20 字节/空条目）、stored/deflated 篡改认证码、AES 正确/错误字典 CLI 用例。
 - 验证命令：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace --locked`、`cargo +1.89 test --workspace --locked`、`cargo deny check licenses bans sources` 全部通过。
 - 未验证：第三方 7-Zip/WinRAR 生成的真实 AES ZIP 差分、>64 MiB 条目、AE-1 外部样本、AES PBKDF2 吞吐基准；不提交未实测的性能数字。
