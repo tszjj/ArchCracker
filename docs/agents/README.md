@@ -2,11 +2,14 @@
 
 本目录把“一个 AI 写全部代码”拆成**可委派、可评审、可交接**的角色。它不依赖特定运行时：DSH 的 `subagent`/`workflow`、Codex、Claude Code 等都可以用同一套角色提示词。
 
+> **先读 [`POOL.md`](POOL.md)**：同类工作优先复用已有 agent，不要为每个 PR 新建 reviewer / 实现者。
+
 ## 1. 角色
 
 | 文件 | 角色 | 主要产出 |
 |---|---|---|
 | `roles/architect.md` | 架构师 | ADR、接口、任务拆分、跨平台约束 |
+| `roles/researcher.md` | 技术调研 | 方案对比、来源/版本/许可证据、未验证项 |
 | `roles/core-engineer.md` | 内核工程师 | Rust 核心、引擎、调度、FFI、单元测试 |
 | `roles/frontend-engineer.md` | 前端工程师 | Avalonia/Compose/ArkUI、打包、平台胶水 |
 | `roles/qa-engineer.md` | 测试工程师 | 语料、差分测试、模糊测试、基准 |
@@ -15,7 +18,30 @@
 
 ## 2. 派发任务
 
-### 2.1 用 subagent（1–2 个独立任务）
+### 2.1 先复用，后新建（默认）
+
+完整规则见 [`POOL.md`](POOL.md)。派发前先 `list_agents`：
+
+1. 同角色 + 同领域 + 相关上下文且 `inactive`：用 `send_message` 续用；
+2. 该领域 reviewer 已存在：不要为每个 PR 新建，直接复用；
+3. 现有 agent 正忙：先判断能否等待/拆分，不要重复开同类 agent；
+4. 只有无合适槽位、需要独立评审（现有 reviewer 参与了实现）、或需要隔离上下文时，才新建。
+
+复用消息只给变更点，不重贴整份仓库：
+
+```text
+延续 <role>:<domain> 的任务。
+本次目标：...
+变更/新增文件：...
+必须重读：...
+验收：...
+禁止：...
+不要重复已完成的检查；结束时按 AGENTS.md §6.5 交接。
+```
+
+新建时 `description` 使用 `角色:领域` 前缀（如 `reviewer:rar`），方便后续找回。
+
+### 2.2 用 subagent（1–2 个独立任务）
 
 Prompt 必须自包含，建议模板：
 
@@ -48,14 +74,14 @@ Prompt 必须自包含，建议模板：
 结束时按 AGENTS.md §6.5 输出交接。
 ```
 
-### 2.2 用 workflow（3+ 独立方向）
+### 2.3 用 workflow（3+ 独立方向）
 
 `workflows/` 下是可复用的 JS 编排脚本。把脚本内容传给 `workflow` 工具，`meta` 里写 name/description/phases，`args` 传任务参数。
 
 - `research-fanout.js`：多方向调研 → 汇总
 - `feature-cycle.js`：计划 → 实现 → 评审 → 验证
 
-> 注意：workflow 的子 Agent 不共享父对话；每个 prompt 必须带仓库路径、角色文件、验收标准。
+> 注意：workflow 每次都会新建子 Agent，不共享父对话，也不能复用已有 agent；适合同域**一次性** fan-out，不适合小步后续迭代。每个 prompt 必须带仓库路径、角色文件、验收标准。
 
 ## 3. 协作规则
 

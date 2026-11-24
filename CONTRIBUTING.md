@@ -64,9 +64,10 @@ cargo run -p acx-cli -- --version
 
 ## 7. 多 Agent 协作
 
-- 阅读 `AGENTS.md` 与 `docs/agents/README.md`。
+- 阅读 `AGENTS.md`、`docs/agents/README.md` 与 `docs/agents/POOL.md`。
 - 用任务包（目标/范围/验收/禁止）派发；实现者与评审者分离。
-- 子 Agent 不共享上下文；prompt 自包含。
+- 同类工作优先复用已有 agent（`send_message`），不要为每个 PR 新建 reviewer/实现者。
+- 新建 `subagent` 不共享上下文，prompt 必须自包含；`subagent_fork` 继承已完成轮次，只补变更点。
 
 ## 8. 安全问题
 

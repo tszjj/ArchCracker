@@ -9,6 +9,8 @@
 //
 // The implementer may edit files; the reviewer/verifier are read-only by prompt.
 // Human/agent integration still owns the commit and PR.
+// This workflow always creates fresh agents. For a follow-up in the same domain,
+// reuse an existing agent via send_message instead (docs/agents/POOL.md).
 
 if (!args || typeof args.task !== 'string' || typeof args.role !== 'string' || typeof args.scope !== 'string') {
   throw new Error('feature-cycle requires args.task, args.role, args.scope');

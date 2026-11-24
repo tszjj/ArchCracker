@@ -79,7 +79,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │  ├─ adr/                                # 0001 Rust、0002 前端拆分、0003 RAR、0004 Full 随包
 │  ├─ tasks/                              # W1-001/002/003/003b/003c、W2-001 任务与证据
 │  ├─ benchmarks/                         # ZIP 基线、RAR 预检缓存基准
-│  ├─ agents/                             # Agent 协作规范 + 6 个角色提示词
+│  ├─ agents/                             # Agent 协作规范 + 7 个角色提示词
 │  └─ analysis/legacy-tools.md            # 三款旧工具的静态分析（内部研究，不执行样本）
 │
 ├─ scripts/                               # bootstrap/check-env/env/make-architecture
@@ -147,6 +147,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
 | [docs/analysis/legacy-tools.md](analysis/legacy-tools.md) | 三款旧工具的静态分析、历史架构参考 | 内部研究；不执行样本 |
 | [docs/agents/README.md](agents/README.md) | 多 Agent 角色、任务包、交接、反模式 | 协作入口 |
+| [docs/agents/POOL.md](agents/POOL.md) | 角色槽位、复用/新建判据、上下文预算、并发与生命周期 | 派发子智能体前 |
 | [tests/README.md](../tests/README.md) | 语料/向量/差分/模糊测试计划 | 目前仅目录说明 |
 | [third_party/README.md](../third_party/README.md) | 随包二进制 manifest/哈希策略 | 无实际二进制 |
 
@@ -244,14 +245,23 @@ W1 不能只用“能跑”收口；满足以下条件才进入 W2：
 
 ## 7. 开发工作流
 
-### 7.1 分支与评审
+### 7.1 Agent 分配（先复用）
+
+- 派发前先 `list_agents`，同角色/同领域且有相关上下文的 inactive agent 优先用 `send_message` 续用。
+- 领域 reviewer 是常驻槽位，不为每个 PR 新建；同一 PR 不并行开两个 reviewer。
+- 只有无合适槽位、需要独立评审（现有 reviewer 参与实现）、或需要隔离上下文时，才新建。
+- `workflow` 每次新建 agent，只用于一次性 fan-out，不用于同域小步迭代。
+- 新建 label 用 `角色:领域`；复用消息只给变更点，不重贴仓库全文。
+- 完整规则：[`docs/agents/POOL.md`](agents/POOL.md)。
+
+### 7.2 分支与评审
 
 - 从 `main` 开分支：`feat/<id>-<slug>`、`fix/...`、`docs/...`、`chore/...`；
 - 所有改动走 PR；禁止直接 push `main`、禁止 force-push 共享分支；
 - 每个 PR 至少 1 个 reviewer；核心/许可/安全改动加 architect/release 角色；
 - PR 描述必须写：改了什么、怎么验证、风险/许可影响、未验证项。
 
-### 7.2 提交前命令
+### 7.3 提交前命令
 
 ```powershell
 cd core
@@ -262,7 +272,7 @@ cargo +1.89 test --workspace --locked        # MSRV
 cargo deny check licenses bans sources
 ```
 
-### 7.3 CI 门禁
+### 7.4 CI 门禁
 
 `.github/workflows/ci.yml` 当前 6 个 job：
 
@@ -273,7 +283,7 @@ cargo deny check licenses bans sources
 5. `rust (msrv 1.89)`：最低 Rust 版本；
 6. `cargo-deny`：licenses/bans/sources。
 
-### 7.4 Definition of Done
+### 7.5 Definition of Done
 
 - 代码 + 测试 + 文档（至少更新对应 `docs/tasks/` 或本文）；
 - fmt/clippy/受影响测试通过；

@@ -6,6 +6,8 @@
 //
 // This file is not executed by Node; it runs inside the DSH workflow runtime,
 // where `agent`, `parallel`, `phase`, and `args` are provided.
+// Workflow agents are always fresh: for a follow-up on an existing topic, reuse
+// the prior agent via send_message (docs/agents/POOL.md).
 
 if (!args || typeof args.question !== 'string' || !Array.isArray(args.angles) || args.angles.length === 0) {
   throw new Error('research-fanout requires args.question and a non-empty args.angles[]');
