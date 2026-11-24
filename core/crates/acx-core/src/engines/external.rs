@@ -238,4 +238,30 @@ mod tests {
         assert_eq!(output.len(), MAX_CAPTURE_BYTES);
         assert!(output.iter().all(|byte| *byte == b'x'));
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn timeout_kills_a_stuck_child() {
+        let output = run(
+            Path::new("powershell.exe"),
+            ["-NoProfile", "-Command", "Start-Sleep -Seconds 5"],
+            None,
+            Duration::from_millis(100),
+        )
+        .expect("start powershell");
+        assert!(output.timed_out);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_a_stuck_child() {
+        let output = run(
+            Path::new("sh"),
+            ["-c", "exec sleep 5"],
+            None,
+            Duration::from_millis(100),
+        )
+        .expect("start sh");
+        assert!(output.timed_out);
+    }
 }
