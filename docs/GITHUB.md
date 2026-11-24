@@ -52,7 +52,7 @@ git push -u origin main
 
 - [ ] 仓库无样本/破解工具/字典/密钥
 - [ ] `LICENSE`、`THIRD_PARTY_NOTICES.md` 完整
-- [ ] RAR 策略与 ADR-0003 一致（不随包 unrar）
+- [ ] RAR/hashcat 策略与 ADR-0004 一致（Full 随包未修改二进制 + 许可；无 WinRAR/GPU 运行时）
 - [ ] README 的“授权使用”声明
 - [ ] CI 三平台绿
 - [ ] macOS 不上 App Store 的说明

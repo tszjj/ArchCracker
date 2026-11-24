@@ -12,7 +12,7 @@
 | 契约 | `acx.h`、错误码、攻击参数、测试向量 | 无 |
 | 前端 | 交互流程、设计 token、i18n | UI 框架、文件选择、权限、通知、后台 |
 | 打包 | 版本/许可/源码 | 签名、安装器、商店 |
-| RAR | Windows 外部 `unrar`（首发） | 其他平台 deferred / 后续 add-on |
+| RAR | Windows Full 随包 `UnRAR.exe` | 其他平台 deferred / 后续 add-on |
 
 **结论**：跨平台成本应集中在“三套 UI + 平台胶水”，而不是复制算法。
 
@@ -27,7 +27,8 @@
 | 外部进程 | 支持 | 支持 | 支持（沙盒限制） | 基本不可用 | 基本不可用 |
 | 签名 | Authenticode/EV | 无/包签名 | Developer ID + 公证 | keystore | DevEco 证书 |
 | 商店 | Microsoft Store/官网 | 官网/Flatpak | 官网 DMG（不上 App Store） | Play/侧载 | AppGallery/侧载 |
-| RAR | 外部 unrar | 外部 unrar | 外部 unrar | 首发无 | 首发无 |
+| RAR | Full 随包 `UnRAR.exe` | 外部 unrar | 外部 unrar | 首发无 | 首发无 |
+| GPU 字典 | Full 随包 hashcat | 后续 | 后续 | 暂不 | 暂不 |
 
 ## 3. 开发顺序（为什么）
 
@@ -46,7 +47,7 @@
 - Rust workspace，`acx-core` 无 UI/平台 GUI 依赖。
 - 平台差异用 `#[cfg(target_os)]` 小模块封装：路径、线程数、进程、locale。
 - 文件访问抽象为“可 seek 的只读流 + 长度”；移动端 fd/URI 由前端转成路径或 fd 句柄。
-- 外部 `unrar` 只在 `engines::external`，移动端 feature 关闭。
+- 外部 `unrar`/`hashcat` 只在 `engines::external`；Windows Full 随包，其他平台 Deferred/后续 add-on；移动端 feature 关闭。
 
 ### 4.2 C ABI
 
@@ -66,7 +67,8 @@
 | Feature | Windows | Linux | macOS | Android | HarmonyOS |
 |---|---|---|---|---|---|
 | 7z / ZIP | ✅ | ✅ | ✅ | ✅ | ✅ |
-| RAR | 外部引擎 | 外部引擎 | 外部引擎 | ❌ | ❌ |
+| RAR | Full 随包外部引擎 | 外部引擎 | 外部引擎 | ❌ | ❌ |
+| GPU 字典 | Full 随包 hashcat | 后续 | 后续 | ❌ | ❌ |
 | SFX | ✅ | ✅ | ✅ | 视文件选择 | 视文件选择 |
 | 自动解压 | ✅ | ✅ | ✅ | SAF 目录 | Picker 目录 |
 | 规则引擎 | P2 | P2 | P2 | P2 | P2 |
@@ -113,7 +115,8 @@
 | HarmonyOS Rust 工具链不稳 | 先做最小 C ABI + NAPI spike；必要时 ArkTS 侧只做 UI，核心用 C++/C ABI 重编 |
 | 移动端后台被杀 | 前台服务/常亮/断点；UI 明确“锁屏可能暂停” |
 | 商店拒审 | 官网侧载；不内置字典；明确授权使用 |
-| RAR 许可 | 桌面外部 unrar；移动首发无 RAR |
+| RAR 许可/分发 | Windows Full 随包 UnRAR.exe + license；移动首发无 RAR；WinRAR 不随包 |
+| GPU/驱动 | hashcat 随包但驱动由系统提供；无 GPU 回落 CPU |
 | 多前端漂移 | 共享契约/测试向量；每端 3–5 屏，不做平台特有功能 |
 | 性能不达 | M1 基准；按 ROI 优化；不承诺未测数字 |
 

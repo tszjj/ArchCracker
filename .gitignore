@@ -56,6 +56,11 @@ desktop.ini
 .env.*
 !.env.example
 
+# Full 版外部程序由发布流水线按 manifest 获取，不提交二进制
+/third_party/unrar/
+/third_party/hashcat/
+/third_party/*.exe
+
 # never commit samples/archives/dictionaries anywhere
 *.7z
 *.rar

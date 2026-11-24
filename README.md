@@ -2,15 +2,15 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入用户自装的外部 UnRAR（RAR5 已端到端验证，RAR4 待真实样本）；下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入外部 UnRAR（RAR5 已端到端验证，RAR4 待真实样本）。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
 ## 目标
 
-- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/192/256；7-Zip 差分待补）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；W1-003 已接入外部整包验证；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
-- **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、字典+掩码混合；规则引擎为 P2。
-- **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎完整解压复核；多核/多进程并行、断点续跑。
+- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/192/256；7-Zip 差分待补）、RAR4/RAR5（Full 版随包未修改的 `UnRAR.exe`，仅进程调用；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
+- **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、字典+掩码混合；规则引擎为 P2；字典批量可选 hashcat GPU 后端。
+- **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎/外部 UnRAR 完整解压复核；CPU 多线程为基线，hashcat/GPU 为可选加速，缺失时自动回落。
 - **形态**：同一 Rust 内核 + C ABI；Windows 用 Avalonia 12；CLI 可独立运行。Android/HarmonyOS 前端后续再做。
 - **隐私**：默认零网络、无遥测、无强制更新。
 
@@ -29,25 +29,26 @@
 │ acx-core (Rust)                                                  │
 │  jobs · planner · scheduler · resume · stats                     │
 │  candidates: dictionary / mask / brute / rules / hybrid          │
-│  engines: 7z · ZIP · RAR · volumes · SFX · fast probes           │
+│  engines: 7z · ZIP · RAR · hashcat(GPU) · volumes · SFX · probes   │
 │  platform: file access / process / threads (no UI deps)          │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
-        sevenz-rust2 · zip · 外部 unrar（Windows，仅进程调用） · rayon · aes/sha2
+        sevenz-rust2 · zip · 外部 UnRAR（Full 版随包，仅进程） · 外部 hashcat（可选 GPU） · aes/sha2
 ```
 
-- **内核**：Rust workspace，纯逻辑、可交叉编译；不依赖任何 UI 框架。
+- **内核**：Rust workspace，纯逻辑、可交叉编译；不依赖任何 UI 框架，也不依赖 hashcat/CUDA/HIP/OpenCL 绑定。
 - **前端**：Windows 用 Avalonia 12，通过 P/Invoke 调 C ABI；崩溃隔离可选用 sidecar 进程。Android JNI / HarmonyOS NAPI 的接口保留，后续实现。
-- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 的**解压用途**由 unRAR 许可允许，当前只处理 Apache-2.0 下的组件边界：Windows 调用用户已安装的 WinRAR/`UnRAR.exe`，不把 unRAR 链进主项目（详见 `docs/licensing.md`）。
+- **引擎边界**：7z/ZIP 使用宽松许可的 Rust 库；RAR 使用 Full 版随包的未修改 `UnRAR.exe`（仅进程）；hashcat 同样只走外部进程。内核不链接 unRAR/7-Zip RAR 代码，不把 hashcat 作为 Cargo 依赖；无 hashcat/GPU 时 CPU 路径照常工作（详见 `docs/adr/0004-bundled-engines.md`）。
 
 ## 当前优先级：Windows 全栈
 
 本迭代按“能装、能用、能卸载”的 Windows 产品推进：
 
 1. Rust 内核 + CLI：ZIP/7z/RAR（外部）+ 字典/掩码/暴力 + 多线程 + 断点。
-2. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、自动解压。
-3. Windows 交付：MSIX/Inno 安装包、代码签名、崩溃转储、zh/en。
-4. 测试/基准：1M 字典、1GB 归档、缺卷/损坏/未加密分类。
+2. GPU 字典批量：Full 版随包 hashcat，Rust 侧提 hash/调度/复核；无 GPU 或 hashcat 缺失时 CPU 回落。
+3. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、自动解压。
+4. Windows 交付：单一 Full 安装包、随包 UnRAR/hashcat、代码签名、崩溃转储、zh/en。
+5. 测试/基准：1M 字典、1GB 归档、缺卷/损坏/未加密分类、CPU/GPU 对照。
 
 Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排期、不引入 SDK**；Windows 发布后再逐平台移植。
 
@@ -61,7 +62,7 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 | Android 11+ | Kotlin + Compose | `libacx.so`（JNI） | 后续 | SAF、前台服务 |
 | HarmonyOS 6+ | ArkTS/ArkUI | `libacx.so`（NAPI） | 后续 | DevEco 签名 |
 
-> 版本号（.NET 10、Avalonia 12）以实际 SDK 为准。RAR 在 Windows 通过已安装的 WinRAR/UnRAR 工作；其他平台后续同样走外部 `unrar`，移动端暂不排期。
+> 版本号（.NET 10、Avalonia 12）以实际 SDK 为准。Windows Full 版随包 UnRAR/hashcat；GPU 驱动/CUDA/HIP 仍由系统提供。其他平台后续同样走外部引擎，移动端暂不排期。
 
 ## 仓库结构
 
@@ -125,7 +126,7 @@ Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在后续平台�
 
 本项目以 **Apache-2.0** 发布，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
-第三方组件与特殊说明见 [docs/licensing.md](docs/licensing.md)。其中 RAR 支持涉及 unRAR 许可：解压 RAR 本身是许可允许的用途；本项目不链接（静态/动态）、不随包、不自动下载 unRAR 代码或二进制，Windows 首发调用用户已安装的 WinRAR/UnRAR。
+第三方组件与特殊说明见 [docs/licensing.md](docs/licensing.md)。Windows Full 版按 [ADR-0004](docs/adr/0004-bundled-engines.md) 随包**未修改的 `UnRAR.exe`**（附 UnRAR license）与 **hashcat**（MIT/第三方声明）；不随包 WinRAR、CUDA/HIP/GPU 驱动；内核不链接 unRAR，hashcat 不是 Cargo 依赖。
 
 ## 参与
 

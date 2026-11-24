@@ -33,14 +33,15 @@
 │ acx-core（Rust，纯逻辑，无 UI/平台 GUI 依赖）                          │
 │  jobs / planner / scheduler / resume / stats                          │
 │  candidates：dictionary · mask · brute · rules · hybrid · dedup       │
-│  engines：7z · ZIP · RAR(external/optional) · volume · SFX            │
+│  engines：7z · ZIP · RAR(external) · hashcat(GPU, optional) · volume  │
 │  probes：结构判据 + 可选签名快筛；命中交 confirmer                     │
 │  platform：文件、进程、线程、locale（cfg 隔离）                        │
 └──────────────────────────────┬───────────────────────────────────────┘
 ┌──────────────────────────────▼───────────────────────────────────────┐
 │ 依赖                                                                  │
-│  sevenz-rust2（Apache-2.0） · zip（MIT） · 外部 unrar（Windows，仅进程）    │
-│  rayon · aes · sha2 · crc32fast · serde · thiserror                    │
+│  sevenz-rust2 · zip · 外部 UnRAR.exe（Full 随包，仅进程）              │
+│  外部 hashcat（Full 随包，仅进程；非 Cargo 依赖）                      │
+│  crc32fast · thiserror · encoding_rs · crossbeam-channel               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,7 +50,7 @@
 - `acx-core` 不依赖 `clap`/UI/平台 GUI；CLI 只做参数解析与输出。
 - `acx-ffi` 只做 marshalling、生命周期、错误码；不含业务逻辑。
 - 前端不复制算法/错误码；以 `core/crates/acx-ffi/include/acx.h` 为契约。
-- 外部 `unrar` 的调用只能在 `engines::external` 中，便于替换/禁用。
+- 外部 `unrar`/`hashcat` 的调用只能在 `engines::external` 中，便于替换/禁用；hashcat 不得成为 Cargo 依赖。
 
 ## 3. 为什么是 Rust
 
@@ -57,7 +58,7 @@
 
 - 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。
 - ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2，AES-128/192/256）读取能力；W1-002 已实现候选验证，第三方 7-Zip 差分待补；多卷需自建容器层。
-- RAR：解压用途由 unRAR 许可允许；本项目 Windows 首发调用用户已安装的 `UnRAR.exe`（仅进程），不把 unRAR 链接进主项目。`unrar-rs` 仅本地实验，不是依赖。
+- RAR：解压用途由 UnRAR 许可允许；Windows Full 版随包**未修改的 `UnRAR.exe`**（仅进程），不把 unRAR 链接进主项目；hashcat 也仅外部进程。`unrar-rs` 仅本地实验，不是依赖。
 - 平台：Rust Android 为 Tier 2；`aarch64-unknown-linux-ohos` 为 Tier 2 with host tools，可用 OHOS clang 作为 linker。
 - 内存安全与 AI 可维护性显著优于 C++；性能上限高于 Go。
 
@@ -71,8 +72,8 @@
 |---|---|---|---|---|
 | 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
 | ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
-| RAR4 | AES-128、头加密 | 外部 `unrar`（Windows 首发，W1-003 已接入整包 `t`） | 外部引擎处理 | 用户自装，不链接/不随包 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar`（Windows 首发，W1-003 已接入整包 `t`） | 外部引擎处理 | 用户自装，不链接/不随包 |
+| RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包，W1-003 已接入整包 `t`） | 外部引擎处理 | 仅进程，不链接 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包，W1-003 已接入整包 `t`） | 外部引擎处理 | 仅进程，不链接 |
 | SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
 
 ### 4.2 快筛与确认
@@ -91,19 +92,26 @@
 - 命中由内置引擎（sevenz-rust2/zip）完整解压复核；CI 再用 7-Zip/unrar 做差分 oracle。设计目标是零误报，但不把绝对保证写进产品文案。
 - 快筛误否决只在“快速模式”出现；UI 必须显示“未确认”，并提供严格模式复核。
 
-### 4.3 RAR 许可策略（重要）
+### 4.3 RAR 与外部引擎策略（重要）
 
-先澄清：**解压 RAR 本身是 unRAR 许可允许的用途，不违反 RAR 协议**。本项目是 Apache-2.0，没有 GPL 的 copyleft 冲突；但 unRAR 许可自身仍有“不得开发 RAR 兼容压缩器”等限制。为保持组件边界清晰：
+先澄清：**解压 RAR 本身是 UnRAR 许可允许的用途，不违反 RAR 协议**。Windows 只发布**单一 Full 版本**，按 [ADR-0004](adr/0004-bundled-engines.md)：
 
-1. **内核不链接（静态或动态）unRAR/7-Zip RAR 代码，也不随包分发/自动下载**；
-2. Windows 首发通过**用户自行安装的 WinRAR/`UnRAR.exe` 进程**完成 RAR 确认与解压；功能不受影响；
-3. `unrar-rs` 仅作为**本地实验**，不是依赖、默认不启用、不随发布物；
-4. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
-5. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
+1. **随包未修改的 `UnRAR.exe`** 与完整 `license.txt`；UnRAR 许可允许将 utility 放入其他软件包；
+2. 只通过 `engines::external` 进程调用；**不链接（静态/动态）**、不调用 `unrar.dll`、不复制 unRAR/7-Zip RAR 源码；
+3. 不随包 `WinRAR.exe`/`Rar.exe`；WinRAR 的 trial bundling 由独立 EULA 限制；
+4. 不自动下载/静默更新；版本/SHA-256/来源固定在 `third_party/manifest.json`；
+5. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
+6. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-W1-003 已实现 `engines::external` + `archive::rar`：Windows 发现用户自装 `UnRAR.exe`，密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
+W1-003 已实现 `engines::external` + `archive::rar`：Windows 优先使用随包 `UnRAR.exe`，其次用户路径；密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
 
-> 该策略在 `docs/adr/0003-rar-licensing.md` 中记录；若要随包 UnRAR.exe，按独立程序单独评审。
+### 4.4 hashcat GPU 后端（可选，外部进程）
+
+- hashcat 随 Full 安装包分发（固定版本、MIT/第三方声明），但**不进入 Cargo 依赖**。
+- 后端流程：`ArchiveInfo` → Rust 提 hashspec → hashcat 外部进程（GPU）→ 命中候选交 `ArchiveSession` 完整复核。
+- 无 hashcat、无可用 GPU、驱动不满足或用户禁用 GPU 时，自动回落现有多线程 CPU 调度；CPU 功能与不带 hashcat 时一致。
+- 进度从 `--status-json` 映射并标注为估算；暂停/恢复用 `--runtime`/`--restore`；取消终止进程并清理临时 hash/potfile。
+- 不随包 CUDA/HIP/OpenCL 运行时或 GPU 驱动；hashcat 检测驱动后使用。
 
 ## 5. C ABI 设计
 
@@ -143,6 +151,7 @@ typedef struct {
   uint32_t min_len, max_len;
   uint32_t threads;             /* 0 = auto (physical cores) */
   uint8_t  mode;                /* 0 dict, 1 mask, 2 brute, 3 hybrid */
+  uint8_t  backend;             /* 0 auto, 1 cpu, 2 hashcat-gpu */
   uint8_t  fast_mode;           /* 1 fast, 0 strict */
   uint8_t  auto_extract;
   const char* output_dir;       /* nullable */
@@ -288,15 +297,18 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 ## 10. 许可
 
 - 本项目 Apache-2.0。
-- `sevenz-rust2` Apache-2.0、`zip` MIT、`rayon` MIT/Apache-2.0、`aes`/`sha2` MIT/Apache-2.0：与 Apache-2.0 兼容。
-- unRAR/7-Zip RAR：不兼容/受限；见 ADR-0003 与 `docs/licensing.md`。
+- `sevenz-rust2` Apache-2.0、`zip` MIT、`aes`/`sha2` MIT/Apache-2.0：与 Apache-2.0 兼容。
+- Full 版随包未修改的 `UnRAR.exe`（UnRAR License，独立组件）与 hashcat（MIT + 第三方声明）；均仅进程调用，不链接、不作为 Rust 依赖；见 ADR-0004 与 `docs/licensing.md`。
+- 不随包 WinRAR、7-Zip RAR 代码、CUDA/HIP/OpenCL 运行时或 GPU 驱动。
 - 前端：Avalonia MIT、Compose Apache-2.0、ArkUI 随 HarmonyOS SDK（需遵守华为条款）。
 
 ## 11. 风险
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| RAR 许可 | 不链接/不随包 | Windows 用用户自装外部 unrar；许可边界见 ADR-0003；RAR 快筛自研 |
+| RAR/UnRAR 许可 | 非 OSI 组件、AV/商店风险 | Full 版随包未修改 UnRAR.exe + license，仅进程；WinRAR 不随包；见 ADR-0004 |
+| hashcat 随包 | AV 误报、驱动矩阵、更新成本 | 固定版本/哈希；外部进程；无 GPU 回落 CPU；发布前 Defender/VirusTotal |
+| GPU 驱动缺失 | GPU 不可用 | 检测 CUDA/HIP/OpenCL，明确提示，自动 CPU 回落 |
 | sevenz-rust2 边界 | 加密头/PPMd/异常包差异 | 差分测试（7-Zip oracle）；语料矩阵 |
 | HarmonyOS Rust 工具链 | 构建/加载不稳定 | 先 C ABI + 最小 NAPI spike；保留纯 ArkTS 降级 |
 | 移动端后台限制 | 长任务被挂起 | 前台服务/常亮/断点续算；不承诺后台 |
