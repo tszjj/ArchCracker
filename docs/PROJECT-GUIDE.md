@@ -24,7 +24,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 当前阶段 | **W1 进行中** | Windows 全栈优先；W2–W5 未开始 |
-| 已验收切片 | W1-001、W1-002、W1-003、W1-003b | PR #1–#5 已合并（#4 为 Full 随包文档）；详见 §5 |
+| 已验收切片 | W1-001、W1-002、W1-003（RAR5；RAR4 待真实样本）、W1-003b | PR #1–#5 已合并（#4 为 Full 随包文档）；详见 §5 |
 | 内核能力 | ZIP、RAR（外部）、字典、多线程调度 | 7z、分卷、SFX、断点、暂停/停止未完成 |
 | CLI | `acx -f <archive> -m dict -d <dict> -t N` | 仅字典模式；退出码 0/1/2/3 |
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
@@ -41,7 +41,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 ```text
 .
 ├─ core/                                  # Rust workspace（当前真正有代码的部分）
-│  ├─ Cargo.toml                          # workspace + 依赖/许可配置
+│  ├─ Cargo.toml                          # workspace 成员/依赖版本；许可策略在 deny.toml + docs/licensing.md
 │  └─ crates/
 │     ├─ acx-core/                        # 内核库
 │     │  └─ src/
@@ -156,8 +156,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 阶段 | 状态 | 已完成 | 主要缺口 |
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
-| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、RAR（外部 + 预检缓存）、字典编码/去重、有界多线程调度、CLI 字典模式 | 7z、分卷/SFX、暂停/停止、断点、完整错误分类、1M/1GB 基准、流式字典/批处理 |
-| **W2 引擎/攻击** | 未开始 | 只有 W2-001 规格 | hashcat spike、快筛、掩码/暴力/混合、分卷/SFX、批量/编码变体 |
+| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、RAR5（外部 + 预检缓存）、字典编码/去重、有界多线程调度、CLI 字典模式 | 7z、RAR4 真实样本、分卷/SFX、暂停/停止、断点、完整错误分类、1M/1GB 基准、流式字典/批处理 |
+| **W2 引擎/攻击** | 未开始 | RAR 外部引擎已由 W1-003 提前交付；W2-001 只有规格 | hashcat spike、快筛、掩码/暴力/混合、分卷/SFX、批量/编码变体 |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
@@ -169,7 +169,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 |---|---|---|
 | ZIP ZipCrypto + 字典 + 多线程 CLI | ✅ 完成 | W1-001；命中由 ZIP 引擎完整验证 |
 | ZIP WinZip AES-128/192/256 | ✅ 完成 | W1-002；AE-1/AE-2；7-Zip 差分待补 |
-| RAR4/RAR5 外部 UnRAR | ✅ 完成 | W1-003；整包 `t`，密码走 stdin；RAR4 真实样本未取得 |
+| RAR5 外部 UnRAR | ✅ 完成 | W1-003；整包 `t`，密码走 stdin；RAR5 已端到端验证 |
+| RAR4 外部 UnRAR | ⏳ 待真实样本 | 代码路径/magic/预检已覆盖；WinRAR 7.22 无法生成 `-ma4` 样本，端到端未验证 |
 | RAR 预检缓存 | ✅ 完成 | W1-003b；`-t N` 不再产生 `2N` 次重复预检 |
 | 7z（AES/头加密/首块） | ⏭ **下一步** | `sevenz-rust2`；与 7-Zip CLI 差分 |
 | 分卷/SFX + 预检完整化 | ⏳ 未开始 | `.001`/`.z01`/`.partN`、PE overlay、缺卷检测 |

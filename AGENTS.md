@@ -83,17 +83,19 @@ tests/                跨语言测试向量与语料索引（当前仅 README；
 > 当前可直接运行；先加载 `scripts/env.ps1`。
 
 ```powershell
-# Windows 环境检查（只读）
+# Windows 环境检查（只读，仓库根目录）
 Set-ExecutionPolicy -Scope Process Bypass -Force
 powershell -ExecutionPolicy Bypass -File .\scripts\check-env.ps1
 
-# Rust
-cargo fmt --all --check
+# Rust（以下在 core/ 下执行；仓库根目录没有 Cargo.toml）
+cd core
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p acx-cli -- --help
 
-# 前端（M1 后）
+# 前端（M1 后，回到仓库根目录）
+cd ..
 dotnet test frontends/desktop/ArchCracker.Desktop.sln
 ```
 
@@ -139,7 +141,7 @@ Out of scope: ...
 
 ### 6.4 分支 / 提交 / 评审
 
-- `main` 保护；所有改动走 `feat/`、`fix/`、`docs/`、`chore/` 分支 + PR。
+- `main` 保护（当前私有免费仓库无法启用 GitHub 分支保护，暂由流程约束；转公开/Pro 后开启）；所有改动走 `feat/`、`fix/`、`docs/`、`chore/` 分支 + PR。
 - 提交信息：`type(scope): summary`，例如 `feat(core): add zipcrypto probe`。
 - PR 描述必须包含：改了什么、怎么验证、风险/许可影响、未验证项。
 - 评审门禁：至少 1 个 reviewer agent；核心/许可/安全改动需要 architect 或 release 角色复核。
@@ -220,6 +222,8 @@ RISKS: <licensing/perf/cross-platform>
 ---
 
 ## 11. 常用命令
+
+> 以下命令在 `core/` 下执行。
 
 ```text
 cargo build --workspace

@@ -91,8 +91,8 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 │  ├─ agents/            # 子智能体角色与协作规范
 │  └─ analysis/          # 旧工具分析与历史规划（内部研究）
 ├─ workflows/            # DSH workflow 编排脚本
-├─ scripts/              # 环境/语料/构建脚本
-├─ tests/                # 跨语言测试向量与语料索引
+├─ scripts/              # 环境/构建脚本（语料生成脚本待补）
+├─ tests/                # 目前仅 README；语料/向量/差分为 P1 计划
 ├─ AGENTS.md             # 所有 Agent 的入口指令
 ├─ LICENSE               # Apache-2.0
 └─ README.md
