@@ -79,7 +79,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │  ├─ adr/                                # 0001 Rust、0002 前端拆分、0003 RAR、0004 Full 随包
 │  ├─ tasks/                              # W1-001/002/003/003b/003c、W2-001 任务与证据
 │  ├─ benchmarks/                         # ZIP 基线、RAR 预检缓存基准
-│  ├─ agents/                             # Agent 协作规范 + 6 个角色提示词
+│  ├─ agents/                             # Agent 协作规范 + 7 个角色提示词
 │  └─ analysis/legacy-tools.md            # 三款旧工具的静态分析（内部研究，不执行样本）
 │
 ├─ scripts/                               # bootstrap/check-env/env/make-architecture

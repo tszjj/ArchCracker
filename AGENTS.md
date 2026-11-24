@@ -110,6 +110,7 @@ dotnet test frontends/desktop/ArchCracker.Desktop.sln
 | 角色 | 职责 | 禁止 |
 |---|---|---|
 | `architect` | 架构、ADR、接口、跨平台约束、任务拆分 | 直接写业务代码 |
+| `researcher` | 技术调研、方案对比、许可/依赖证据、未验证项 | 直接写产品代码；把未复现数字当结论 |
 | `core-engineer` | Rust 内核、引擎、调度、FFI、测试 | 改前端/移动端工程 |
 | `frontend-engineer` | Avalonia / Compose / ArkUI、打包 | 改核心算法/许可策略 |
 | `qa-engineer` | 语料、差分测试、模糊测试、基准 | 修产品代码（只提 issue/PR 建议） |

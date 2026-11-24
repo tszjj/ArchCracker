@@ -97,14 +97,14 @@
 ## 8. 当前会话的落地方式
 
 > 截至 2026-11-25，当前 DSH 会话约有 **18 个历史 agent**（研究、M0 评审、实现、
-> W1/AES/RAR/RAR4/docs/guide reviewer、GPU 评估）。数量是运行时状态，不写入仓库；
+> W1/AES/RAR/RAR4/docs/guide reviewer、GPU 评估）。该数字仅作本次快照，运行时数量会变；
 > 具体 id 以 `list_agents` 为准。历史 agent 不一定有 `角色:领域` label，按 description/领域人工映射；
 > 首次复用后，在新消息里补一句规范槽位，后续按该槽位找。
 
 按以下方式收敛：
 
 - 研究类：`researcher` 槽位，按主题复用，不重复开同一主题的调研。
-- 实现类：`core-engineer:core`（含字典/ZIP/core）与 `core-engineer:cli` 各保留一个主实现者，
+- 实现类：`core-engineer:core`（含字典/ZIP）与 `core-engineer:cli` 各保留一个主实现者，
   共 2 个；后续修 bug/补测试回到对应实现者。
 - 评审类：按 `reviewer:core`、`reviewer:rar`、`reviewer:docs` 等领域收敛；同域后续 PR 复用最近一个，
   只有它参与实现时才换另一个已有 reviewer。

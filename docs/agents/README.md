@@ -9,6 +9,7 @@
 | 文件 | 角色 | 主要产出 |
 |---|---|---|
 | `roles/architect.md` | 架构师 | ADR、接口、任务拆分、跨平台约束 |
+| `roles/researcher.md` | 技术调研 | 方案对比、来源/版本/许可证据、未验证项 |
 | `roles/core-engineer.md` | 内核工程师 | Rust 核心、引擎、调度、FFI、单元测试 |
 | `roles/frontend-engineer.md` | 前端工程师 | Avalonia/Compose/ArkUI、打包、平台胶水 |
 | `roles/qa-engineer.md` | 测试工程师 | 语料、差分测试、模糊测试、基准 |
