@@ -2,7 +2,7 @@
 
 - 分支：`feat/w1-zip-dict`
 - 角色：planner（主对话）、core-engineer ×2、frontend/cli-engineer、qa
-- 状态：进行中
+- 状态：完成（PR #1，独立 reviewer approve，CI 6/6）
 
 ## 目标
 

@@ -28,13 +28,13 @@
 
 **目标**：让任何 Agent 在新机器上 30 分钟内跑起 `cargo test`。
 
-- [ ] 仓库初始化：Apache-2.0、README、AGENTS.md、ADR、目录骨架
-- [ ] 用户级工具链脚本：Rust GNU + MinGW + CMake/Ninja + .NET SDK + gh
-- [ ] Rust workspace：`acx-core`/`acx-cli`/`acx-ffi` 空壳，`cargo test` 通过
-- [ ] `acx.h` v0 草案 + 错误码
-- [ ] 语料生成脚本（7z/WinRAR CLI 可用时）+ 校验清单
-- [ ] CI：windows/ubuntu/macos 的 fmt/clippy/test/build
-- [ ] 首个 ADR 评审：Rust、前端拆分、RAR 许可
+- [x] 仓库初始化：Apache-2.0、README、AGENTS.md、ADR、目录骨架
+- [x] 用户级工具链脚本：Rust GNU + MinGW + CMake/Ninja + .NET SDK + gh
+- [x] Rust workspace：`acx-core`/`acx-cli`/`acx-ffi` 空壳，`cargo test` 通过
+- [x] `acx.h` v0 草案 + 错误码
+- [ ] 语料生成脚本（7z/WinRAR CLI 可用时）+ 校验清单（当前 `tests/` 只有计划）
+- [x] CI：windows/ubuntu/macos 的 fmt/clippy/test/build
+- [x] 首个 ADR 评审：Rust、前端拆分、RAR 许可
 
 **退出标准**
 
@@ -51,10 +51,12 @@
 
 **目标**：在 Windows 上，用 1M 字典跑通 ZIP/7z/RAR 的单包恢复，且性能可测。
 
+> 切片级完成情况（W1-001/002/003/003b）以 [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md) §5 为准；本节复选框保留阶段级口径，不把“ZIP/RAR 预检已实现”误写成整套预检完成。
+
 - [ ] 归档预检：格式/加密类型/条目/最小加密条目/缺卷
 - [x] ZIP：ZipCrypto + WinZip AES（W1-001/W1-002）
 - [ ] 7z：`sevenz-rust2`；AES/头加密；首块探测
-- [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003）；预检缓存（W1-003b）
+- [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003，RAR5 已验证；RAR4 待样本）；预检缓存（W1-003b）
 - [ ] 字典：流式、编码识别、去重、批处理
 - [ ] 调度：物理核数、有界队列、暂停/停止、命中仲裁
 - [x] 会话复用：每 worker 打开一次、RAR 预检在 factory 缓存；不每候选重开
@@ -77,7 +79,7 @@
 
 **目标**：覆盖 RAR/分卷/SFX/快筛/爆破，Windows CLI 达到 beta。
 
-- [x] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003；Full 随包 W4）
+- [x] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003；RAR5 已验证/RAR4 待样本；Full 随包 W4）
 - [ ] hashcat GPU 后端 spike：ZIP AES 13600 + RAR5 13000 提 hash；外部进程；CPU 回退（见 `docs/tasks/W2-001-hashcat-spike.md`）
 - [ ] 分卷：7z/ZIP `.001` 拼接；RAR 交外部引擎；缺卷检测
 - [ ] SFX：PE overlay 扫描；数据区偏移

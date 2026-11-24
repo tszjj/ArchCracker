@@ -2,7 +2,7 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入外部 UnRAR（RAR5 已端到端验证，RAR4 待真实样本）。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入外部 UnRAR（RAR5 已端到端验证，RAR4 待真实样本），RAR 预检已缓存（W1-003b）。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
@@ -72,22 +72,27 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 │  ├─ crates/acx-core/   # 领域、调度、候选、引擎、探针
 │  ├─ crates/acx-cli/    # 跨平台 CLI
 │  ├─ crates/acx-ffi/    # C ABI（cdylib/staticlib）+ acx.h
-│  ├─ crates/acx-jni/    # Android JNI 薄层
-│  └─ crates/acx-napi/   # HarmonyOS NAPI 薄层
-├─ frontends/
-│  ├─ desktop/           # Avalonia 12
-│  ├─ android/           # Kotlin + Compose
-│  └─ harmony/           # ArkTS/ArkUI
+│  ├─ crates/acx-jni/    # [计划] Android JNI 薄层
+│  └─ crates/acx-napi/   # [计划] HarmonyOS NAPI 薄层
+├─ frontends/            # 目前只有 README 占位
+│  ├─ desktop/           # [计划] Avalonia 12
+│  ├─ android/           # [计划] Kotlin + Compose
+│  └─ harmony/           # [计划] ArkTS/ArkUI
 ├─ docs/
+│  ├─ PROJECT-GUIDE.md   # 项目结构、文档地图、开发进度（先读）
 │  ├─ architecture.md    # 跨平台总体架构
 │  ├─ roadmap.md         # 分阶段开发计划
+│  ├─ windows-plan.md    # Windows 全栈任务/验收
+│  ├─ cross-platform.md  # 五平台差异（其他平台 Deferred）
 │  ├─ licensing.md       # Apache-2.0 与第三方许可
 │  ├─ adr/               # 架构决策记录
+│  ├─ tasks/             # 切片任务与验证证据
+│  ├─ benchmarks/        # 非正式性能基线
 │  ├─ agents/            # 子智能体角色与协作规范
 │  └─ analysis/          # 旧工具分析与历史规划（内部研究）
 ├─ workflows/            # DSH workflow 编排脚本
-├─ scripts/              # 环境/语料/构建脚本
-├─ tests/                # 跨语言测试向量与语料索引
+├─ scripts/              # 环境/构建脚本（语料生成脚本待补）
+├─ tests/                # 目前仅 README；语料/向量/差分为 P1 计划
 ├─ AGENTS.md             # 所有 Agent 的入口指令
 ├─ LICENSE               # Apache-2.0
 └─ README.md
@@ -95,7 +100,7 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 
 ## 快速开始（开发环境）
 
-> 当前 Windows 开发机没有 C++/Rust/.NET SDK；`scripts/bootstrap-windows.ps1` 会以**用户级、免管理员**方式准备工具链。
+> Windows 工具链由 `scripts/bootstrap-windows.ps1` 以**用户级、免管理员**方式准备；新机器先运行 `check-env.ps1` 检查，缺什么再 bootstrap。
 
 ```powershell
 # 1) 检查环境（只读）
@@ -104,7 +109,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\check-env.ps1
 # 2) 安装/修复用户级工具链（Rust GNU、MinGW、CMake、Ninja、.NET SDK、GitHub CLI）
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-windows.ps1
 
-# 3) M0 之后：
+# 3) 构建与测试（当前可直接运行）：
+cd core
 cargo test --workspace
 cargo run -p acx-cli -- --help
 ```
@@ -113,6 +119,7 @@ Android/HarmonyOS 工具链（Android SDK/NDK、DevEco Studio）在后续平台�
 
 ## 文档
 
+- [项目全景与开发指引](docs/PROJECT-GUIDE.md)（结构、文档地图、进度）
 - [Windows 全栈开发计划](docs/windows-plan.md)
 - [总体架构](docs/architecture.md)
 - [跨平台开发策略](docs/cross-platform.md)

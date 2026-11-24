@@ -1,6 +1,6 @@
 # GitHub 仓库设置
 
-本仓库当前是本地 Git 仓库；远端尚未创建。`gh` 已安装但未登录。
+仓库已创建并推送到 GitHub（当前为私有仓库，`origin` = `https://github.com/tszjj/ArchCracker.git`）；`gh` 已登录。本文保留首次建仓与推荐设置步骤，当前状态见 §5。
 
 ## 1. 登录
 
@@ -60,6 +60,9 @@ git push -u origin main
 
 ## 5. 当前状态
 
-- 本地 `main` 已提交 bootstrap 版本。
-- 远端：**待创建**。
-- 需要的用户决策：仓库 owner（个人/组织）、名称、可见性（建议先 private）。
+- 远端：**已创建（私有）**，`origin` 指向 `tszjj/ArchCracker`；默认分支 `main`。
+- 已合并 ZIP、AES、RAR、Full 随包文档、RAR 预检缓存等 PR（详见 `docs/PROJECT-GUIDE.md` §5）。
+- CI：6 个 job（Windows MSVC/GNU、Ubuntu、macOS、MSRV 1.89、cargo-deny），最近一次 main 全绿。
+- **分支保护当前无法启用**：私有免费仓库调用 API 返回 403（需 GitHub Pro 或转公开）。因此 `main` 保护目前只是流程约束；转公开/升级后按 §3 开启。
+- Vulnerability alerts 当前为关闭（API 404）；Dependabot、secret scanning、Private vulnerability reporting 需在 Settings 中逐项核对。
+- 仓库仍为私有；转公开前逐项检查 §4。
