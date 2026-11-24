@@ -67,11 +67,11 @@ cargo test --workspace
 
 结论：**需要优化，但不阻塞 W1-003 收口**。按优先级：
 
-1. **每 worker 重复预检**（确定要做）：`RarFactory::open()` 当前对每个线程重新跑 `t -p-`/`l -p-`，`-t N` 会多出约 `2N` 次进程；应在 factory 缓存 `ArchiveInfo`，worker 直接复用。
+1. **每 worker 重复预检**（已完成，W1-003b）：`RarFactory::open()` 曾在每个线程重新跑 `t -p-`/`l -p-`，`-t N` 多出约 `2N` 次进程；现在 factory 创建时预检一次并缓存 `ArchiveInfo`，worker 只克隆，CLI 复用 `archive::preflight` 结果。见 [W1-003b](W1-003b-rar-preflight-cache.md)。
 2. **整包 `unrar t` 每候选一次**（W2 主优化）：当前正确但慢；W2 用 clean-room RAR 头/KDF 提 hash，优先交 hashcat，疑似命中才 `UnRAR.exe` 复核。
 3. **固定 60s 超时**（W2）：大归档可能单候选超时；改为可配置/按归档大小估算，并区分“超时”和“密码错”。
 4. **退出码 1/3**（W2）：损坏归档/CRC 错误目前归为 `External`，正确密码也可能被报错；需要“密码已接受但归档损坏”的独立状态。
 5. **头加密/文件加密区分**（低优先）：当前预检计算了 `l -p-` 结果但未记录；UI 后续可显示“头加密”，不影响正确性。
 6. 已在上轮修复：前导 `-` 路径、非 ASCII OEM 编码、stdin 上限、子进程超时/清理。
 
-本轮只记录评估，代码优化留到 W1-003b/W2，避免在 Full 版计划修订中混入行为变更。
+本轮只记录评估；预检缓存已在 [W1-003b](W1-003b-rar-preflight-cache.md) 完成，其余优化留到 W2，避免在 Full 版计划修订中混入行为变更。

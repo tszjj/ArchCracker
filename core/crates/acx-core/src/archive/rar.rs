@@ -35,20 +35,19 @@ impl RarSession {
 
     /// Open with an explicit engine path (used by tests and diagnostics).
     pub fn open_with_engine(path: &Path, format: ArchiveFormat, engine: PathBuf) -> Result<Self> {
-        if !matches!(format, ArchiveFormat::Rar4 | ArchiveFormat::Rar5) {
-            return Err(AcxError::Unsupported(format!(
-                "not a RAR archive (format {})",
-                format.as_str()
-            )));
-        }
-
+        ensure_rar(format)?;
         let info = preflight(path, format, &engine)?;
-        Ok(Self {
+        Ok(Self::with_info(path, engine, info))
+    }
+
+    /// Build a session around metadata that is already known.
+    fn with_info(path: &Path, engine: PathBuf, info: ArchiveInfo) -> Self {
+        Self {
             path: path.to_path_buf(),
             engine,
             info,
             timeout: DEFAULT_TIMEOUT,
-        })
+        }
     }
 
     /// Override the per-process timeout (useful for large local fixtures).
@@ -98,32 +97,103 @@ impl ArchiveSession for RarSession {
 }
 
 /// Opens a fresh [`RarSession`] per scheduler worker.
+///
+/// The archive is probed once, when the factory is created, and every worker
+/// reuses that metadata. Probing inside `open()` would start `unrar t -p-`
+/// (and `l -p-` for encrypted archives) once per worker, adding about `2N`
+/// engine processes before `-t N` tests any candidate.
+#[derive(Debug)]
 pub struct RarFactory {
+    /// Archive path. Changing it after construction leaves `info` stale; create
+    /// a new factory instead.
     pub path: PathBuf,
     engine: PathBuf,
+    info: ArchiveInfo,
 }
 
 impl RarFactory {
-    /// Discover the user-installed engine once, then reuse it for every worker.
+    /// Discover the user-installed engine and probe the archive once.
     pub fn new(path: PathBuf) -> Result<Self> {
+        let format = super::detect_format(&path)?;
+        ensure_rar(format)?;
         let engine = external::find_unrar()?;
-        Ok(Self { path, engine })
+        let info = preflight(&path, format, &engine)?;
+        Ok(Self::with_cached_info(path, engine, info))
     }
 
-    /// Explicit engine path for tests and diagnostics.
-    pub fn with_engine(path: PathBuf, engine: PathBuf) -> Self {
-        Self { path, engine }
+    /// Explicit engine path; still probes the archive once.
+    pub fn with_engine(path: PathBuf, engine: PathBuf) -> Result<Self> {
+        let format = super::detect_format(&path)?;
+        ensure_rar(format)?;
+        let info = preflight(&path, format, &engine)?;
+        Ok(Self::with_cached_info(path, engine, info))
+    }
+
+    /// Reuse metadata returned by [`super::preflight`] without probing again.
+    ///
+    /// The CLI already probes to print the archive summary; this constructor
+    /// keeps that single probe instead of paying for a second one. The metadata
+    /// must have been produced for `path`; a mismatch is rejected so a stale
+    /// `whole_archive` flag cannot turn an unencrypted archive into a hit.
+    pub fn from_info(path: PathBuf, info: ArchiveInfo) -> Result<Self> {
+        ensure_rar(info.format)?;
+        if !same_archive(&path, &info.path) {
+            return Err(AcxError::Unsupported(
+                "cached RAR metadata belongs to a different archive".to_string(),
+            ));
+        }
+        let engine = external::find_unrar()?;
+        Ok(Self::with_cached_info(path, engine, info))
+    }
+
+    /// Build a factory around already-probed metadata.
+    ///
+    /// No engine process is started here or in [`ArchiveSessionFactory::open`].
+    /// The caller is responsible for passing metadata produced for `path`, and
+    /// must not modify the archive while this factory is in use: the metadata
+    /// is a snapshot, not a live view.
+    fn with_cached_info(path: PathBuf, engine: PathBuf, info: ArchiveInfo) -> Self {
+        Self { path, engine, info }
+    }
+
+    /// Metadata probed when this factory was created.
+    pub fn info(&self) -> &ArchiveInfo {
+        &self.info
     }
 }
 
 impl ArchiveSessionFactory for RarFactory {
     fn open(&self) -> Result<Box<dyn ArchiveSession>> {
-        let format = super::detect_format(&self.path)?;
-        Ok(Box::new(RarSession::open_with_engine(
+        // Clone cached metadata only: opening a worker must not start UnRAR.
+        Ok(Box::new(RarSession::with_info(
             &self.path,
-            format,
             self.engine.clone(),
-        )?))
+            self.info.clone(),
+        )))
+    }
+}
+
+/// Compare two paths, resolving them when possible so `.\a.rar` and `a.rar`
+/// are recognized as the same archive on Windows.
+fn same_archive(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// Reject non-RAR formats before starting an external process.
+fn ensure_rar(format: ArchiveFormat) -> Result<()> {
+    if matches!(format, ArchiveFormat::Rar4 | ArchiveFormat::Rar5) {
+        Ok(())
+    } else {
+        Err(AcxError::Unsupported(format!(
+            "not a RAR archive (format {})",
+            format.as_str()
+        )))
     }
 }
 
@@ -267,6 +337,63 @@ mod tests {
         assert!(password_has_line_break(b"abc\ndef"));
         assert!(password_has_line_break(b"abc\rdef"));
         assert!(!password_has_line_break(b"normal"));
+    }
+
+    #[test]
+    fn factory_open_reuses_cached_info_without_starting_the_engine() {
+        let info = ArchiveInfo {
+            path: PathBuf::from("archive.rar"),
+            format: ArchiveFormat::Rar5,
+            encryption: Encryption::Rar,
+            selected: None,
+            whole_archive: true,
+            entries: Vec::new(),
+        };
+        let factory = RarFactory::with_cached_info(
+            PathBuf::from("archive.rar"),
+            PathBuf::from("definitely-not-an-unrar-binary"),
+            info,
+        );
+
+        // Opening a worker must only clone the cached metadata. A missing
+        // engine would surface here if `open` still ran the preflight.
+        let first = factory.open().expect("cached open");
+        let second = factory.open().expect("cached open");
+        assert_eq!(first.info().format, ArchiveFormat::Rar5);
+        assert_eq!(first.info().encryption, Encryption::Rar);
+        assert!(first.info().whole_archive);
+        assert_eq!(second.info().format, ArchiveFormat::Rar5);
+        assert_eq!(factory.info().format, ArchiveFormat::Rar5);
+    }
+
+    #[test]
+    fn from_info_rejects_non_rar_metadata_before_probing() {
+        let info = ArchiveInfo {
+            path: PathBuf::from("archive.zip"),
+            format: ArchiveFormat::Zip,
+            encryption: Encryption::ZipCrypto,
+            selected: Some(0),
+            whole_archive: false,
+            entries: Vec::new(),
+        };
+        let error = RarFactory::from_info(PathBuf::from("archive.zip"), info)
+            .expect_err("ZIP metadata must be rejected");
+        assert!(matches!(error, AcxError::Unsupported(_)));
+    }
+
+    #[test]
+    fn from_info_rejects_metadata_for_a_different_archive() {
+        let info = ArchiveInfo {
+            path: PathBuf::from("one.rar"),
+            format: ArchiveFormat::Rar5,
+            encryption: Encryption::Rar,
+            selected: None,
+            whole_archive: true,
+            entries: Vec::new(),
+        };
+        let error = RarFactory::from_info(PathBuf::from("two.rar"), info)
+            .expect_err("metadata for another archive must be rejected");
+        assert!(matches!(error, AcxError::Unsupported(_)));
     }
 
     #[test]

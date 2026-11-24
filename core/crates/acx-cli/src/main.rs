@@ -113,13 +113,17 @@ fn run(cli: Cli) -> ExitCode {
         ArchiveFormat::Zip => Arc::new(ZipFactory {
             path: cli.file.clone(),
         }),
-        ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => match RarFactory::new(cli.file.clone()) {
-            Ok(factory) => Arc::new(factory),
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_ARCHIVE);
+        ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
+            // `archive::preflight` already probed this RAR; reuse that result
+            // instead of starting a second preflight in the factory.
+            match RarFactory::from_info(cli.file.clone(), info.clone()) {
+                Ok(factory) => Arc::new(factory),
+                Err(error) => {
+                    eprintln!("acx: {error}");
+                    return ExitCode::from(EXIT_ARCHIVE);
+                }
             }
-        },
+        }
     };
     let passwords = Arc::new(dictionary.entries().to_vec());
 
