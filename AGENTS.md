@@ -118,12 +118,19 @@ dotnet test frontends/desktop/ArchCracker.Desktop.sln
 
 角色提示词在 `docs/agents/roles/`。派发任务时把对应角色文件内容 + 仓库 `AGENTS.md` 一起给子智能体。
 
-### 6.2 何时用 subagent / workflow
+### 6.2 何时用 subagent / workflow / 复用
 
-- 1–2 个独立子任务：用 `subagent`（或 `subagent_fork`），不要上 workflow。
-- 3 个以上独立方向、需要并行汇总：用 `workflow`，脚本放 `workflows/`。
-- 每个任务必须写清：**目标、范围、输入文件、验收标准、禁止事项**。
-- 子智能体不共享本对话上下文；prompt 必须自包含。
+**先复用，后新建**。完整规则见 [`docs/agents/POOL.md`](docs/agents/POOL.md)。
+
+- 派发前先 `list_agents`：同角色/同领域且有相关上下文的 inactive agent，优先用 `send_message` 续用。
+- 同类工作（同格式 reviewer、同模块实现、同文档复核）不为每个 PR 新建 agent；领域 reviewer 是槽位，不是一次性。
+- 只有无合适槽位、需要独立评审（现有 reviewer 参与了实现），或需要隔离上下文时，才用 `subagent`。
+- 1–2 个独立子任务：用 `subagent`（或 `subagent_fork`），不要上 workflow；
+  但若已有同域 agent，先复用，不要为了“独立”重复开同角色。
+- 3 个以上独立方向、需要并行汇总：用 `workflow`；workflow 每次都会新建 agent，不适合同域后续迭代。
+- 每个任务必须写清：**目标、范围、输入文件、验收标准、禁止事项**；复用消息只给变更点，不重贴整份仓库。
+- 子智能体不共享本对话上下文；新建时 prompt 必须自包含。新建 label 用 `角色:领域`，便于下次找回。
+- 同一 PR 不并行开两个 reviewer；需要第二意见时，串行换一个未参与该改动的已有 reviewer。
 
 ### 6.3 任务包格式
 
