@@ -38,6 +38,8 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 
 ## 3. 当前阶段
 
+> 项目结构、文档地图和切片进度见 [`docs/PROJECT-GUIDE.md`](docs/PROJECT-GUIDE.md)。开工前先读该页的“当前状态”和“推荐开发顺序”。
+
 **W1 进行中（Windows 全栈优先）**：
 
 - 仓库、许可证、文档、ADR、Agent 协作规范已建立；
@@ -53,18 +55,18 @@ W1 完成前不要提前铺 GUI；移动端 SDK 一律不引入；不要提交�
 
 ```text
 core/                 Rust workspace
-  crates/acx-core/    领域模型、候选源、调度、引擎、探针、断点
+  crates/acx-core/    领域模型、候选源、调度、引擎、探针、断点（部分模块仍为计划）
   crates/acx-cli/     CLI
-  crates/acx-ffi/     C ABI + include/acx.h
-  crates/acx-jni/     Android JNI 薄层
-  crates/acx-napi/    HarmonyOS NAPI 薄层
-frontends/desktop/    Avalonia 12
-frontends/android/    Kotlin + Compose
-frontends/harmony/    ArkTS / ArkUI
+  crates/acx-ffi/     C ABI + include/acx.h（当前仅最小 v0）
+  crates/acx-jni/     [计划] Android JNI 薄层
+  crates/acx-napi/    [计划] HarmonyOS NAPI 薄层
+frontends/desktop/    [计划] Avalonia 12（当前只有 README）
+frontends/android/    [计划] Kotlin + Compose（当前只有 README）
+frontends/harmony/    [计划] ArkTS / ArkUI（当前只有 README）
 docs/                 架构、路线图、许可、ADR、Agent 角色
 workflows/            DSH workflow 编排脚本
-scripts/              环境、语料、构建脚本
-tests/                跨语言测试向量与语料索引（不提交大文件）
+scripts/              环境/构建脚本（语料生成脚本待补）
+tests/                跨语言测试向量与语料索引（当前仅 README；不提交大文件）
 ```
 
 **边界规则**
