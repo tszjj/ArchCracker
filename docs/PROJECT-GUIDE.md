@@ -41,7 +41,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 ```text
 .
 ├─ core/                                  # Rust workspace（当前真正有代码的部分）
-│  ├─ Cargo.toml                          # workspace 成员/依赖版本；许可策略在 deny.toml + docs/licensing.md
+│  ├─ Cargo.toml                          # workspace 成员/共享包元数据；依赖见各 crate Cargo.toml；许可策略在 deny.toml + docs/licensing.md
 │  └─ crates/
 │     ├─ acx-core/                        # 内核库
 │     │  └─ src/
@@ -190,12 +190,13 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dictionary> -t 4
 ```
 
 - ZIP：ZipCrypto、WinZip AES-128/192/256；
-- RAR4/RAR5：本机安装 WinRAR/UnRAR，或设置 `ACX_UNRAR`；
+- RAR5：本机安装 WinRAR/UnRAR，或设置 `ACX_UNRAR`；
 - 退出码：0 命中，1 未找到，2 参数/字典错误，3 归档/引擎错误。
 
-**尚不可用**：
+**尚不可用 / 未验证**：
 
 - 7z；
+- RAR4：代码路径、magic、预检已接入，但缺真实样本，**暂不作为已验证能力**；
 - 分卷/SFX；
 - 掩码/暴力/混合；
 - GUI、安装包、自动解压；
