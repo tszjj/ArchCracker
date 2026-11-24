@@ -98,7 +98,7 @@ band(555, 300, "③ Rust 内核 acx-core", "纯逻辑 · 无 UI 依赖 · 可交
 cols = [
     (72, 610, 390, 205, "任务与编排", ["JobManager · 队列/批量", "AttackPlanner · 成本估算", "Scheduler · 有界队列/线程", "ResumeManager · 原子断点", "Stats · EWMA/ETA"]),
     (482, 610, 390, 205, "候选源", ["字典 · 流式/编码/去重", "掩码 · ?d?l?u?s/?1-?4", "暴力 · 字符集/长度/UInt128", "混合 · 字典×掩码", "规则（P2）· hashcat 风格"]),
-    (892, 610, 390, 205, "引擎与探针", ["7z · AES/头加密/PPMd", "ZIP · ZipCrypto/AES", "RAR · 外部 unrar（桌面）", "Volume/SFX · 自建容器层", "Probe → 结构/签名 → 确认"]),
+    (892, 610, 390, 205, "引擎与探针", ["7z · AES/头加密/PPMd", "ZIP · ZipCrypto/AES", "RAR · Full 随包 UnRAR.exe", "hashcat · GPU（外部）", "Probe → 结构/签名 → 确认"]),
     (1302, 610, 410, 205, "平台抽象 / 质量", ["文件/路径 · 线程 · 进程 · locale", "cfg 隔离 · 无 Windows API 泄漏", "取消/暂停 · 批边界", "错误分类 · 缺卷/损坏/不支持", "测试向量 · 差分 oracle"]),
 ]
 for (cx, cy, cw, ch, title, lines) in cols:
@@ -110,16 +110,16 @@ for (cx, cy, cw, ch, title, lines) in cols:
         yy += 20
 
 # engines band
-band(875, 185, "④ 引擎与第三方", "许可边界：RAR 不链接、不随包、不自动下载")
+band(875, 185, "④ 引擎与第三方", "许可边界：Full 随包 UnRAR/hashcat；不链接/不复制源码")
 eng = [
     (55, 935, 390, 100, "sevenz-rust2", ["Apache-2.0 · 7z", "AES-256 / 头加密 / PPMd"], (255,250,240), (226,184,119)),
-    (465, 935, 340, 100, "zip", ["MIT · ZIP", "ZipCrypto / AES（P1 实测）"], (255,250,240), (226,184,119)),
-    (825, 935, 430, 100, "外部 unrar（桌面）", ["用户自装 · 仅进程调用", "不随包 / 不链接 / 不自动下载"], (255,235,235), (220,120,120)),
-    (1275, 935, 450, 100, "Volume / SFX / 编码", ["自建拼接 Reader · PE overlay", "UTF-8/GBK 字节变体"], (255,250,240), (226,184,119)),
+    (465, 935, 340, 100, "zip", ["MIT · ZIP", "ZipCrypto / AES"], (255,250,240), (226,184,119)),
+    (825, 935, 430, 100, "UnRAR.exe（Full 随包）", ["仅进程 / 不链接 / 不复制源码", "WinRAR / CUDA / HIP 不随包"], (255,235,235), (220,120,120)),
+    (1275, 935, 450, 100, "hashcat / Volume / SFX", ["外部 GPU · 无 GPU 回落 CPU", "Volume/SFX 自建容器层"], (255,250,240), (226,184,119)),
 ]
 for (ex, ey, ew, eh, t, lines, fill, border) in eng:
     box(ex, ey, ew, eh, t, lines, fill, border, 16, 12)
-text(825, 1044, "RAR 许可边界：Apache-2.0 主项目 vs unRAR restriction", 12, (170,40,40), True)
+text(825, 1044, "Full 版随包未修改 UnRAR.exe/hashcat；CPU 路径始终可用", 12, (170,40,40), True)
 
 # infra
 band(1080, 120, "⑤ 质量与交付", "CI · 语料 · 签名 · 许可扫描")
@@ -127,7 +127,7 @@ inf = [
     (55, 1128, 380, 56, "CI 三平台", "windows / ubuntu / macos"),
     (455, 1128, 380, 56, "语料/差分", "7-Zip/unrar oracle"),
     (855, 1128, 380, 56, "打包/签名", "MSIX · DMG · APK · HAP"),
-    (1255, 1128, 470, 56, "许可扫描", "cargo-deny · 无 Rar* · 源码归档"),
+    (1255, 1128, 470, 56, "许可扫描", "无 RAR 源码/链接 · 外部程序清单"),
 ]
 for (ix, iy, iw, ih, t, sub) in inf:
     rounded(ix, iy, iw, ih, 10, (240,242,245), (174,182,194), 1)
@@ -135,7 +135,7 @@ for (ix, iy, iw, ih, t, sub) in inf:
     text(ix + 14, iy + 30, sub, 12, (90,98,112))
 
 # footer
-text(55, 1222, "核心原则：每 worker 独占会话 · 每候选只做最便宜的证据 · 命中必须由参考引擎复核 · 移动端首发不含 RAR。", 14, (55,65,81), True)
+text(55, 1222, "核心原则：每 worker 独占会话 · CPU 是完整基线 · GPU 命中必须复核 · hashcat 只走外部进程。", 14, (55,65,81), True)
 text(55, 1248, "规划稿 · 性能数字需基准验证 · 本图不构成法律意见", 11, (156,163,175))
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

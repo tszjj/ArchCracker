@@ -6,7 +6,7 @@
 
 ## 目标
 
-在 Windows 上通过用户自行安装的 WinRAR/`UnRAR.exe` 恢复 RAR4/RAR5 密码：
+在 Windows 上通过外部 `UnRAR.exe`（Full 版随包，W1 开发期可用本机安装版）恢复 RAR4/RAR5 密码：
 
 ```powershell
 acx -f encrypted.rar -m dict -d dict.txt -t 4
@@ -24,7 +24,7 @@ acx -f encrypted.rar -m dict -d dict.txt -t 4
   - 退出 11 → 加密；再 `unrar l -p- -idq` 区分非头加密/头加密；
   - 其他退出码 → 归档/引擎错误。
 - 候选验证：`unrar t -idq -p archive`，密码写 stdin；退出 0 → Hit，11 → Miss，其他 → `AcxError::External`。
-- CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；未安装引擎时退出 3 并提示安装/`ACX_UNRAR`。
+- CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；引擎缺失/损坏时退出 3 并提示修复安装/选择 `UnRAR.exe`/`ACX_UNRAR`（W1 代码不含随包路径，W4 加）。
 - 测试：
   - 纯函数：预检/测试参数、路径绝对化、缺失引擎、external 超时/截断；
   - 本地集成（仅当 `UnRAR.exe` + `Rar.exe` 可用时运行，CI 无则跳过）：生成 RAR5 文件加密样本，验证 CLI 正确/错误字典、ASCII/Unicode 密码、未加密归档；
@@ -33,7 +33,7 @@ acx -f encrypted.rar -m dict -d dict.txt -t 4
 
 ## 非目标
 
-- 不链接/随包/自动下载 unRAR；不做自研 RAR 解码器。
+- W1-003 **代码**不链接/不复制 unRAR；不做自研 RAR 解码器。随包策略由 ADR-0004 在 W4 落地（未修改 `UnRAR.exe` + license，仅进程）。
 - 不解析 `unrar` 本地化输出以选择最小条目；W2 用 clean-room 头/KDF 快筛优化。
 - 分卷/SFX、断点、RAR 头加密的单独快筛、性能基准不在本切片。
 - 非 Windows 平台 RAR 能力仍 Deferred；Linux/macOS 只保证代码可编译，不宣称可用。
@@ -62,3 +62,16 @@ cargo test --workspace
 - 手工验证（WinRAR 7.22 / RAR5）：文件加密命中/错误字典、头加密命中、中文密码命中、未加密 exit 3、缺失引擎 exit 3、密码不在 argv。
 - 验证命令：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、`cargo +1.89 test --workspace --locked`、`cargo deny check licenses bans sources`。
 - 未验证：RAR4 真实样本、RAR5 其他代码页/emoji 密码、缺卷/损坏分类、大归档、真实超时 kill、Linux/macOS 实际 RAR（CI 无引擎）。
+
+## RAR 轮次优化评估（2026-11-24）
+
+结论：**需要优化，但不阻塞 W1-003 收口**。按优先级：
+
+1. **每 worker 重复预检**（确定要做）：`RarFactory::open()` 当前对每个线程重新跑 `t -p-`/`l -p-`，`-t N` 会多出约 `2N` 次进程；应在 factory 缓存 `ArchiveInfo`，worker 直接复用。
+2. **整包 `unrar t` 每候选一次**（W2 主优化）：当前正确但慢；W2 用 clean-room RAR 头/KDF 提 hash，优先交 hashcat，疑似命中才 `UnRAR.exe` 复核。
+3. **固定 60s 超时**（W2）：大归档可能单候选超时；改为可配置/按归档大小估算，并区分“超时”和“密码错”。
+4. **退出码 1/3**（W2）：损坏归档/CRC 错误目前归为 `External`，正确密码也可能被报错；需要“密码已接受但归档损坏”的独立状态。
+5. **头加密/文件加密区分**（低优先）：当前预检计算了 `l -p-` 结果但未记录；UI 后续可显示“头加密”，不影响正确性。
+6. 已在上轮修复：前导 `-` 路径、非 ASCII OEM 编码、stdin 上限、子进程超时/清理。
+
+本轮只记录评估，代码优化留到 W1-003b/W2，避免在 Full 版计划修订中混入行为变更。

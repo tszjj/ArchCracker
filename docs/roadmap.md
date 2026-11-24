@@ -11,10 +11,10 @@
 |---|---|---|---|
 | W0 Bootstrap | 1–2 周 | 仓库/CI/工具链/语料/C ABI 草案 | Windows |
 | W1 核心 CLI | 2–3 周 | CLI：ZIP/7z/RAR（外部）+ 字典 + 多线程 + 断点 | Windows |
-| W2 引擎/攻击 | 2–3 周 | 快筛/分卷/SFX/掩码/暴力/批量/编码 | Windows |
+| W2 引擎/攻击 | 2–3 周 | 快筛/分卷/SFX/掩码/暴力/批量/编码 + hashcat GPU spike | Windows |
 | W3 桌面 GUI | 3–4 周 | Avalonia 12 主界面 + C ABI v1 | Windows |
-| W4 全栈交付 | 2–3 周 | 安装包/签名/自动解压/崩溃转储/zh-en | Windows |
-| W5 Windows Beta | 2–4 周 | 性能/模糊测试/文档/兼容性 | Windows |
+| W4 全栈交付 | 2–3 周 | 单一 Full 安装包（随包 UnRAR/hashcat）/签名/自动解压/崩溃转储/zh-en | Windows |
+| W5 Windows Beta | 2–4 周 | 性能/模糊测试/文档/兼容性/AV | Windows |
 | D1–D3 其他平台 | — | Linux/macOS、Android、HarmonyOS | **Deferred** |
 | P7 持续 | 持续 | 许可审计、性能、发布 | Windows 优先 |
 
@@ -49,11 +49,12 @@
 
 ## W1 核心 CLI（2–3 周）
 
-**目标**：在 Windows 上，用 1M 字典跑通 ZIP/7z 的单包恢复，且性能可测。
+**目标**：在 Windows 上，用 1M 字典跑通 ZIP/7z/RAR 的单包恢复，且性能可测。
 
 - [ ] 归档预检：格式/加密类型/条目/最小加密条目/缺卷
-- [ ] ZIP：ZipCrypto + WinZip AES 解密读取；`zip` crate + 自写容器层
+- [x] ZIP：ZipCrypto + WinZip AES（W1-001/W1-002）
 - [ ] 7z：`sevenz-rust2`；AES/头加密；首块探测
+- [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003）
 - [ ] 字典：流式、编码识别、去重、批处理
 - [ ] 调度：物理核数、有界队列、暂停/停止、命中仲裁
 - [ ] 会话复用：每 worker 打开一次；不每候选重开
@@ -63,7 +64,7 @@
 
 **退出标准**
 
-- 1M 字典 × 1GB ZIP/7z（已知密码）完成，并记录 p/s（格式/线程/硬件）；"可接受"不作为验收措辞；
+- 1M 字典 × 1GB ZIP/7z/RAR（已知密码）完成，并记录 p/s（格式/线程/硬件）；"可接受"不作为验收措辞；
 - 取消 < 200 ms；强杀恢复误差 ≤ 1 批；
 - 错误分类 100% 正确（语料）；
 - 性能基线记录在 `docs/benchmarks/`。
@@ -76,7 +77,8 @@
 
 **目标**：覆盖 RAR/分卷/SFX/快筛/爆破，Windows CLI 达到 beta。
 
-- [ ] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明
+- [x] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003；Full 随包 W4）
+- [ ] hashcat GPU 后端 spike：ZIP AES 13600 + RAR5 13000 提 hash；外部进程；CPU 回退（见 `docs/tasks/W2-001-hashcat-spike.md`）
 - [ ] 分卷：7z/ZIP `.001` 拼接；RAR 交外部引擎；缺卷检测
 - [ ] SFX：PE overlay 扫描；数据区偏移
 - [ ] 快筛：ZIP verifier、RAR 头/密钥、7z 头 CRC/首块；严格模式
@@ -90,7 +92,7 @@
 
 - 已知密码 100% 命中；ZIP/ZipCrypto 10⁷ 错误候选 0 误报，7z/RAR5 抽样（≥10⁵）0 误报 + 差分；
 - 缺卷/损坏/未加密分类正确；
-- RAR 仅通过外部引擎，发布物不含 unRAR 代码；
+- RAR 只通过外部 `UnRAR.exe`；hashcat 只通过外部进程，不是 Cargo 依赖；无 hashcat/GPU 时 CPU 多线程功能完整；
 - 快筛/严格模式结果差异可解释。
 
 **Agent 分工**：core-engineer ×2（引擎/候选）+ qa（差分测试）+ reviewer（许可）。
@@ -125,13 +127,15 @@
 
 **目标**：从“能跑”到“能装、能卸载、能自动解压”。
 
-- [ ] 安装包：MSIX 或 Inno Setup；卸载/升级/便携模式
+- [ ] 安装包：单一 Full 版（MSIX 或 Inno Setup）；卸载/升级/便携模式
+- [ ] Full 随包：未修改 `UnRAR.exe` + license，hashcat + MIT/第三方声明；版本/SHA 清单
+- [ ] 不随包：WinRAR、CUDA/HIP/OpenCL 运行时、GPU 驱动
 - [ ] 代码签名：OV/EV；SmartScreen/Defender 误报提交
 - [ ] 自动解压：目标目录、覆盖策略、磁盘空间检查、Zip Slip 防护
 - [ ] 崩溃转储/日志脱敏（不记完整密码）；sidecar 隔离开关
 - [ ] zh/en、键盘、读屏基础；高 DPI/深色
-- [ ] 首次启动授权提示；RAR 未检测到时的引导（WinRAR/UnRAR）
-- [ ] 发布检查：无 unrar 随包、无样本、`THIRD_PARTY_NOTICES` 最新
+- [ ] 首次启动授权提示；GPU/引擎检测与 CPU 回落提示
+- [ ] 发布检查：无 RAR 样本、`THIRD_PARTY_NOTICES`/manifest 最新
 
 **退出标准**
 
@@ -151,7 +155,8 @@
 - [ ] 差分测试（7-Zip/unrar oracle）+ 模糊测试（头/分卷/SFX）
 - [ ] 兼容性：Windows 10 22H2、Windows 11 24H2；x64（ARM64 另评）
 - [ ] 安全评审：路径穿越、恶意归档、DLL 加载、日志泄密
-- [ ] 许可审计：无 unrar/Rar* 代码；依赖清单/源码归档
+- [ ] 许可审计：UnRAR/hashcat 版本/许可/哈希齐全，无 RAR 源码；无 WinRAR/CUDA/HIP 随包
+- [ ] AV/SmartScreen：Defender/VirusTotal、安装包签名、误报处理流程
 - [ ] 文档/FAQ/已知问题/回滚
 
 **退出标准**
@@ -252,7 +257,8 @@ W0 ──► W1 ──► W2 ──► W3 ──► W4 ──► W5 ──► Wi
 ```
 
 - **W1 是最大风险**：ZIP/7z 加密、会话复用、断点、性能基线必须先打通。
-- **RAR**：解压用途符合 unRAR 许可；Windows 只调用用户已装 WinRAR/UnRAR，不链接、不随包（许可边界见 ADR-0003）。
+- **RAR**：解压用途符合 UnRAR 许可；Full 版随包未修改 `UnRAR.exe`（仅进程），不链接、不复制源码；WinRAR 不随包。hashcat 随包但只作为外部进程，见 ADR-0004。
+- **GPU**：hashcat 不是 Rust/Cargo 依赖；GPU 驱动/CUDA/HIP 由系统提供；无 GPU 时 CPU 多线程是完整基线。
 - **其他平台**依赖 C ABI 稳定（W3 末冻结）；D1–D3 在 Windows 发布后再启动。
 - **UI 工作量**：当前只做 Windows 一套（Avalonia）；移动端后续再评估。
 

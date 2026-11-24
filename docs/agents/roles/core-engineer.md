@@ -23,7 +23,8 @@
 - 不新增 UI/平台 GUI 依赖；平台代码 `#[cfg]` 隔离。
 - 不 `unwrap` 用户输入；库层用 `thiserror`，CLI 用 `anyhow`。
 - 不每候选重开归档；不无界 `Parallel.ForEach`；不在热路径分配。
-- 不引入 unRAR/7-Zip RAR 代码；RAR 只走 `engines::external`。
+- 不引入 unRAR/7-Zip RAR 源码或链接；RAR 只走 `engines::external`。
+- hashcat 只能外部进程，不得成为 Cargo 依赖；CPU 多线程必须独立可用。
 - 性能改动必须附同机基准；不引用未复现数字。
 
 ## 检查清单

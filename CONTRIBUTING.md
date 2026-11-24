@@ -46,7 +46,8 @@ cargo run -p acx-cli -- --version
 ```
 
 - 依赖：新增前说明用途/许可/体积；更新 `docs/licensing.md`。
-- 不引入 unRAR/7-Zip RAR 代码；RAR 只走外部进程（见 ADR-0003）。
+- 不引入 unRAR/7-Zip RAR 源码或链接；RAR 只走外部进程（见 ADR-0004）。
+- hashcat 只能作为外部进程，不得加入 Cargo 依赖；CPU 路径必须保持可独立运行。
 - 不加入遥测/在线查询；不记录完整密码。
 
 ## 5. 测试与证据

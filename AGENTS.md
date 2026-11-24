@@ -14,7 +14,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 1. **只做授权恢复**：仅处理用户本人拥有或已获明确授权的归档；不实现在线撞库/共享密码/绕过 DRM。
 2. **内核/前端分离**：核心不得依赖 UI、不得调用平台 GUI API；前端只通过 C ABI / JNI / NAPI 调用核心。
 3. **默认离线**：无遥测、无强制更新、无静默网络请求。
-4. **许可干净**：Apache-2.0；第三方组件逐个登记；RAR 解压用途本身允许，但内核不链接（静态/动态）、不随包、不自动下载 unRAR 代码/二进制。
+4. **许可干净**：Apache-2.0；第三方组件逐个登记；Full 版按 ADR-0004 随包**未修改的 UnRAR.exe 与 hashcat 二进制**，仅进程调用；内核不链接 unRAR/7-Zip RAR 代码，不复制其源码；WinRAR 与 GPU 运行时（CUDA/HIP/驱动）不随包。
 5. **可验证**：每个功能有测试或可复现的验证步骤；性能结论必须有基准数据。
 
 ---
@@ -26,7 +26,9 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 | 许可证 | Apache-2.0 | `LICENSE` |
 | 内核语言 | Rust（workspace + C ABI） | `docs/adr/0001-rust-core.md` |
 | 前端拆分 | Avalonia 12（桌面三平台）/ Compose（Android）/ ArkUI（HarmonyOS） | `docs/adr/0002-frontend-split.md` |
-| RAR 策略 | Windows 首发调用用户自装 WinRAR/UnRAR；不链接、不随包、不自动下载；其他平台 Deferred | `docs/adr/0003-rar-licensing.md` |
+| RAR 策略 | **单一 Windows Full 版**随包未修改 `UnRAR.exe`（仅进程）；不链接/不调用 `unrar.dll`；WinRAR 不随包；其他平台 Deferred | `docs/adr/0003-rar-licensing.md`、`docs/adr/0004-bundled-engines.md` |
+| GPU/字典加速 | Full 版随包 hashcat 二进制，**仅外部进程**；hashcat 不是 Rust/Cargo 依赖；无 hashcat/GPU 时 CPU 多线程完整可用 | `docs/adr/0004-bundled-engines.md` |
+| 发布形态 | 不分 Lite/Full，直接开发单一 Full 版本 | `docs/adr/0004-bundled-engines.md` |
 | 首发平台 | Windows 10/11 x64，先 CLI 后 GUI | `docs/roadmap.md` |
 | 开发方式 | 多 Agent 分工 + 分支/PR + 评审门禁 | 本文件第 6 节 |
 
@@ -41,7 +43,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 - 仓库、许可证、文档、ADR、Agent 协作规范已建立；
 - Windows 用户级工具链（Rust GNU/MinGW、.NET 10、CMake、Ninja、gh）已装好；
 - `core/` 已有可编译的 Rust workspace + C ABI 最小实现，`cargo test` 通过；
-- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（RAR5 端到端验证，RAR4 待真实样本；整包 `t`，密码走 stdin/OEM 编码）；下一步 7z、分卷/断点与 p/s 基准。Windows GUI 尚未开始。其他平台 Deferred。
+- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（RAR5 端到端验证，RAR4 待真实样本；整包 `t`，密码走 stdin/OEM 编码）；下一步 7z、分卷/断点与 p/s 基准。Windows GUI 尚未开始。Full 版的 UnRAR/hashcat 随包按 ADR-0004 在 W4 落地；其他平台 Deferred。
 
 W1 完成前不要提前铺 GUI；移动端 SDK 一律不引入；不要提交未经证实的性能数字。
 
@@ -67,7 +69,8 @@ tests/                跨语言测试向量与语料索引（不提交大文件�
 
 **边界规则**
 
-- `acx-core` 不得依赖 `clap`、`serde_json` 之外的 UI/平台库；不得 `use std::process::Command` 直接跑 `unrar`（由 `engines::external` 抽象）。
+- `acx-core` 不得依赖 `clap`、`serde_json` 之外的 UI/平台库；不得 `use std::process::Command` 直接跑 `unrar`/`hashcat`（由 `engines::external` 抽象）。
+- hashcat 只能通过外部进程/`engines::external` 接入，**不得**成为 Cargo 依赖、不得把 CUDA/HIP/OpenCL 绑定或 hashcat 内核复制进核心。
 - `acx-ffi` 只做类型转换、错误码、回调生命周期；不得承载业务逻辑。
 - 前端不得复制核心的攻击参数/错误码定义；以 `acx.h` 与 `docs/architecture.md` §5 为准。
 
@@ -186,7 +189,7 @@ RISKS: <licensing/perf/cross-platform>
 
 - [ ] 代码 + 测试 + 文档（至少更新相关 `docs/`）
 - [ ] `cargo fmt --check`、`clippy -D warnings`、受影响测试通过
-- [ ] 新依赖/许可已登记；无 unRAR/7-Zip RAR 代码违规引入
+- [ ] 新依赖/许可已登记；无 unRAR/7-Zip RAR 源码违规引入；hashcat 未成为 Cargo 依赖
 - [ ] 跨平台影响已说明（Windows 验证 / 其他平台未验证）
 - [ ] 性能改动有基准数据（before/after，同机同语料）
 - [ ] 无样本档案、无密钥、无用户数据
@@ -198,7 +201,7 @@ RISKS: <licensing/perf/cross-platform>
 
 - **不执行** `解密1/2/3` 目录中的二进制；它们只作静态分析样本，且已被 `.gitignore` 排除。
 - 不运行来源不明的压缩包/字典；测试语料必须由仓库脚本生成或来自可信公开数据集。
-- 不把 `unrar`、7-Zip RAR 代码、破解版工具提交进仓库；RAR 只通过用户自装的外部进程，不链接/不随包；边界见 `docs/licensing.md`。
+- 不把 `unrar`/7-Zip RAR **源码**、破解版工具提交进仓库；Full 版按 ADR-0004 随包**未修改的 UnRAR.exe 与 hashcat 二进制**（发布流水线按 manifest 获取，不提交二进制），RAR 只通过外部进程调用，不链接/不复制源码；边界见 `docs/licensing.md`。
 - 不加入遥测、崩溃上报、在线密码查询；日志默认不记录完整密码。
 - 解压路径做规范化，防 Zip Slip；DLL/so 从程序目录加载并校验哈希。
 - 发现安全问题时走私密渠道（`SECURITY.md`），不要在公开 issue 贴利用细节。
@@ -207,7 +210,7 @@ RISKS: <licensing/perf/cross-platform>
 
 ## 10. 性能与正确性
 
-- 正确性优先：任何“找到密码”必须由内置引擎完整解压复核；CI 再用 7-Zip/unrar 做差分 oracle。快筛只用于否决候选。
+- 正确性优先：任何“找到密码”必须由 ZIP/7z 内置引擎完整解压，或由外部 UnRAR 完整测试复核；CI 再用 7-Zip/unrar 做差分 oracle。快筛只用于否决候选。
 - 快筛的分层：结构判据（verifier/压缩流头/CRC）可靠；文件签名启发式可能漏，必须标注“未确认”，并提供严格模式。
 - 基准：同机、同语料、同电源模式；报告 p/s、CPU、内存、ETA 误差；不引用未复现的第三方数字作为本项目结论。
 - 移动端 ETA 用滑动窗口，不假设可持续满载。
@@ -229,7 +232,7 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dict> -t 14
 
 - 在 `main` 上直接提交；跨多个角色边界“顺手重构”。
 - 为了跑通而 `unwrap()`、吞错误、跳过测试。
-- 引入 `unrar`/7-Zip RAR 代码“先跑起来再说”。
+- 引入 `unrar`/7-Zip RAR **源码或链接**“先跑起来再说”；把 hashcat 写成 Cargo 依赖或复制其内核。
 - 把“未验证”写成“已完成”；把估算写成实测。
 - 复制许可不兼容代码或从破解版工具提取资源。
 - 在 UI 线程做解密；每候选新建归档会话；无界 `Parallel.ForEach`。

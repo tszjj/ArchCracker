@@ -14,5 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 Third-party components and their notices are listed in
-THIRD_PARTY_NOTICES.md. RAR support is provided by a user-installed
-external UnRAR executable; no unRAR code is bundled or linked.
+THIRD_PARTY_NOTICES.md. The Windows Full distribution bundles an
+unmodified UnRAR executable (separate UnRAR license) and hashcat
+(MIT), both invoked only as external processes. No unRAR or hashcat
+source code is linked into the Apache-2.0 core.
