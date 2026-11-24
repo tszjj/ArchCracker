@@ -2,7 +2,7 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入用户自装的外部 UnRAR（整包 `t` 验证）；下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入用户自装的外部 UnRAR（RAR5 已端到端验证，RAR4 待真实样本）；下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 

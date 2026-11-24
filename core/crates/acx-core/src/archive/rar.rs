@@ -75,10 +75,11 @@ impl ArchiveSession for RarSession {
             return Ok(PasswordTest::Miss);
         }
 
+        let encoded = external::encode_password(password)?;
         let output = external::run(
             &self.engine,
             test_args(&self.path),
-            Some(password),
+            Some(encoded.as_ref()),
             self.timeout,
         )?;
         if output.timed_out {
@@ -179,7 +180,7 @@ fn preflight_args(path: &Path) -> Vec<OsString> {
         "-c-".into(),
         "-idq".into(),
         "-p-".into(),
-        path.as_os_str().to_os_string(),
+        command_path(path).into_os_string(),
     ]
 }
 
@@ -190,7 +191,7 @@ fn listing_args(path: &Path) -> Vec<OsString> {
         "-c-".into(),
         "-idq".into(),
         "-p-".into(),
-        path.as_os_str().to_os_string(),
+        command_path(path).into_os_string(),
     ]
 }
 
@@ -201,8 +202,14 @@ fn test_args(path: &Path) -> Vec<OsString> {
         "-c-".into(),
         "-idq".into(),
         "-p".into(),
-        path.as_os_str().to_os_string(),
+        command_path(path).into_os_string(),
     ]
+}
+
+/// UnRAR parses a leading `-` as a switch and has no `--` escape. Resolve the
+/// archive to an absolute path so a file such as `-archive.rar` is still data.
+fn command_path(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn password_has_line_break(password: &[u8]) -> bool {
@@ -246,6 +253,13 @@ mod tests {
         assert!(args
             .iter()
             .all(|arg| !arg.to_string_lossy().contains("P@ss")));
+    }
+
+    #[test]
+    fn archive_path_is_made_absolute_to_avoid_switch_parsing() {
+        let path = command_path(Path::new("-archive.rar"));
+        assert!(path.is_absolute());
+        assert!(!path.to_string_lossy().starts_with('-'));
     }
 
     #[test]

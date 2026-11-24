@@ -10,7 +10,9 @@
 
 use crate::error::{AcxError, Result};
 use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(windows)]
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -34,6 +36,11 @@ pub struct ExternalOutput {
     pub timed_out: bool,
 }
 
+/// Maximum bytes accepted for one stdin password line. RAR passwords are far
+/// smaller; this prevents a pathological candidate from blocking on a full
+/// pipe before the timeout loop starts.
+const MAX_STDIN_BYTES: usize = 4096;
+
 /// Run `program` with `args`, optionally feeding one line to stdin.
 ///
 /// `stdin` is written followed by `\n`, because UnRAR's password prompt is
@@ -49,6 +56,12 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    if stdin.is_some_and(|input| input.len() > MAX_STDIN_BYTES) {
+        return Err(AcxError::Unsupported(format!(
+            "stdin password exceeds the {MAX_STDIN_BYTES}-byte external-engine limit"
+        )));
+    }
+
     let mut command = Command::new(program);
     command
         .args(args)
@@ -68,6 +81,15 @@ where
         AcxError::External(format!("failed to start {}: {error}", program.display()))
     })?;
 
+    let stdout_thread = child
+        .stdout
+        .take()
+        .map(|pipe| thread::spawn(move || read_capped(pipe)));
+    let stderr_thread = child
+        .stderr
+        .take()
+        .map(|pipe| thread::spawn(move || read_capped(pipe)));
+
     if let Some(input) = stdin {
         if let Some(mut pipe) = child.stdin.take() {
             let mut line = Vec::with_capacity(input.len() + 1);
@@ -79,6 +101,8 @@ where
             // its exit status still provides the real verdict.
             if let Err(error) = write_result {
                 if error.kind() != std::io::ErrorKind::BrokenPipe {
+                    let _ = child.kill();
+                    let _ = child.wait();
                     return Err(AcxError::External(format!(
                         "failed to write password to {}: {error}",
                         program.display()
@@ -90,15 +114,6 @@ where
         // Explicitly close stdin so a prompt cannot wait forever.
         drop(child.stdin.take());
     }
-
-    let stdout_thread = child
-        .stdout
-        .take()
-        .map(|pipe| thread::spawn(move || read_capped(pipe)));
-    let stderr_thread = child
-        .stderr
-        .take()
-        .map(|pipe| thread::spawn(move || read_capped(pipe)));
 
     let deadline = Instant::now().checked_add(timeout);
     let mut timed_out = false;
@@ -119,6 +134,8 @@ where
                 thread::sleep(Duration::from_millis(10));
             }
             Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
                 return Err(AcxError::External(format!(
                     "failed to wait for {}: {error}",
                     program.display()
@@ -207,6 +224,79 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Encode a UTF-8 candidate for a console-oriented external engine.
+///
+/// UnRAR reads a redirected password prompt using the Windows OEM code page,
+/// not UTF-8. Feeding raw UTF-8 silently turns a correct non-ASCII password
+/// into a miss. On other platforms the bytes are passed through unchanged.
+#[cfg(windows)]
+pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    use std::borrow::Cow;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Globalization::{GetOEMCP, WideCharToMultiByte, WC_NO_BEST_FIT_CHARS};
+
+    let text = std::str::from_utf8(input).map_err(|_| {
+        AcxError::Unsupported("RAR external engine only accepts UTF-8 candidate text".to_string())
+    })?;
+    let code_page = unsafe { GetOEMCP() };
+    if code_page == 65001 {
+        return Ok(Cow::Borrowed(input));
+    }
+
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.is_empty() {
+        return Ok(Cow::Owned(Vec::new()));
+    }
+    let wide_len = i32::try_from(wide.len()).map_err(|_| {
+        AcxError::Unsupported("RAR password is too long for the external engine".to_string())
+    })?;
+
+    let mut used_default = 0i32;
+    let needed = unsafe {
+        WideCharToMultiByte(
+            code_page,
+            WC_NO_BEST_FIT_CHARS,
+            wide.as_ptr(),
+            wide_len,
+            null_mut(),
+            0,
+            null(),
+            &mut used_default,
+        )
+    };
+    if needed <= 0 {
+        return Err(AcxError::External(format!(
+            "failed to encode RAR password for OEM code page {code_page}"
+        )));
+    }
+
+    let mut output = vec![0u8; needed as usize];
+    let written = unsafe {
+        WideCharToMultiByte(
+            code_page,
+            WC_NO_BEST_FIT_CHARS,
+            wide.as_ptr(),
+            wide_len,
+            output.as_mut_ptr(),
+            needed,
+            null(),
+            &mut used_default,
+        )
+    };
+    if written != needed || used_default != 0 {
+        return Err(AcxError::Unsupported(format!(
+            "RAR password contains characters not representable in OEM code page {code_page}"
+        )));
+    }
+    Ok(Cow::Owned(output))
+}
+
+/// On non-Windows platforms, pass candidate bytes through unchanged.
+#[cfg(not(windows))]
+pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    Ok(std::borrow::Cow::Borrowed(input))
+}
+
 /// Drain a pipe, retaining at most [`MAX_CAPTURE_BYTES`].
 fn read_capped(mut reader: impl Read) -> Vec<u8> {
     let mut kept = Vec::new();
@@ -237,6 +327,14 @@ mod tests {
         let output = read_capped(Cursor::new(input));
         assert_eq!(output.len(), MAX_CAPTURE_BYTES);
         assert!(output.iter().all(|byte| *byte == b'x'));
+    }
+
+    #[test]
+    fn ascii_password_is_unchanged_by_console_encoding() {
+        assert_eq!(
+            encode_password(b"P@ssw0rd").expect("ASCII").as_ref(),
+            b"P@ssw0rd"
+        );
     }
 
     #[cfg(windows)]

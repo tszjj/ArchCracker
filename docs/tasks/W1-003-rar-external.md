@@ -26,8 +26,9 @@ acx -f encrypted.rar -m dict -d dict.txt -t 4
 - 候选验证：`unrar t -idq -p archive`，密码写 stdin；退出 0 → Hit，11 → Miss，其他 → `AcxError::External`。
 - CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；未安装引擎时退出 3 并提示安装/`ACX_UNRAR`。
 - 测试：
-  - 纯函数：预检/测试退出码分类；
-  - 本地集成（仅当 `UnRAR.exe` + `Rar.exe` 可用时运行，CI 无则跳过）：生成 RAR4/RAR5 文件加密样本，验证 CLI 正确/错误字典、头加密预检；
+  - 纯函数：预检/测试参数、路径绝对化、缺失引擎、external 超时/截断；
+  - 本地集成（仅当 `UnRAR.exe` + `Rar.exe` 可用时运行，CI 无则跳过）：生成 RAR5 文件加密样本，验证 CLI 正确/错误字典、ASCII/Unicode 密码、未加密归档；
+  - 头加密 `-hp` 本机手工验证；RAR4 真实样本未取得，代码路径与 magic 已覆盖但端到端未验证。
   - 缺失引擎错误路径（使用不存在的显式路径）。
 
 ## 非目标
@@ -53,11 +54,11 @@ cargo test --workspace
 
 ## 结果
 
-- 新增 `engines::external`：`ACX_UNRAR` / PATH / `%ProgramFiles%\WinRAR` 发现；stdin 单行密码；stdout/stderr 截断；超时 kill；`CREATE_NO_WINDOW`。
+- 新增 `engines::external`：`ACX_UNRAR` / PATH / `%ProgramFiles%\WinRAR` 发现；stdin 单行密码；stdout/stderr 截断；超时 kill；`CREATE_NO_WINDOW`；Windows 下按 OEM 代码页编码非 ASCII 密码（不可表示时返回明确 `Unsupported`，不再静默 Miss）。
 - 新增 `archive::rar`：RAR4/RAR5 magic、`RarSession`/`RarFactory`、整包 `unrar t` 验证；预检用 `t -p-` 区分未加密/加密，再用 `l -p-` 覆盖头加密；退出码 0/11/其他映射为 Hit/Miss/External。
-- `ArchiveInfo` 增加 `whole_archive`，CLI 显示 “whole archive (external RAR test)”；按格式选择 ZIP/RAR factory。
+- `ArchiveInfo` 增加 `whole_archive`，CLI 显示 “whole archive (external RAR test)”；按格式选择 ZIP/RAR factory；归档路径绝对化，避免以 `-` 开头被 UnRAR 当作开关。
 - 密码不进 argv：参数只为 `-p`（无值），密码写 stdin；单测断言参数不含测试密码；日志/错误只带 UnRAR stderr 摘要。
-- 测试：core 37（含 RAR magic、参数安全、缺失引擎、external 截断/超时 kill）+ CLI 4 + 集成 7（ZIP 6 + RAR 1）+ FFI 2。RAR 集成测试仅在本地存在 `UnRAR.exe` + `Rar.exe` 时运行，CI 无引擎时明确 skip。
-- 手工验证（WinRAR 7.22 / RAR5）：文件加密命中/错误字典、头加密命中、未加密 exit 3、缺失引擎 exit 3、密码不在 argv。
+- 测试：core 39（含 RAR magic、参数安全/路径绝对化、缺失引擎、external 截断/超时、ASCII 编码）+ CLI 4 + 集成 8（ZIP 6 + RAR 2）+ FFI 2。RAR 集成测试仅在本地存在 `UnRAR.exe` + `Rar.exe` 时运行，CI 无引擎时明确 skip。
+- 手工验证（WinRAR 7.22 / RAR5）：文件加密命中/错误字典、头加密命中、中文密码命中、未加密 exit 3、缺失引擎 exit 3、密码不在 argv。
 - 验证命令：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、`cargo +1.89 test --workspace --locked`、`cargo deny check licenses bans sources`。
-- 未验证：RAR4 真实样本、RAR5 非 ASCII/含换行密码、缺卷/损坏分类、大归档、真实超时 kill、Linux/macOS 实际 RAR（CI 无引擎）。
+- 未验证：RAR4 真实样本、RAR5 其他代码页/emoji 密码、缺卷/损坏分类、大归档、真实超时 kill、Linux/macOS 实际 RAR（CI 无引擎）。

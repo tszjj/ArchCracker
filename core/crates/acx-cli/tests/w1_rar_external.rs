@@ -7,7 +7,7 @@
 //! test is skipped when WinRAR/UnRAR or `Rar.exe` is unavailable. No sample
 //! archive is committed. CI intentionally has no RAR engine dependency.
 
-use acx_core::engines::external::{find_unrar, run};
+use acx_core::engines::external::{encode_password, find_unrar, run};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -82,21 +82,15 @@ fn local_rar() -> Option<PathBuf> {
     Some(rar)
 }
 
-fn create_rar(rar: &Path, archive: &Path, file: &Path, password: bool) -> bool {
+fn create_rar(rar: &Path, archive: &Path, file: &Path, password: Option<&[u8]>) -> bool {
     let mut args: Vec<OsString> = vec!["a".into(), "-ep1".into()];
-    if password {
+    if password.is_some() {
         args.push("-p".into());
     }
     args.push(archive.as_os_str().to_os_string());
     args.push(file.as_os_str().to_os_string());
 
-    let output = run(
-        rar,
-        args,
-        password.then_some(PASSWORD.as_bytes()),
-        std::time::Duration::from_secs(60),
-    )
-    .expect("run Rar.exe");
+    let output = run(rar, args, password, std::time::Duration::from_secs(60)).expect("run Rar.exe");
     if output.code != Some(0) {
         eprintln!(
             "Rar.exe returned {:?}: {}",
@@ -132,11 +126,11 @@ fn local_rar_external_cli() {
     write_dictionary(&miss_dict, &["wrong1", "wrong2"]);
 
     assert!(
-        create_rar(&rar, &encrypted, &hello, true),
+        create_rar(&rar, &encrypted, &hello, Some(PASSWORD.as_bytes())),
         "Rar.exe must create an encrypted fixture"
     );
     assert!(
-        create_rar(&rar, &plain, &hello, false),
+        create_rar(&rar, &plain, &hello, None),
         "Rar.exe must create an unencrypted fixture"
     );
 
@@ -190,4 +184,45 @@ fn local_rar_external_cli() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn local_rar_unicode_password() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let password = "中文密码";
+    let Ok(encoded) = encode_password(password.as_bytes()) else {
+        eprintln!("skipping Unicode RAR test: active OEM code page cannot represent the fixture");
+        return;
+    };
+
+    let temp = TempDir::new("unicode");
+    let hello = temp.join("hello.txt");
+    let archive = temp.join("unicode.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    write_dictionary(&dictionary, &["wrong", password]);
+    assert!(
+        create_rar(&rar, &archive, &hello, Some(encoded.as_ref())),
+        "Rar.exe must create a Unicode-password fixture"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&archive)
+        .args(["-d"])
+        .arg(&dictionary)
+        .args(["-t", "1"])
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+    assert!(stdout.contains(password), "stdout: {stdout}");
 }

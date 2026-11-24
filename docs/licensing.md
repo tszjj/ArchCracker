@@ -25,6 +25,7 @@
 | `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 是 | 源码依赖 |
 | `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `crc32fast` / `thiserror` / `clap` | 校验/错误/CLI | MIT OR Apache-2.0 | 是 | 源码依赖 |
+| `windows-sys`（仅 Windows） | OEM 代码页转换 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | Avalonia | 桌面 UI | MIT | 是 | NuGet |
 | .NET Runtime | 桌面运行时 | MIT | 是 | 自包含发布 |
 | `unrar-rs` | RAR 解码（仅本地实验） | Apache-2.0 + unRAR restriction | 受限 | 不是依赖、默认不启用、不分发 |

@@ -8,4 +8,4 @@
 
 pub mod external;
 
-pub use external::{find_unrar, run, ExternalOutput, DEFAULT_TIMEOUT};
+pub use external::{encode_password, find_unrar, run, ExternalOutput, DEFAULT_TIMEOUT};
