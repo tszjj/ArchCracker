@@ -77,7 +77,7 @@
 
 **目标**：覆盖 RAR/分卷/SFX/快筛/爆破，Windows CLI 达到 beta。
 
-- [x] RAR 外部引擎：随包/用户路径 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003）
+- [x] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003；Full 随包 W4）
 - [ ] hashcat GPU 后端 spike：ZIP AES 13600 + RAR5 13000 提 hash；外部进程；CPU 回退（见 `docs/tasks/W2-001-hashcat-spike.md`）
 - [ ] 分卷：7z/ZIP `.001` 拼接；RAR 交外部引擎；缺卷检测
 - [ ] SFX：PE overlay 扫描；数据区偏移

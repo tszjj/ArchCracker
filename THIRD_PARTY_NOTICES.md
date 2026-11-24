@@ -1,6 +1,6 @@
 # 第三方组件声明
 
-本文件列出随 ArchCracker 分发或构建时使用的第三方组件。发布前由 CI 生成完整清单（`cargo about` / `cargo deny`），本文件保留人工摘要。
+本文件列出随 ArchCracker 分发或构建时使用的第三方组件。发布前由 CI 生成完整清单（`cargo about` / `cargo deny`），本文件保留人工摘要。许可明细以 [`docs/licensing.md`](docs/licensing.md) 与 [ADR-0004](docs/adr/0004-bundled-engines.md) 为准。
 
 ## 当前源码依赖（W1-003）
 
@@ -22,7 +22,7 @@
 | `UnRAR.exe`（未修改） | RAR4/RAR5 测试/解压 | UnRAR License（非 OSI） | Full 安装包 `third_party/unrar/`，附 license.txt，仅进程 |
 | hashcat（固定版本） | GPU 字典后端 | MIT + 第三方声明 | Full 安装包 `third_party/hashcat/`，仅进程 |
 
-> Full 版只有一个安装包，不分层。UnRAR/hashcat 的版本、来源、SHA-256 记录在 `third_party/manifest.json`；构建/发布按清单获取，运行时不在线更新。
+> Full 版只有一个安装包，不分层。UnRAR/hashcat 的版本、来源、SHA-256 记录在 `third_party/manifest.json`；构建/发布按清单获取，运行时不在线更新。hashcat 分发包内的 OpenCL loader/压缩库按其各自许可声明。
 
 ## 计划引入（需在 PR 中更新）
 

@@ -11,7 +11,7 @@ Windows 最终成品的目标是**开箱可用**，不再提供“基础版/Full
 
 已确认：
 
-- **UnRAR 许可第 3 条**允许将未修改的 UnRAR utility 放入其他软件包分发；限制是不得开发 RAR 兼容压缩器、不得反向工程 RAR 压缩算法。
+- **UnRAR 许可第 3 条**允许将未修改的 UnRAR utility 放入其他软件包分发；限制是不得用于开发 RAR 兼容压缩器，不得重建 RAR 压缩算法。
 - **hashcat 为 MIT**，允许随包，但必须附版权/许可文本并审计其第三方组件。
 - **WinRAR 的 EULA**禁止把试用版安装包塞进其他软件包；因此只随包独立 `UnRAR.exe`，不随包 `WinRAR.exe`/`Rar.exe`。
 - CUDA/HIP/GPU 驱动属于系统环境，不能随包；hashcat 随包不等于 GPU 在所有机器上可用。
@@ -25,10 +25,10 @@ ADR-0003 的“不随包”是当时的保守边界，已不满足开箱目标�
 3. **随包 hashcat 二进制**：放在 `third_party/hashcat/`，附 MIT 许可与第三方声明；只通过外部进程调用。
 4. **hashcat 不是核心 Rust 依赖**：`Cargo.toml`/`Cargo.lock` 不出现 hashcat、CUDA、HIP、OpenCL 绑定；不把 hashcat 源码/内核复制进 `acx-core`。
 5. **CPU 是一等路径**：hashcat 缺失、损坏、无可用 GPU、驱动不满足或用户禁用 GPU 时，必须自动回落现有多线程 CPU 调度；CPU 的 ZIP/7z/外部 RAR 功能与不带 hashcat 时完全一致。
-6. **不随包**：`WinRAR.exe`、`Rar.exe`、CUDA Toolkit、HIP SDK、Intel NEO、GPU 驱动。仅提示用户安装/升级系统驱动。
+6. **不随包**：`WinRAR.exe`、`Rar.exe`、厂商 GPU 运行时/驱动（CUDA Toolkit、HIP SDK、Intel NEO、NVIDIA/AMD/Intel 驱动）。仅提示用户安装/升级系统驱动；hashcat 分发包自带的 OpenCL loader/压缩库随 hashcat 组件按其声明分发。
 7. **固定版本与可验证**：UnRAR 与 hashcat 固定版本、SHA-256、来源 URL 记入 `third_party/manifest.json`；发布流水线按清单取包，不在运行时自动下载。
-8. **许可与安装器**：`THIRD_PARTY_NOTICES.md`、`LICENSE`、`NOTICE`、UnRAR license、hashcat MIT/第三方声明随安装包分发；默认不启用遥测/联网。
-9. **发现顺序**：随包路径优先，其次 `ACX_UNRAR`/`ACX_HASHCAT`、PATH、用户手动指定；不得静默使用来源不明的同名程序。
+8. **许可与安装器**：`THIRD_PARTY_NOTICES.md`、`LICENSE`、`NOTICE`、UnRAR license、hashcat MIT/分发包内第三方声明随安装包分发；默认不启用遥测/联网。
+9. **发现顺序（canonical）**：随包路径（按 manifest 校验 SHA-256）→ `ACX_UNRAR`/`ACX_HASHCAT` → `%ProgramFiles%\WinRAR`/注册表 → `PATH` → 用户手动指定。`PATH`/用户路径是兼容 fallback，UI 显示实际路径，不视为随包组件；随包路径哈希不匹配时明确报错，不静默回退到来源不明程序。
 10. **发布门禁**：Full 安装包必须通过 Defender/SmartScreen 检查、许可审计、无 GPU 环境冒烟、`cargo tree` 无 hashcat/GPU 依赖检查。
 
 ## 备选

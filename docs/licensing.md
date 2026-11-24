@@ -55,7 +55,7 @@ UnRAR 许可不是 OSI 自由许可，安装包必须在 NOTICE/THIRD_PARTY_NOTI
 
 - Full 版随包固定版本 hashcat 二进制，附 MIT 许可与第三方声明；hashcat 只通过外部进程调用。
 - hashcat **不是核心 Rust 依赖**：`Cargo.toml`/`Cargo.lock` 不出现 hashcat、CUDA/HIP/OpenCL 绑定。
-- 不随包 CUDA Toolkit、HIP SDK、Intel NEO 或 GPU 驱动；这些由用户系统提供，hashcat 检测后使用。
+- 不随包厂商 GPU 运行时/驱动（CUDA Toolkit、HIP SDK、Intel NEO、GPU 驱动）；这些由用户系统提供。hashcat 分发包自带的 OpenCL loader/压缩库随 hashcat 组件按其 MIT/第三方声明分发。
 - 无 hashcat、无 GPU 或用户禁用 GPU 时，CPU 多线程路径必须完整可用，功能不降级。
 - hashcat 的版本/哈希/来源与 UnRAR 一样固定，运行时不在线更新。
 

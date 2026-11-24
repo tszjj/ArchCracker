@@ -24,7 +24,7 @@ acx -f encrypted.rar -m dict -d dict.txt -t 4
   - 退出 11 → 加密；再 `unrar l -p- -idq` 区分非头加密/头加密；
   - 其他退出码 → 归档/引擎错误。
 - 候选验证：`unrar t -idq -p archive`，密码写 stdin；退出 0 → Hit，11 → Miss，其他 → `AcxError::External`。
-- CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；未安装引擎时退出 3 并提示安装/`ACX_UNRAR`。
+- CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；引擎缺失/损坏时退出 3 并提示修复安装/选择 `UnRAR.exe`/`ACX_UNRAR`（W1 代码不含随包路径，W4 加）。
 - 测试：
   - 纯函数：预检/测试参数、路径绝对化、缺失引擎、external 超时/截断；
   - 本地集成（仅当 `UnRAR.exe` + `Rar.exe` 可用时运行，CI 无则跳过）：生成 RAR5 文件加密样本，验证 CLI 正确/错误字典、ASCII/Unicode 密码、未加密归档；

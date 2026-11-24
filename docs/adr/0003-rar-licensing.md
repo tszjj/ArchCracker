@@ -11,7 +11,7 @@
 
 项目采用 **Apache-2.0**。RAR 解压本身是 unRAR 许可允许的用途，不违反 RAR 协议；Apache-2.0 也不存在 GPL 的 copyleft 冲突。
 
-但 unRAR 许可仍有自身限制（不得开发 RAR 兼容压缩器、反向工程限制等），且 RAR 解码事实标准是 RARLAB 的 UnRAR/`unrar` 二进制。
+但 UnRAR 许可仍有自身限制（不得开发 RAR 兼容压缩器、不得重建 RAR 压缩算法等），且 RAR 解码事实标准是 RARLAB 的 UnRAR/`unrar` 二进制。
 
 ## 决策
 
@@ -21,7 +21,7 @@
 4. 自研 clean-room RAR 头/密钥派生验密仅用于快速判错（不复制 unrar 代码）；命中后交外部 `unrar` 完整解压确认。
 5. 其他平台（Linux/macOS/Android/HarmonyOS）当前 **Deferred**；未来同样只走外部引擎或独立许可 add-on。
 6. `unrar-rs` 仅本地实验，不是依赖、默认不启用、不随发布物。
-7. UI 在 RAR 引擎不可用时明确提示“未检测到 RAR 引擎”，引导使用随包 `UnRAR.exe`、安装 WinRAR 或指定路径，而不是报“密码错误”。
+7. UI 在 RAR 引擎不可用时明确提示“未检测到 RAR 引擎”，引导“修复安装/选择 `UnRAR.exe`/安装独立 UnRAR”，而不是报“密码错误”；不要求用户安装 WinRAR。
 
 > Full 版的随包策略、版本固定、hashcat 与 CPU 回退见 ADR-0004；本 ADR 不再把“不随包”作为目标。
 

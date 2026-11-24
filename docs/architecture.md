@@ -3,7 +3,7 @@
 > 状态：Accepted（M0 基线） · 更新：2026-11-24
 >
 > **排期：Windows 全栈优先（W0–W5）。** 其他平台的接口保留，但 D1–D3 为 Deferred；本文的跨平台设计不等于当前迭代范围。
-> 相关：[ADR-0001 Rust 内核](adr/0001-rust-core.md) · [ADR-0002 前端拆分](adr/0002-frontend-split.md) · [ADR-0003 RAR 许可](adr/0003-rar-licensing.md)
+> 相关：[ADR-0001 Rust 内核](adr/0001-rust-core.md) · [ADR-0002 前端拆分](adr/0002-frontend-split.md) · [ADR-0003 RAR 许可](adr/0003-rar-licensing.md) · [ADR-0004 Full 随包](adr/0004-bundled-engines.md)
 
 ## 1. 目标与约束
 
@@ -103,7 +103,7 @@
 5. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
 6. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-W1-003 已实现 `engines::external` + `archive::rar`：Windows 优先使用随包 `UnRAR.exe`，其次用户路径；密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
+W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
 
 ### 4.4 hashcat GPU 后端（可选，外部进程）
 

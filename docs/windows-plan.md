@@ -87,7 +87,7 @@ UnRAR.exe x -p "<archive>" "<out>" # 命中后确认/解压
 
 ### 5.3 性能策略
 
-- Full 版随包 hashcat；RAR5/7z/ZIP AES 优先走 hashcat（Rust 提 hash），RAR 外部 `t` 只做最终复核。
+- Full 版随包 hashcat；RAR5/ZIP AES 优先走 hashcat（Rust 提 hash），7z 在 W2 spike 之后；RAR 外部 `t` 只做最终复核。
 - hashcat 不是 Cargo 依赖；无 GPU/驱动不满足/hashcat 缺失时，CPU 多线程 + 外部 UnRAR 保持完整功能。
 - RAR4/5 的 KDF 无法绕过；快筛只省“解压/进程”，不省 KDF。
 - 桌面 RAR 的 p/s 目标按基准实测写，不引用未复现数字。
