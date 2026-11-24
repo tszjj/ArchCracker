@@ -28,21 +28,25 @@ rar a -ma4 -ep1 -p encrypted-rar4.rar hello.txt
 1. **RAR4 缺少密码时 `t -p-` 返回 3，不是 11**。UnRAR 输出
    `Checksum error in the encrypted file ... Corrupt file or wrong password.`；
    RAR5 才返回 11。
-2. RAR4 文件加密时 `l -p-` 返回 0，清单中加密条目以行首 `*` 标记；头加密时 `l -p-` 返回 3。
+2. RAR4 文件加密时 `l -p-` 返回 0，清单中加密条目以行首 `*` 标记；头加密时 `l -p-`
+   返回 3，且主头 flags（偏移 10..12）含 `0x0080`（`MHD_PASSWORD`）。
 3. **RAR4 错误密码的候选测试也返回 3**，不是 11；原实现会把每个错误候选当成外部错误中止。
-4. `l -idq` 会完全抑制清单输出，拿不到 `*` 标记。
+4. `l -idq` 会完全抑制清单输出，拿不到 `*` 标记；去掉后输出仍受 64 KiB 截断保护。
+5. **未加密但损坏的 RAR4** 也可能让 `l -p-` 返回 3，但主头 flags 不含 `0x0080`；
+   预检必须用该标志区分“头加密”和“损坏”。
 
 ## 范围
 
 - `core/crates/acx-core/src/archive/rar.rs`
-  - 预检新增 RAR4 exit 3 分支：`l -p-` 成功且带 `*` 标记 → 加密；`l -p-` 返回 3 → 头加密；
-    可见但无标记 → 视为损坏而非静默攻击。
+  - 预检新增 RAR4 exit 3 分支：`l -p-` 成功且带 `*` 标记 → 文件加密；`l -p-` 返回 3 且
+    RAR4 主头 flags 含 `0x0080` → 头加密；其余一律按损坏报错，不进入字典。
   - `listing_args()` 去掉 `-idq`，保留清单输出用于 `*` 标记；输出仍受 64 KiB 截断保护。
   - `classify_test_exit()`：RAR4 exit 3 → Miss；RAR5 exit 3 仍为 External。
-  - 新增 3 个单元测试：RAR4/RAR5 退出码分类、`*` 标记识别。
+  - 新增 4 个单元测试：RAR4/RAR5 退出码分类、RAR4 主头 flags、`*` 标记识别。
 - `core/crates/acx-cli/tests/w1_rar_external.rs`
   - `create_rar` 支持附加开关；新增 `local_rar4_external_cli`：
-    生成 `-ma4` 加密/未加密样本，断言 RAR4 magic，验证命中、错误字典、未加密三种退出码。
+    生成 `-ma4` 加密/未加密样本，断言 RAR4 magic，验证命中、错误字典、未加密退出码；
+    翻转未加密 RAR4 尾部字节，断言损坏归档 exit 3、不显示 `Encryption: rar`、不跑字典。
 - 文档：本任务、W1-003 状态、PROJECT-GUIDE、README、AGENTS、roadmap、windows-plan。
 
 ## 验收
@@ -65,21 +69,23 @@ cargo test --workspace --locked
 - `cargo fmt --all -- --check`：通过。
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`：通过。
 - `cargo test --workspace --locked`：
-  - `acx-core` 单元 45（原 42，新增 3）；
+  - `acx-core` 单元 46（原 42，新增 4）；
   - CLI 单元 4；
-  - 集成 9（ZIP 6 + RAR 3：RAR5、RAR4、Unicode）；
+  - 集成 9（ZIP 6 + RAR 3：RAR5、RAR4、Unicode；RAR4 内含损坏回归）；
   - FFI 2。
 - 本机 RAR 集成实际执行 3 个测试，均通过（未跳过）。
 - 手工验证（WinRAR 6.24）：
   - RAR4 文件加密：hit exit 0、miss exit 1；
   - RAR4 `-hp` 头加密：hit exit 0、miss exit 1；
   - RAR4 未加密：exit 3；
+  - 损坏的未加密 RAR4：exit 3，提示 listing 失败，不显示 `Encryption: rar`、不进入字典；
   - 归档 magic 与 `Format: rar4` 均正确。
 
 ## 未验证 / 风险
 
-- **RAR4 exit 3 语义不唯一**：损坏归档也可能返回 3。当前把它当 Miss；正确密码但数据损坏会表现为
-  找不到密码，而不是明确“归档损坏”。RAR5 的 3 仍按 External 处理。完整错误分类留 W2。
+- **RAR4 exit 3 语义不唯一**：预检已用主头 `0x0080` 标志把“头加密”和“可见但损坏”分开；
+  但候选阶段若密码正确而数据损坏，UnRAR 仍返回 3，当前按 Miss，最终可能显示 `NOT FOUND`
+  而不是明确“归档损坏”。RAR5 的 3 仍按 External 处理。完整错误分类留 W2。
 - 预检依赖 `l -p-` 输出中的 `*` 标记；这是 RAR 控制台标记，不是本地化文本，但仍需在更多
   WinRAR/UnRAR 版本上回归。
 - RAR4 分卷/SFX、不同代码页密码、超大归档未覆盖。

@@ -281,6 +281,34 @@ fn local_rar4_external_cli() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+
+    let corrupt = temp.join("corrupt-rar4.rar");
+    let mut bytes = std::fs::read(&plain).expect("read plain RAR4 fixture");
+    *bytes.last_mut().expect("non-empty RAR4 fixture") ^= 0xff;
+    std::fs::write(&corrupt, &bytes).expect("write corrupt RAR4 fixture");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&corrupt)
+        .args(["-d"])
+        .arg(&hit_dict)
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "corrupt RAR4 must exit 3\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !stdout.contains("Encryption: rar"),
+        "corrupt RAR4 must not be classified as encrypted\nstdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("NOT FOUND"),
+        "corrupt RAR4 must not run the dictionary\nstdout: {stdout}"
+    );
 }
 
 #[test]

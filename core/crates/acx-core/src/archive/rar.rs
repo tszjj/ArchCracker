@@ -14,6 +14,7 @@ use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::engines::external::{self, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -248,8 +249,8 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
         Some(3) if format == ArchiveFormat::Rar4 => {
             // RAR4 uses exit 3 for a missing/wrong password. A successful
             // listing then marks encrypted entries with `*`; a failed listing
-            // means encrypted headers. A visible, unmarked listing is treated
-            // as a damaged archive rather than silently attacking it.
+            // is only trusted as header encryption when the RAR4 main-header
+            // flag says so. Otherwise the archive is damaged, not encrypted.
             let listing = external::run(engine, listing_args(path), None, DEFAULT_TIMEOUT)?;
             if listing.timed_out {
                 return Err(AcxError::External(format!(
@@ -258,7 +259,7 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
                 )));
             }
             match listing.code {
-                Some(3) => Ok(encrypted_info(path, format)),
+                Some(3) if rar4_header_encrypted(path)? => Ok(encrypted_info(path, format)),
                 Some(0) if listing_marks_encrypted(&listing.stdout) => {
                     Ok(encrypted_info(path, format))
                 }
@@ -268,6 +269,28 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
         }
         _ => Err(engine_failure("preflight", &test)),
     }
+}
+
+/// RAR4 main-header flag for encrypted headers (`MHD_PASSWORD`).
+const RAR4_MAIN_HEADER_ENCRYPTED: u16 = 0x0080;
+
+/// Read the unencrypted RAR4 main header and check its header-encryption flag.
+///
+/// RAR4 writes the marker, block CRC, block type, and flags before encrypting
+/// the rest of the header, so these 12 bytes remain readable even for `-hp`.
+fn rar4_header_encrypted(path: &Path) -> Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header)?;
+    Ok(rar4_header_is_encrypted(&header))
+}
+
+fn rar4_header_is_encrypted(header: &[u8]) -> bool {
+    if header.len() < 12 || !header.starts_with(b"Rar!\x1a\x07\x00") || header[9] != 0x73 {
+        return false;
+    }
+    let flags = u16::from_le_bytes([header[10], header[11]]);
+    flags & RAR4_MAIN_HEADER_ENCRYPTED != 0
 }
 
 fn encrypted_info(path: &Path, format: ArchiveFormat) -> ArchiveInfo {
@@ -408,6 +431,23 @@ mod tests {
     #[test]
     fn rar5_corrupt_archive_exit_is_not_a_miss() {
         assert_eq!(classify_test_exit(ArchiveFormat::Rar5, Some(3)), None);
+    }
+
+    #[test]
+    fn rar4_main_header_flag_detects_header_encryption() {
+        let mut header = [0u8; 12];
+        header[..7].copy_from_slice(b"Rar!\x1a\x07\x00");
+        header[9] = 0x73;
+        assert!(!rar4_header_is_encrypted(&header));
+
+        header[10] = 0x80;
+        assert!(rar4_header_is_encrypted(&header));
+
+        let mut rar5 = [0u8; 12];
+        rar5[..8].copy_from_slice(b"Rar!\x1a\x07\x01\x00");
+        rar5[9] = 0x73;
+        assert!(!rar4_header_is_encrypted(&rar5));
+        assert!(!rar4_header_is_encrypted(&[]));
     }
 
     #[test]
