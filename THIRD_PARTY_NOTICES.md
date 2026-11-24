@@ -7,7 +7,7 @@
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
 | `zip` | ZIP 读写（`deflate` + `aes-crypto`） | MIT | 源码依赖 |
-| `aes` / `hmac` / `pbkdf2` / `sha1` / `constant_time_eq` / `zeroize` / `getrandom` | `zip` 的 WinZip AES 传递依赖 | MIT OR Apache-2.0 | 源码依赖 |
+| `aes` / `hmac` / `pbkdf2` / `sha1` / `block-buffer` / `cipher` / `cmov` / `const-oid` / `cpubits` / `cpufeatures` / `crypto-common` / `ctutils` / `digest` / `hybrid-array` / `inout` / `typenum` / `zeroize` / `zeroize_derive` / `getrandom` / `constant_time_eq` | `zip` 的 WinZip AES 传递依赖 | MIT OR Apache-2.0；`constant_time_eq` 为 CC0-1.0 OR MIT-0 OR Apache-2.0 | 源码依赖 |
 | `crc32fast` | CRC32 校验 | MIT OR Apache-2.0 | 源码依赖 |
 | `thiserror` | 错误类型 | MIT OR Apache-2.0 | 源码依赖 |
 | `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 源码依赖 |
