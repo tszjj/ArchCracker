@@ -1,6 +1,9 @@
 # local sample tools used for the initial analysis — never commit
 /解密*/
 
+# local WinRAR installer used to generate RAR4 fixtures — never commit
+/winrar-x64-*.exe
+
 
 # local toolchains / caches
 /.tools/

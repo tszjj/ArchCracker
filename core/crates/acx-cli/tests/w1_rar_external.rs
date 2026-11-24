@@ -82,8 +82,15 @@ fn local_rar() -> Option<PathBuf> {
     Some(rar)
 }
 
-fn create_rar(rar: &Path, archive: &Path, file: &Path, password: Option<&[u8]>) -> bool {
+fn create_rar(
+    rar: &Path,
+    archive: &Path,
+    file: &Path,
+    password: Option<&[u8]>,
+    extra_switches: &[&str],
+) -> bool {
     let mut args: Vec<OsString> = vec!["a".into(), "-ep1".into()];
+    args.extend(extra_switches.iter().map(OsString::from));
     if password.is_some() {
         args.push("-p".into());
     }
@@ -126,11 +133,11 @@ fn local_rar_external_cli() {
     write_dictionary(&miss_dict, &["wrong1", "wrong2"]);
 
     assert!(
-        create_rar(&rar, &encrypted, &hello, Some(PASSWORD.as_bytes())),
+        create_rar(&rar, &encrypted, &hello, Some(PASSWORD.as_bytes()), &[]),
         "Rar.exe must create an encrypted fixture"
     );
     assert!(
-        create_rar(&rar, &plain, &hello, None),
+        create_rar(&rar, &plain, &hello, None, &[]),
         "Rar.exe must create an unencrypted fixture"
     );
 
@@ -187,6 +194,130 @@ fn local_rar_external_cli() {
 }
 
 #[test]
+fn local_rar4_external_cli() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+
+    let temp = TempDir::new("rar4");
+    let hello = temp.join("hello.txt");
+    let encrypted = temp.join("encrypted-rar4.rar");
+    let plain = temp.join("plain-rar4.rar");
+    let hit_dict = temp.join("hit.txt");
+    let miss_dict = temp.join("miss.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    write_dictionary(&hit_dict, &["wrong1", PASSWORD, "wrong2"]);
+    write_dictionary(&miss_dict, &["wrong1", "wrong2"]);
+
+    assert!(
+        create_rar(
+            &rar,
+            &encrypted,
+            &hello,
+            Some(PASSWORD.as_bytes()),
+            &["-ma4"]
+        ),
+        "Rar.exe must create a RAR4 (-ma4) encrypted fixture"
+    );
+    assert!(
+        create_rar(&rar, &plain, &hello, None, &["-ma4"]),
+        "Rar.exe must create an unencrypted RAR4 fixture"
+    );
+
+    let magic = std::fs::read(&encrypted).expect("read RAR4 fixture");
+    assert!(
+        magic.starts_with(b"Rar!\x1a\x07\x00"),
+        "fixture must use the RAR4 marker, got {:02x?}",
+        &magic[..magic.len().min(8)]
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&encrypted)
+        .args(["-m", "dict", "-d"])
+        .arg(&hit_dict)
+        .args(["-t", "2"])
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("Format: rar4"), "stdout: {stdout}");
+    assert!(stdout.contains("Encryption: rar"), "stdout: {stdout}");
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+    assert!(stdout.contains(PASSWORD), "stdout: {stdout}");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&encrypted)
+        .args(["-d"])
+        .arg(&miss_dict)
+        .args(["-t", "2"])
+        .output()
+        .expect("run acx");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "wrong RAR4 dictionary must exit 1\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&plain)
+        .args(["-d"])
+        .arg(&hit_dict)
+        .output()
+        .expect("run acx");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "unencrypted RAR4 must exit 3\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let corrupt = temp.join("corrupt-rar4.rar");
+    let mut bytes = std::fs::read(&plain).expect("read plain RAR4 fixture");
+    // Corrupt the main-header CRC (offset 7) so `l -p-` fails deterministically
+    // while the RAR4 marker remains readable.
+    *bytes.get_mut(7).expect("RAR4 main header") ^= 0xff;
+    std::fs::write(&corrupt, &bytes).expect("write corrupt RAR4 fixture");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&corrupt)
+        .args(["-d"])
+        .arg(&hit_dict)
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "corrupt RAR4 must exit 3\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !stdout.contains("Encryption: rar"),
+        "corrupt RAR4 must not be classified as encrypted\nstdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("NOT FOUND"),
+        "corrupt RAR4 must not run the dictionary\nstdout: {stdout}"
+    );
+    assert!(
+        stderr.contains("listing failed"),
+        "corrupt RAR4 must fail in preflight listing\nstderr: {stderr}"
+    );
+}
+
+#[test]
 fn local_rar_unicode_password() {
     let Some(rar) = local_rar() else {
         return;
@@ -204,7 +335,7 @@ fn local_rar_unicode_password() {
     std::fs::write(&hello, HELLO).expect("write hello");
     write_dictionary(&dictionary, &["wrong", password]);
     assert!(
-        create_rar(&rar, &archive, &hello, Some(encoded.as_ref())),
+        create_rar(&rar, &archive, &hello, Some(encoded.as_ref()), &[]),
         "Rar.exe must create a Unicode-password fixture"
     );
 

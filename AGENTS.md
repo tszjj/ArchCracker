@@ -45,7 +45,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 - 仓库、许可证、文档、ADR、Agent 协作规范已建立；
 - Windows 用户级工具链（Rust GNU/MinGW、.NET 10、CMake、Ninja、gh）已装好；
 - `core/` 已有可编译的 Rust workspace + C ABI 最小实现，`cargo test` 通过；
-- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（RAR5 端到端验证，RAR4 待真实样本；整包 `t`，密码走 stdin/OEM 编码）；W1-003b 已将预检缓存进 `RarFactory`，worker 不再重复探测。下一步 7z、分卷/断点与 p/s 基准。Windows GUI 尚未开始。Full 版的 UnRAR/hashcat 随包按 ADR-0004 在 W4 落地；其他平台 Deferred。
+- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（整包 `t`，密码走 stdin/OEM 编码）；W1-003b 已将预检缓存进 `RarFactory`，worker 不再重复探测；W1-003c 已在 WinRAR 6.24 下补验 RAR4 `-ma4` 端到端（RAR4/RAR5 均已验证）。下一步 7z、分卷/断点与 p/s 基准。Windows GUI 尚未开始。Full 版的 UnRAR/hashcat 随包按 ADR-0004 在 W4 落地；其他平台 Deferred。
 
 W1 完成前不要提前铺 GUI；移动端 SDK 一律不引入；不要提交未经证实的性能数字。
 

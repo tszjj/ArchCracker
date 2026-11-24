@@ -14,6 +14,7 @@ use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::engines::external::{self, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -88,10 +89,9 @@ impl ArchiveSession for RarSession {
             )));
         }
 
-        match output.code {
-            Some(0) => Ok(PasswordTest::Hit),
-            Some(11) => Ok(PasswordTest::Miss),
-            _ => Err(engine_failure("test", &output)),
+        match classify_test_exit(self.info.format, output.code) {
+            Some(result) => Ok(result),
+            None => Err(engine_failure("test", &output)),
         }
     }
 }
@@ -197,6 +197,20 @@ fn ensure_rar(format: ArchiveFormat) -> Result<()> {
     }
 }
 
+/// Classify one candidate-test exit code for the archive format.
+///
+/// RAR5 reports a wrong password as 11. RAR4 reports the same condition as 3
+/// ("checksum error in the encrypted file"), so 3 is a miss only for RAR4;
+/// for RAR5 it remains an external error because it usually means corruption.
+fn classify_test_exit(format: ArchiveFormat, code: Option<i32>) -> Option<PasswordTest> {
+    match code {
+        Some(0) => Some(PasswordTest::Hit),
+        Some(11) => Some(PasswordTest::Miss),
+        Some(3) if format == ArchiveFormat::Rar4 => Some(PasswordTest::Miss),
+        _ => None,
+    }
+}
+
 /// Probe exit codes and determine whether the archive is encrypted.
 fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<ArchiveInfo> {
     let test = external::run(engine, preflight_args(path), None, DEFAULT_TIMEOUT)?;
@@ -228,19 +242,77 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
                 )));
             }
             match listing.code {
-                Some(0) | Some(11) => Ok(ArchiveInfo {
-                    path: path.to_path_buf(),
-                    format,
-                    encryption: Encryption::Rar,
-                    selected: None,
-                    whole_archive: true,
-                    entries: Vec::new(),
-                }),
+                Some(0) | Some(11) => Ok(encrypted_info(path, format)),
+                _ => Err(engine_failure("listing", &listing)),
+            }
+        }
+        Some(3) if format == ArchiveFormat::Rar4 => {
+            // RAR4 uses exit 3 for a missing/wrong password. A successful
+            // listing then marks encrypted entries with `*`; a failed listing
+            // is only trusted as header encryption when the RAR4 main-header
+            // flag says so. Otherwise the archive is damaged, not encrypted.
+            let listing = external::run(engine, listing_args(path), None, DEFAULT_TIMEOUT)?;
+            if listing.timed_out {
+                return Err(AcxError::External(format!(
+                    "UnRAR listing timed out after {:?}",
+                    DEFAULT_TIMEOUT
+                )));
+            }
+            match listing.code {
+                Some(3) if rar4_header_encrypted(path)? => Ok(encrypted_info(path, format)),
+                Some(0) if listing_marks_encrypted(&listing.stdout) => {
+                    Ok(encrypted_info(path, format))
+                }
+                Some(0) => Err(engine_failure("preflight", &test)),
                 _ => Err(engine_failure("listing", &listing)),
             }
         }
         _ => Err(engine_failure("preflight", &test)),
     }
+}
+
+/// RAR4 main-header flag for encrypted headers (`MHD_PASSWORD`).
+const RAR4_MAIN_HEADER_ENCRYPTED: u16 = 0x0080;
+
+/// Read the unencrypted RAR4 main header and check its header-encryption flag.
+///
+/// RAR4 writes the marker, block CRC, block type, and flags before encrypting
+/// the rest of the header, so these 12 bytes remain readable even for `-hp`.
+fn rar4_header_encrypted(path: &Path) -> Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header)?;
+    Ok(rar4_header_is_encrypted(&header))
+}
+
+fn rar4_header_is_encrypted(header: &[u8]) -> bool {
+    if header.len() < 12 || !header.starts_with(b"Rar!\x1a\x07\x00") || header[9] != 0x73 {
+        return false;
+    }
+    let flags = u16::from_le_bytes([header[10], header[11]]);
+    flags & RAR4_MAIN_HEADER_ENCRYPTED != 0
+}
+
+fn encrypted_info(path: &Path, format: ArchiveFormat) -> ArchiveInfo {
+    ArchiveInfo {
+        path: path.to_path_buf(),
+        format,
+        encryption: Encryption::Rar,
+        selected: None,
+        whole_archive: true,
+        entries: Vec::new(),
+    }
+}
+
+/// RAR's console listing prefixes encrypted entries with `*`.
+///
+/// This is only used to tell RAR4's exit-3 "wrong password" apart from a
+/// corrupt but unencrypted archive; sizes, dates, and names are still not
+/// parsed from the localized listing.
+fn listing_marks_encrypted(stdout: &[u8]) -> bool {
+    stdout
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.starts_with(b"*"))
 }
 
 fn preflight_args(path: &Path) -> Vec<OsString> {
@@ -255,11 +327,12 @@ fn preflight_args(path: &Path) -> Vec<OsString> {
 }
 
 fn listing_args(path: &Path) -> Vec<OsString> {
+    // `-idq` suppresses `l` output entirely, including the `*` marker that
+    // distinguishes an encrypted RAR4 entry from a corrupt archive.
     vec![
         "l".into(),
         "-cfg-".into(),
         "-c-".into(),
-        "-idq".into(),
         "-p-".into(),
         command_path(path).into_os_string(),
     ]
@@ -337,6 +410,56 @@ mod tests {
         assert!(password_has_line_break(b"abc\ndef"));
         assert!(password_has_line_break(b"abc\rdef"));
         assert!(!password_has_line_break(b"normal"));
+    }
+
+    #[test]
+    fn rar4_wrong_password_exit_is_a_miss() {
+        assert_eq!(
+            classify_test_exit(ArchiveFormat::Rar4, Some(3)),
+            Some(PasswordTest::Miss)
+        );
+        assert_eq!(
+            classify_test_exit(ArchiveFormat::Rar4, Some(0)),
+            Some(PasswordTest::Hit)
+        );
+        assert_eq!(
+            classify_test_exit(ArchiveFormat::Rar5, Some(11)),
+            Some(PasswordTest::Miss)
+        );
+    }
+
+    #[test]
+    fn rar5_corrupt_archive_exit_is_not_a_miss() {
+        assert_eq!(classify_test_exit(ArchiveFormat::Rar5, Some(3)), None);
+    }
+
+    #[test]
+    fn rar4_main_header_flag_detects_header_encryption() {
+        let mut header = [0u8; 12];
+        header[..7].copy_from_slice(b"Rar!\x1a\x07\x00");
+        header[9] = 0x73;
+        assert!(!rar4_header_is_encrypted(&header));
+
+        header[10] = 0x80;
+        assert!(rar4_header_is_encrypted(&header));
+
+        let mut rar5 = [0u8; 12];
+        rar5[..8].copy_from_slice(b"Rar!\x1a\x07\x01\x00");
+        rar5[9] = 0x73;
+        assert!(!rar4_header_is_encrypted(&rar5));
+        assert!(!rar4_header_is_encrypted(&[]));
+    }
+
+    #[test]
+    fn listing_marker_identifies_encrypted_rar4_entries() {
+        assert!(listing_marks_encrypted(
+            b" Attributes      Size     Date    Time   Name\n\
+              *   I.A....        24  2026-11-24 22:29  hello.txt\n"
+        ));
+        assert!(!listing_marks_encrypted(
+            b" Attributes      Size     Date    Time   Name\n\
+                  I.A....        24  2026-11-24 22:29  hello.txt\n"
+        ));
     }
 
     #[test]
