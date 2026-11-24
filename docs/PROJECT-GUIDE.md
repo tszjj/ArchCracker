@@ -171,7 +171,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | ZIP ZipCrypto + 字典 + 多线程 CLI | ✅ 完成 | W1-001；命中由 ZIP 引擎完整验证 |
 | ZIP WinZip AES-128/192/256 | ✅ 完成 | W1-002；AE-1/AE-2；7-Zip 差分待补 |
 | RAR5 外部 UnRAR | ✅ 完成 | W1-003；整包 `t`，密码走 stdin；RAR5 已端到端验证 |
-| RAR4 外部 UnRAR | ✅ 完成 | W1-003c；WinRAR 6.24 生成 `-ma4` 样本，文件加密/头加密/未加密均验证 |
+| RAR4 外部 UnRAR | ✅ 完成 | W1-003c；WinRAR 6.24 生成 `-ma4` 样本；文件加密/未加密自动测试，`-hp` 头加密手工验证 |
 | RAR 预检缓存 | ✅ 完成 | W1-003b；`-t N` 不再产生 `2N` 次重复预检 |
 | 7z（AES/头加密/首块） | ⏭ **下一步** | `sevenz-rust2`；与 7-Zip CLI 差分 |
 | 分卷/SFX + 预检完整化 | ⏳ 未开始 | `.001`/`.z01`/`.partN`、PE overlay、缺卷检测 |

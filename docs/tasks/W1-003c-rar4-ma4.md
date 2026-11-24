@@ -46,7 +46,7 @@ rar a -ma4 -ep1 -p encrypted-rar4.rar hello.txt
 - `core/crates/acx-cli/tests/w1_rar_external.rs`
   - `create_rar` 支持附加开关；新增 `local_rar4_external_cli`：
     生成 `-ma4` 加密/未加密样本，断言 RAR4 magic，验证命中、错误字典、未加密退出码；
-    翻转未加密 RAR4 尾部字节，断言损坏归档 exit 3、不显示 `Encryption: rar`、不跑字典。
+    破坏未加密 RAR4 主头 CRC，断言损坏归档 exit 3、不显示 `Encryption: rar`、不跑字典。
 - 文档：本任务、W1-003 状态、PROJECT-GUIDE、README、AGENTS、roadmap、windows-plan。
 
 ## 验收
@@ -87,6 +87,7 @@ cargo test --workspace --locked
   但候选阶段若密码正确而数据损坏，UnRAR 仍返回 3，当前按 Miss，最终可能显示 `NOT FOUND`
   而不是明确“归档损坏”。RAR5 的 3 仍按 External 处理。完整错误分类留 W2。
 - 预检依赖 `l -p-` 输出中的 `*` 标记；这是 RAR 控制台标记，不是本地化文本，但仍需在更多
-  WinRAR/UnRAR 版本上回归。
+  WinRAR/UnRAR 版本上回归。清单输出受 64 KiB 截断保护，极端情况下（加密条目位于大量未加密
+  条目之后）可能漏掉标记，后续可改为直接读 RAR4 文件头 flags。
 - RAR4 分卷/SFX、不同代码页密码、超大归档未覆盖。
 - 非 Windows 平台仍无 RAR 运行时验证；CI 无引擎时集成测试跳过。

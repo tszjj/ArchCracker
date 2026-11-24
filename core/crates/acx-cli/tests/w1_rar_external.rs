@@ -284,7 +284,9 @@ fn local_rar4_external_cli() {
 
     let corrupt = temp.join("corrupt-rar4.rar");
     let mut bytes = std::fs::read(&plain).expect("read plain RAR4 fixture");
-    *bytes.last_mut().expect("non-empty RAR4 fixture") ^= 0xff;
+    // Corrupt the main-header CRC (offset 7) so `l -p-` fails deterministically
+    // while the RAR4 marker remains readable.
+    *bytes.get_mut(7).expect("RAR4 main header") ^= 0xff;
     std::fs::write(&corrupt, &bytes).expect("write corrupt RAR4 fixture");
 
     let output = Command::new(env!("CARGO_BIN_EXE_acx"))
@@ -308,6 +310,10 @@ fn local_rar4_external_cli() {
     assert!(
         !stdout.contains("NOT FOUND"),
         "corrupt RAR4 must not run the dictionary\nstdout: {stdout}"
+    );
+    assert!(
+        stderr.contains("listing failed"),
+        "corrupt RAR4 must fail in preflight listing\nstderr: {stderr}"
     );
 }
 

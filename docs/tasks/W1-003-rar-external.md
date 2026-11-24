@@ -21,7 +21,7 @@ acx -f encrypted.rar -m dict -d dict.txt -t 4
 - `ArchiveInfo` 增加 `whole_archive`：RAR 当前以整包 `unrar t` 验证，不解析本地化条目列表；不以“最小条目”伪装。
 - 预检：
   - `unrar t -p- -idq` 退出 0 → 未加密；
-  - 退出 11 → 加密；再 `unrar l -p- -idq` 区分非头加密/头加密；
+  - 退出 11 → 加密；再 `unrar l -p-` 区分非头加密/头加密（W1-003c 起不带 `-idq`，用于读取 RAR4 的 `*` 标记）；
   - 其他退出码 → 归档/引擎错误。
 - 候选验证：`unrar t -idq -p archive`，密码写 stdin；退出 0 → Hit，11 → Miss，其他 → `AcxError::External`。
 - CLI 按 `ArchiveFormat` 选择 ZIP/RAR factory；引擎缺失/损坏时退出 3 并提示修复安装/选择 `UnRAR.exe`/`ACX_UNRAR`（W1 代码不含随包路径，W4 加）。
@@ -70,7 +70,8 @@ WinRAR 调整为 **6.24 x64** 后，用 `Rar.exe a -ma4` 生成了真实 RAR4 �
 
 - RAR4 `t -p-` 缺密码返回 **3**（不是 11）；`l -p-` 成功且加密条目带行首 `*`；
 - RAR4 错误候选返回 **3**，现映射为 Miss；RAR5 的 3 仍为 External；
-- RAR4 头加密 `l -p-` 返回 3，按加密处理；
+- RAR4 头加密：`l -p-` 返回 3，且主头 flags 含 `0x0080`（MHD_PASSWORD），按头加密处理；
+  未加密但损坏的归档 `l -p-` 也可能返回 3，但主头 flags 不含该位，按损坏报错；
 - 新增 `local_rar4_external_cli` 集成测试，验证 `-ma4` magic、命中、错误字典、未加密退出码。
 
 详见 [W1-003c](W1-003c-rar4-ma4.md)。
