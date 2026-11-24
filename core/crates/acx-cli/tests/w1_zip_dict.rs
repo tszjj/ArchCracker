@@ -94,6 +94,22 @@ fn write_zipcrypto_zip(path: &Path) {
     writer.finish().expect("finish encrypted zip");
 }
 
+/// Write a WinZip AES-256 ZIP with one stored `hello.txt` entry.
+fn write_aes_zip(path: &Path) {
+    let file = std::fs::File::create(path)
+        .unwrap_or_else(|error| panic!("create {}: {error}", path.display()));
+    let mut writer = ZipWriter::new(file);
+
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .with_aes_encryption(zip::AesMode::Aes256, PASSWORD);
+    writer
+        .start_file("hello.txt", options)
+        .expect("start AES hello.txt");
+    writer.write_all(HELLO).expect("write AES hello.txt");
+    writer.finish().expect("finish AES zip");
+}
+
 /// Write an unencrypted, stored ZIP with one `hello.txt` entry.
 fn write_plain_zip(path: &Path) {
     let file = std::fs::File::create(path)
@@ -149,6 +165,38 @@ fn dictionary_attack_finds_zipcrypto_password() {
     assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
     assert!(stdout.contains(PASSWORD), "stdout: {stdout}");
     assert!(stdout.contains("Encryption: zipcrypto"), "stdout: {stdout}");
+}
+
+#[test]
+fn dictionary_attack_finds_aes_password() {
+    let temp = TempDir::new("aes-hit");
+    let zip = temp.join("encrypted-aes.zip");
+    let dict = temp.join("dictionary.txt");
+    write_aes_zip(&zip);
+    write_dictionary(&dict, &["wrong1", PASSWORD, "wrong2"]);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("-m")
+        .arg("dict")
+        .arg("-d")
+        .arg(&dict)
+        .arg("-t")
+        .arg("4")
+        .output()
+        .expect("run acx");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+    assert!(stdout.contains(PASSWORD), "stdout: {stdout}");
+    assert!(stdout.contains("Encryption: aes"), "stdout: {stdout}");
 }
 
 #[test]

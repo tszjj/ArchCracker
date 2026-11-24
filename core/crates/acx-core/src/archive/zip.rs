@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! ZIP engine: metadata preflight plus ZipCrypto candidate verification (W1).
+//! ZIP engine: metadata preflight plus ZipCrypto and WinZip AES candidate
+//! verification (W1).
 //!
-//! The W1 slice only supports the legacy ZipCrypto scheme. AES-encrypted
-//! entries are detected during preflight and reported as [`Encryption::Aes`],
-//! but the crate is built without the `aes-crypto` feature, so verifying an
-//! AES candidate returns [`AcxError::Unsupported`] instead of a guessed
-//! verdict.
+//! ZipCrypto uses the 12-byte check header, a full decompression, and a final
+//! CRC32 comparison. WinZip AES derives keys with PBKDF2-HMAC-SHA1 and checks
+//! the 2-byte verifier; a candidate that passes the verifier is only accepted
+//! after the crate has read the whole entry and verified the HMAC-SHA1-80
+//! authentication code. AES must not be accepted on CRC alone: AE-2 stores a
+//! zero CRC and AE-1's CRC is weaker than the authentication code.
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 use super::{ArchiveSession, ArchiveSessionFactory};
@@ -16,15 +18,12 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use zip::result::ZipError;
-use zip::ZipArchive;
+use zip::{HasZipMetadata, ZipArchive};
 
 /// Hard cap for one verification pass during the W1 slice. The W1 corpus is
 /// tiny; refusing huge entries keeps a dictionary attack from turning into an
 /// accidental full-file decompression.
 const MAX_VERIFY_BYTES: u64 = 64 * 1024 * 1024;
-
-/// Header id of the WinZip AES extra field (APPNOTE 4.5.14).
-const AES_EXTRA_FIELD_ID: u16 = 0x9901;
 
 /// One open ZIP archive, owned by a scheduler worker.
 pub struct ZipSession {
@@ -49,6 +48,10 @@ impl ZipSession {
         let mut entries = Vec::with_capacity(archive.len());
         // (uncompressed size, index, encryption) of the smallest encrypted file.
         let mut selected: Option<(u64, usize, Encryption)> = None;
+        // First zero-length AES file, if any. AES authenticates even empty
+        // plaintext with a 10-byte HMAC, unlike ZipCrypto, whose empty-file
+        // CRC is always 0 and therefore cannot confirm a password.
+        let mut empty_aes: Option<usize> = None;
         let mut has_encrypted_file = false;
 
         for index in 0..archive.len() {
@@ -56,7 +59,11 @@ impl ZipSession {
 
             let encryption = if !entry.encrypted() {
                 Encryption::None
-            } else if has_aes_extra_field(entry.extra_data().as_deref()) {
+            } else if entry.get_metadata().aes_settings().is_some() {
+                // Use the crate's central-directory metadata, the same source
+                // `by_index_decrypt` uses to select AES vs ZipCrypto. A
+                // local-header-only 0x9901 field is not trusted here because
+                // it could disagree with decryption.
                 Encryption::Aes
             } else {
                 Encryption::ZipCrypto
@@ -72,10 +79,11 @@ impl ZipSession {
             let uncompressed_size = entry.size();
             if entry.is_file() && encryption != Encryption::None {
                 has_encrypted_file = true;
-                // A zero-length entry has CRC32 0, so a wrong ZipCrypto
+                // A zero-length ZipCrypto entry has CRC32 0, so a wrong
                 // candidate that passes the 1-byte header check would produce
-                // a vacuous CRC "match". Never select an empty file when a
-                // verifiable non-empty entry may exist.
+                // a vacuous CRC "match". Never select an empty ZipCrypto entry
+                // while a verifiable non-empty entry exists; empty AES entries
+                // are handled separately because their HMAC still verifies.
                 if uncompressed_size > 0 {
                     let is_smaller = match selected {
                         Some((best_size, _, _)) => uncompressed_size < best_size,
@@ -84,6 +92,8 @@ impl ZipSession {
                     if is_smaller {
                         selected = Some((uncompressed_size, index, encryption));
                     }
+                } else if encryption == Encryption::Aes && empty_aes.is_none() {
+                    empty_aes = Some(index);
                 }
             }
 
@@ -100,13 +110,16 @@ impl ZipSession {
 
         let (selected, encryption) = match selected {
             Some((_, index, encryption)) => (Some(index), encryption),
+            // An empty AES entry is still authenticated by its HMAC, so it is
+            // a valid (if unusual) verification target.
+            None if empty_aes.is_some() => (empty_aes, Encryption::Aes),
             None if has_encrypted_file => {
-                // There are encrypted files, but all are empty. The ZIP format
-                // gives us no reliable way to distinguish the correct password
-                // from a 1/256 header collision, so refuse rather than report a
-                // false Hit.
+                // Only zero-length ZipCrypto files remain. Their CRC is 0, so
+                // the format gives us no reliable way to distinguish the
+                // correct password from a 1/256 header collision; refuse
+                // rather than report a false Hit.
                 return Err(AcxError::Unsupported(
-                    "encrypted archive has only zero-length file entries; cannot verify candidates"
+                    "encrypted archive has only zero-length ZipCrypto entries; cannot verify candidates"
                         .to_string(),
                 ));
             }
@@ -136,16 +149,24 @@ impl ArchiveSession for ZipSession {
             return Err(AcxError::NotEncrypted);
         };
 
-        // The W1 engine only verifies ZipCrypto. AES would need the crate's
-        // `aes-crypto` feature and PBKDF2/HMAC verification; report it as
-        // unsupported rather than returning a misleading `Miss`.
-        let selected_encryption = self.info.entries.get(index).map(|entry| entry.encryption);
-        if selected_encryption != Some(Encryption::ZipCrypto) {
-            return Err(AcxError::Unsupported(
-                "only ZipCrypto entries are supported by this build".to_string(),
-            ));
-        }
+        let encryption = self
+            .info
+            .entries
+            .get(index)
+            .map(|entry| entry.encryption)
+            .ok_or_else(|| AcxError::Internal(format!("selected entry {index} is missing")))?;
 
+        match encryption {
+            Encryption::ZipCrypto => self.test_zipcrypto(index, password),
+            Encryption::Aes => self.test_aes(index, password),
+            Encryption::None => Err(AcxError::NotEncrypted),
+        }
+    }
+}
+
+impl ZipSession {
+    /// Verify a legacy ZipCrypto candidate.
+    fn test_zipcrypto(&mut self, index: usize, password: &[u8]) -> Result<PasswordTest> {
         let mut entry = match self.archive.by_index_decrypt(index, password) {
             Ok(entry) => entry,
             // The 12-byte ZipCrypto check header rejected the key: a normal
@@ -178,12 +199,7 @@ impl ArchiveSession for ZipSession {
             // `InvalidData`/`UnexpectedEof` and mean "this password is wrong".
             // Genuine I/O failures (disk, permissions) keep propagating so the
             // scheduler can abort instead of silently recording misses.
-            if matches!(
-                err.kind(),
-                std::io::ErrorKind::InvalidData
-                    | std::io::ErrorKind::InvalidInput
-                    | std::io::ErrorKind::UnexpectedEof
-            ) {
+            if is_candidate_rejection(&err) {
                 return Ok(PasswordTest::Miss);
             }
             return Err(AcxError::Io(err));
@@ -203,6 +219,65 @@ impl ArchiveSession for ZipSession {
             Ok(PasswordTest::Miss)
         }
     }
+
+    /// Verify a WinZip AES candidate (AE-1 or AE-2, AES-128/192/256).
+    ///
+    /// `by_index_decrypt` performs PBKDF2-HMAC-SHA1 and checks the 2-byte
+    /// verifier. A verifier pass is only 1/65536 reliable, so the full entry is
+    /// read to make the crate verify the HMAC-SHA1-80 authentication code. The
+    /// CRC field is deliberately ignored: AE-2 stores 0 there, and the HMAC is
+    /// the stronger check for both AE variants.
+    fn test_aes(&mut self, index: usize, password: &[u8]) -> Result<PasswordTest> {
+        let mut entry = match self.archive.by_index_decrypt(index, password) {
+            Ok(entry) => entry,
+            Err(ZipError::InvalidPassword) => return Ok(PasswordTest::Miss),
+            Err(err) => return Err(AcxError::Zip(err)),
+        };
+
+        let declared_size = entry.size();
+        if declared_size > MAX_VERIFY_BYTES {
+            return Err(AcxError::Unsupported(format!(
+                "selected entry is {declared_size} bytes, larger than the {MAX_VERIFY_BYTES}-byte W1 verification cap"
+            )));
+        }
+
+        let mut bytes = Vec::new();
+        if let Err(err) = (&mut entry)
+            .take(MAX_VERIFY_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes)
+        {
+            // After a verifier collision, AES decryption produces garbage and
+            // the final HMAC comparison fails (`InvalidData`); a corrupt
+            // deflate stream surfaces as `InvalidInput`. Both mean the
+            // candidate is not confirmed. Real I/O failures still propagate.
+            if is_candidate_rejection(&err) {
+                return Ok(PasswordTest::Miss);
+            }
+            return Err(AcxError::Io(err));
+        }
+
+        if bytes.len() as u64 > MAX_VERIFY_BYTES {
+            return Err(AcxError::Unsupported(format!(
+                "selected entry decompresses past the {MAX_VERIFY_BYTES}-byte W1 verification cap"
+            )));
+        }
+
+        // Reaching EOF means the AES reader consumed the authentication code
+        // and verified the HMAC. No CRC gate here (see the method docs).
+        Ok(PasswordTest::Hit)
+    }
+}
+
+/// Errors that mean "this candidate is wrong" rather than "the archive or disk
+/// is broken". Both ZipCrypto garbage and AES authentication failures surface
+/// through these kinds.
+fn is_candidate_rejection(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::InvalidData
+            | std::io::ErrorKind::InvalidInput
+            | std::io::ErrorKind::UnexpectedEof
+    )
 }
 
 /// Opens a fresh [`ZipSession`] per scheduler worker.
@@ -216,33 +291,6 @@ impl ArchiveSessionFactory for ZipFactory {
     }
 }
 
-/// Scan a ZIP extra-field blob for the WinZip AES header id.
-///
-/// [`zip::read::ZipFile::extra_data`] serializes each field as
-/// `[header id: u16 LE][payload length: u16 LE][payload]`, so a linear walk is
-/// enough. Malformed trailing bytes end the scan instead of panicking; the
-/// field is only used as a hint to label the encryption scheme.
-fn has_aes_extra_field(extra: Option<&[u8]>) -> bool {
-    let Some(mut blob) = extra else {
-        return false;
-    };
-    while blob.len() >= 4 {
-        let header_id = u16::from_le_bytes([blob[0], blob[1]]);
-        let payload_len = usize::from(u16::from_le_bytes([blob[2], blob[3]]));
-        if header_id == AES_EXTRA_FIELD_ID {
-            return true;
-        }
-        let Some(field_len) = payload_len.checked_add(4) else {
-            return false;
-        };
-        if field_len > blob.len() {
-            return false;
-        }
-        blob = &blob[field_len..];
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,9 +298,10 @@ mod tests {
     use std::sync::OnceLock;
     use zip::unstable::write::FileOptionsExt;
     use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
+    use zip::{AesMode, CompressionMethod, ZipWriter};
 
     const PASSWORD: &[u8] = b"P@ssw0rd123";
+    const PASSWORD_STR: &str = "P@ssw0rd123";
     const HELLO: &[u8] = b"ArchCracker W1 fixture";
     const PADDING: [u8; 64] = [b'x'; 64];
 
@@ -338,6 +387,23 @@ mod tests {
         writer.finish().expect("finish zip").into_inner()
     }
 
+    /// Build a WinZip AES ZIP from `(name, plaintext)` entries.
+    fn aes_zip(
+        entries: &[(&str, &[u8])],
+        compression: CompressionMethod,
+        mode: AesMode,
+    ) -> Vec<u8> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, contents) in entries {
+            let options = SimpleFileOptions::default()
+                .compression_method(compression)
+                .with_aes_encryption(mode, PASSWORD_STR);
+            writer.start_file(*name, options).expect("start AES entry");
+            writer.write_all(contents).expect("write AES entry");
+        }
+        writer.finish().expect("finish AES zip").into_inner()
+    }
+
     /// Build an unencrypted, stored ZIP with a single `hello.txt` entry.
     fn plain_zip() -> Vec<u8> {
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
@@ -407,6 +473,120 @@ mod tests {
             session.test_password(b"").expect("test password"),
             PasswordTest::Miss
         );
+    }
+
+    #[test]
+    fn preflight_detects_aes_and_selects_smallest_entry() {
+        let bytes = aes_zip(
+            &[("hello.txt", HELLO), ("padding.txt", &PADDING)],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        let (_temp, session) = open_session(&bytes, "aes-preflight");
+        let info = session.info();
+
+        assert_eq!(info.encryption, Encryption::Aes);
+        assert_eq!(info.entries.len(), 2);
+        assert!(info
+            .entries
+            .iter()
+            .all(|entry| entry.encryption == Encryption::Aes));
+
+        let selected = info.selected_entry().expect("AES entry must be selected");
+        assert_eq!(selected.name, "hello.txt");
+        assert_eq!(selected.uncompressed_size, HELLO.len() as u64);
+    }
+
+    #[test]
+    fn aes_modes_and_compression_methods_verify() {
+        for mode in [AesMode::Aes128, AesMode::Aes192, AesMode::Aes256] {
+            for compression in [CompressionMethod::Stored, CompressionMethod::Deflated] {
+                let bytes = aes_zip(&[("hello.txt", HELLO)], compression, mode);
+                let tag = format!("aes-{mode:?}-{compression:?}");
+                let (_temp, mut session) = open_session(&bytes, &tag);
+
+                assert_eq!(
+                    session.test_password(PASSWORD).expect("correct password"),
+                    PasswordTest::Hit,
+                    "{mode:?}/{compression:?} must accept the correct password"
+                );
+                assert_eq!(
+                    session
+                        .test_password(b"definitely-not-the-password")
+                        .expect("wrong password"),
+                    PasswordTest::Miss,
+                    "{mode:?}/{compression:?} must reject a wrong password"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn aes_empty_password_is_miss() {
+        let bytes = aes_zip(
+            &[("hello.txt", HELLO)],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        let (_temp, mut session) = open_session(&bytes, "aes-empty");
+
+        assert_eq!(
+            session.test_password(b"").expect("test password"),
+            PasswordTest::Miss
+        );
+    }
+
+    #[test]
+    fn zero_length_aes_entry_can_be_verified() {
+        // AES authenticates empty plaintext with an HMAC, so an all-empty AES
+        // archive is safer to probe than the ZipCrypto equivalent.
+        let bytes = aes_zip(
+            &[("empty.txt", &[])],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        let (_temp, mut session) = open_session(&bytes, "aes-zero-length");
+        let selected = session
+            .info()
+            .selected_entry()
+            .expect("zero-length AES entry must be selected");
+
+        assert_eq!(session.info().encryption, Encryption::Aes);
+        assert_eq!(selected.uncompressed_size, 0);
+        assert_eq!(
+            session.test_password(PASSWORD).expect("correct password"),
+            PasswordTest::Hit
+        );
+        assert_eq!(
+            session.test_password(b"wrong").expect("wrong password"),
+            PasswordTest::Miss
+        );
+    }
+
+    #[test]
+    fn tampered_aes_authentication_code_is_miss() {
+        for compression in [CompressionMethod::Stored, CompressionMethod::Deflated] {
+            let mut bytes = aes_zip(&[("hello.txt", HELLO)], compression, AesMode::Aes256);
+            let name_len = usize::from(u16::from_le_bytes([bytes[26], bytes[27]]));
+            let extra_len = usize::from(u16::from_le_bytes([bytes[28], bytes[29]]));
+            let compressed_size = u32::from_le_bytes(
+                bytes[18..22]
+                    .try_into()
+                    .expect("local header compressed size"),
+            ) as usize;
+            let data_start = 30 + name_len + extra_len;
+            let auth_code_last = data_start + compressed_size - 1;
+            bytes[auth_code_last] ^= 0x01;
+
+            let tag = format!("aes-tampered-{compression:?}");
+            let (_temp, mut session) = open_session(&bytes, &tag);
+            // The 2-byte verifier still matches, so only the HMAC can reject this.
+            assert_eq!(
+                session.test_password(PASSWORD).expect("tampered password"),
+                PasswordTest::Miss,
+                "{compression:?} tampered auth code must be rejected"
+            );
+        }
     }
 
     #[test]
@@ -484,33 +664,6 @@ mod tests {
             .expect("non-empty encrypted entry must be selected");
         assert_eq!(selected.name, "hello.txt");
         assert_eq!(selected.uncompressed_size, HELLO.len() as u64);
-    }
-
-    #[test]
-    fn aes_extra_field_is_detected_by_extra_data_scan() {
-        // The crate cannot write AES without its `aes-crypto` feature, so the
-        // scanner is exercised on serialized extra-field blobs instead.
-        // `hello` is a ZipCrypto-encrypted entry: no 0x9901 field.
-        let zipcrypto_extra = [0x55, 0x54, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
-        assert!(!has_aes_extra_field(Some(&zipcrypto_extra)));
-        assert!(!has_aes_extra_field(None));
-
-        // WinZip AES field: header id 0x9901, length 7, "AE" + vendor + strength + method.
-        let aes_extra = [
-            0x01, 0x99, 0x07, 0x00, 0x02, 0x00, b'A', b'E', 0x03, 0x00, 0x00,
-        ];
-        assert!(has_aes_extra_field(Some(&aes_extra)));
-
-        // A preceding zip64 field must not stop the scan.
-        let mut mixed = vec![0x01, 0x00, 0x00, 0x00];
-        mixed.extend_from_slice(&aes_extra);
-        assert!(has_aes_extra_field(Some(&mixed)));
-
-        // Truncated or trailing garbage must be ignored, not panic. A bare
-        // 0x9901 id is still enough to label the entry as AES.
-        assert!(has_aes_extra_field(Some(&[0x01, 0x99, 0xff, 0x00])));
-        assert!(!has_aes_extra_field(Some(&[0x55, 0x54, 0x05, 0x00, 0x01])));
-        assert!(!has_aes_extra_field(Some(&[0x01, 0x99])));
     }
 
     #[test]

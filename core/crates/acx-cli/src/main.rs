@@ -3,7 +3,7 @@
 
 //! ArchCracker command-line interface (W1: ZIP + dictionary slice).
 
-use acx_core::archive::{self, ArchiveSessionFactory, Encryption, ZipFactory};
+use acx_core::archive::{self, ArchiveSessionFactory, ZipFactory};
 use acx_core::candidates::Dictionary;
 use acx_core::scheduler;
 use clap::Parser;
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-/// Exit code used when the archive is unusable (bad format, unencrypted, AES).
+/// Exit code used when the archive is unusable (bad format, unencrypted, unsupported).
 const EXIT_ARCHIVE: u8 = 3;
 /// Exit code used for argument and dictionary problems.
 const EXIT_USAGE: u8 = 2;
@@ -85,11 +85,6 @@ fn run(cli: Cli) -> ExitCode {
 
     if info.selected.is_none() {
         eprintln!("acx: archive is not encrypted or has no file entries");
-        return ExitCode::from(EXIT_ARCHIVE);
-    }
-
-    if info.encryption == Encryption::Aes {
-        eprintln!("acx: AES is not supported in the W1 slice");
         return ExitCode::from(EXIT_ARCHIVE);
     }
 

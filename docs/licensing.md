@@ -20,7 +20,8 @@
 | 组件 | 用途 | 许可 | 与 Apache-2.0 兼容 | 分发方式 |
 |---|---|---|---|---|
 | `sevenz-rust2` | 7z 读写 | Apache-2.0 | 是 | 源码依赖 |
-| `zip` | ZIP 读写 | MIT | 是 | 源码依赖 |
+| `zip` | ZIP 读写（含 `deflate`） | MIT | 是 | 源码依赖 |
+| `zip/aes-crypto` 传递依赖：`aes` / `hmac` / `pbkdf2` / `sha1` / `constant_time_eq` / `zeroize` / `getrandom` | WinZip AES 解密 | MIT OR Apache-2.0（`getrandom` 为 MIT/Apache-2.0） | 是 | 源码依赖 |
 | `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 是 | 源码依赖 |
 | `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `rayon` / `aes` / `sha2` / `crc32fast` | 并行/加密/校验 | MIT/Apache-2.0 | 是 | 源码依赖 |
@@ -31,7 +32,7 @@
 | 7-Zip / p7zip（含 RAR） | 差分 oracle | LGPL-2.1+ + unRAR restriction | RAR 部分受限 | 仅本机/CI，不随包 |
 | 7-Zip / p7zip（RAR-free） | 差分 oracle | LGPL-2.1+ | 是 | 仅本机/CI，不随包 |
 
-> 新增依赖必须在 PR 中更新本表；CI 用 `cargo-deny` 做许可门禁。`zip` 的 `deflate` 特性还会引入 `flate2`/`zlib-rs`/`zopfli` 等 MIT/Apache/BSD 传递依赖，发布前由 `cargo-deny`/`cargo-about` 全量列出。
+> 新增依赖必须在 PR 中更新本表；CI 用 `cargo-deny` 做许可门禁。`zip` 的 `deflate` 特性会引入 `flate2`/`zlib-rs`/`zopfli` 等 MIT/Apache/BSD 传递依赖；`aes-crypto` 特性引入 `aes`/`hmac`/`pbkdf2`/`sha1`/`zeroize`/`getrandom` 等。发布前由 `cargo-deny`/`cargo-about` 全量列出。
 
 ## 3. RAR 与 unRAR
 

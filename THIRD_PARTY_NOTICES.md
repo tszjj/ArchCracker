@@ -2,22 +2,23 @@
 
 本文件列出随 ArchCracker 分发或构建时使用的第三方组件。发布前由 CI 生成完整清单（`cargo about` / `cargo deny`），本文件保留人工摘要。
 
-## 当前（M0）
+## 当前（W1-002）
 
-- Rust 标准库（MIT/Apache-2.0 双许可，随工具链）。
-- 无第三方 crate 依赖（`acx-core`/`acx-cli`/`acx-ffi` 目前仅 std）。
+| 组件 | 用途 | 许可 | 分发方式 |
+|---|---|---|---|
+| `zip` | ZIP 读写（`deflate` + `aes-crypto`） | MIT | 源码依赖 |
+| `aes` / `hmac` / `pbkdf2` / `sha1` / `constant_time_eq` / `zeroize` / `getrandom` | `zip` 的 WinZip AES 传递依赖 | MIT OR Apache-2.0 | 源码依赖 |
+| `crc32fast` | CRC32 校验 | MIT OR Apache-2.0 | 源码依赖 |
+| `thiserror` | 错误类型 | MIT OR Apache-2.0 | 源码依赖 |
+| `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 源码依赖 |
+| `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 源码依赖 |
+| `clap` | CLI 参数解析 | MIT OR Apache-2.0 | 源码依赖 |
 
 ## 计划引入（需在 PR 中更新）
 
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
 | sevenz-rust2 | 7z | Apache-2.0 | 源码依赖 |
-| zip | ZIP | MIT | 源码依赖 |
-| encoding_rs | 编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 源码依赖 |
-| crossbeam-channel | 有界队列 | MIT OR Apache-2.0 | 源码依赖 |
-| rayon | 并行 | MIT/Apache-2.0 | 源码依赖 |
-| aes / sha2 / crc32fast | 加密/校验 | MIT/Apache-2.0 | 源码依赖 |
-| serde / thiserror / clap | 序列化/错误/CLI | MIT/Apache-2.0 | 源码依赖 |
 | Avalonia | 桌面 UI | MIT | NuGet |
 | .NET Runtime | 桌面运行时 | MIT | 自包含发布 |
 | Jetpack Compose | Android UI | Apache-2.0 | Gradle |
