@@ -33,7 +33,7 @@ native/unrar?            不随包；运行时检测用户安装的 WinRAR/UnRAR
 按以下顺序实现，每步可独立验收：
 
 1. **归档预检**：格式/加密/条目/最小加密条目/分卷/SFX；错误分类。
-2. **ZIP**：ZipCrypto + WinZip AES（先做读取/验证，`zip` crate 能力以实测为准）。
+2. **ZIP**：ZipCrypto + WinZip AES（W1-002 已实现 AE-1/AE-2、AES-128/192/256 读取/验证；7-Zip 差分待补）。
 3. **7z**：`sevenz-rust2`，AES/头加密，首块探测；与 7-Zip CLI 差分。
 4. **RAR（外部）**：检测 `UnRAR.exe`，调用测试/解压；密码走 stdin，不写 argv。
 5. **字典**：流式、UTF-8/UTF-16/GBK、去重、空行/长行。

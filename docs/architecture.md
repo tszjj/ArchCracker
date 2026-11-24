@@ -56,7 +56,7 @@
 结论来自 2026-11 的技术调研（见 ADR-0001）：
 
 - 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。
-- ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2）能力，**P1 差分确认前不对外宣传**；多卷需自建容器层。
+- ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2，AES-128/192/256）读取能力；W1-002 已实现候选验证，第三方 7-Zip 差分待补；多卷需自建容器层。
 - RAR：解压用途由 unRAR 许可允许；本项目 Windows 首发调用用户已安装的 `UnRAR.exe`（仅进程），不把 unRAR 链接进主项目。`unrar-rs` 仅本地实验，不是依赖。
 - 平台：Rust Android 为 Tier 2；`aarch64-unknown-linux-ohos` 为 Tier 2 with host tools，可用 OHOS clang 作为 linker。
 - 内存安全与 AI 可维护性显著优于 C++；性能上限高于 Go。
@@ -70,7 +70,7 @@
 | 格式 | 加密 | 读取/解密 | 分卷 | 备注 |
 |---|---|---|---|---|
 | 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
-| ZIP | ZipCrypto、WinZip AES-128/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | WinZip AES 支持需 P1 实测确认；multi-disk 由我们补 |
+| ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
 | RAR4 | AES-128、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
 | RAR5 | AES-256、PBKDF2、头加密 | 外部 `unrar`（Windows 首发） | 外部引擎处理 | 用户自装，不链接/不随包 |
 | SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
