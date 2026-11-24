@@ -13,6 +13,9 @@ pub enum AcxError {
     #[error("ZIP error: {0}")]
     Zip(#[from] zip::result::ZipError),
 
+    #[error("external engine error: {0}")]
+    External(String),
+
     #[error("unsupported archive: {0}")]
     Unsupported(String),
 

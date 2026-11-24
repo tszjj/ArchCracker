@@ -2,13 +2,13 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；下一步 7z/RAR、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入用户自装的外部 UnRAR（整包 `t` 验证）；下一步 7z、分卷/断点与基准，再做 GUI。Linux/macOS/Android/HarmonyOS 的接口保留但**后续排期**。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
 ## 目标
 
-- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/192/256；7-Zip 差分待补）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
+- **格式**：7z（AES-256、可选头加密）、ZIP（ZipCrypto、WinZip AES-128/192/256；7-Zip 差分待补）、RAR4/RAR5（Windows 首发：调用已安装的 WinRAR/`UnRAR.exe`；W1-003 已接入外部整包验证；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
 - **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、字典+掩码混合；规则引擎为 P2。
 - **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎完整解压复核；多核/多进程并行、断点续跑。
 - **形态**：同一 Rust 内核 + C ABI；Windows 用 Avalonia 12；CLI 可独立运行。Android/HarmonyOS 前端后续再做。

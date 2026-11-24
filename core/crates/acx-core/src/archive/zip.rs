@@ -133,6 +133,7 @@ impl ZipSession {
                 format: ArchiveFormat::Zip,
                 encryption,
                 selected,
+                whole_archive: false,
                 entries,
             },
         })
@@ -160,6 +161,9 @@ impl ArchiveSession for ZipSession {
             Encryption::ZipCrypto => self.test_zipcrypto(index, password),
             Encryption::Aes => self.test_aes(index, password),
             Encryption::None => Err(AcxError::NotEncrypted),
+            Encryption::Rar => Err(AcxError::Unsupported(
+                "RAR entries are not handled by the ZIP engine".to_string(),
+            )),
         }
     }
 }

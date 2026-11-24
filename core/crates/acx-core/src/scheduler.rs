@@ -266,6 +266,7 @@ mod tests {
             format: ArchiveFormat::Zip,
             encryption: Encryption::ZipCrypto,
             selected: Some(0),
+            whole_archive: false,
             entries: Vec::new(),
         }
     }
