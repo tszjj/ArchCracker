@@ -103,7 +103,7 @@
 5. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
 6. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W2 的 clean-room 头/KDF 快筛再接在它前面。
+W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W1-003b 在 `RarFactory` 创建时预检一次并缓存 `ArchiveInfo`，worker 的 `open()` 不再启动 UnRAR；CLI 复用 `archive::preflight` 结果，整个运行只有一次预检。W2 的 clean-room 头/KDF 快筛再接在它前面。
 
 ### 4.4 hashcat GPU 后端（可选，外部进程）
 
