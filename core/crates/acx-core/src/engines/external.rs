@@ -238,6 +238,8 @@ pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
     let text = std::str::from_utf8(input).map_err(|_| {
         AcxError::Unsupported("RAR external engine only accepts UTF-8 candidate text".to_string())
     })?;
+    // SAFETY: `GetOEMCP` has no preconditions and returns the process OEM code
+    // page without dereferencing any caller-provided pointer.
     let code_page = unsafe { GetOEMCP() };
     if code_page == 65001 {
         return Ok(Cow::Borrowed(input));
@@ -252,6 +254,9 @@ pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
     })?;
 
     let mut used_default = 0i32;
+    // SAFETY: `wide` is a valid UTF-16 slice of `wide_len` elements, the output
+    // pointer is null with capacity 0 (size query), and `used_default` is a
+    // valid writable BOOL.
     let needed = unsafe {
         WideCharToMultiByte(
             code_page,
@@ -271,6 +276,8 @@ pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
     }
 
     let mut output = vec![0u8; needed as usize];
+    // SAFETY: `output` has exactly `needed` writable bytes as returned by the
+    // size query; the input slice and `used_default` pointers are valid.
     let written = unsafe {
         WideCharToMultiByte(
             code_page,
