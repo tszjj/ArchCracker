@@ -72,8 +72,8 @@
 |---|---|---|---|---|
 | 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
 | ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
-| RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包，W1-003 已接入整包 `t`） | 外部引擎处理 | 仅进程，不链接 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包，W1-003 已接入整包 `t`） | 外部引擎处理 | 仅进程，不链接 |
+| RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003/W1-003c 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
 | SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
 
 ### 4.2 快筛与确认
@@ -103,7 +103,7 @@
 5. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
 6. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W1-003b 在 `RarFactory` 创建时预检一次并缓存 `ArchiveInfo`，worker 的 `open()` 不再启动 UnRAR；CLI 复用 `archive::preflight` 结果，整个运行只有一次预检。W2 的 clean-room 头/KDF 快筛再接在它前面。
+W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W1-003b 在 `RarFactory` 创建时预检一次并缓存 `ArchiveInfo`，worker 的 `open()` 不再启动 UnRAR；CLI 复用 `archive::preflight` 结果，整个运行只有一次预检。W1-003c 在 WinRAR 6.24 下补验 RAR4 `-ma4`：其预检/错误候选使用 exit 3，预检用 `l -p-` 的 `*` 标记/退出码区分加密与损坏，候选 3 映射为 Miss。W2 的 clean-room 头/KDF 快筛再接在它前面。
 
 ### 4.4 hashcat GPU 后端（可选，外部进程）
 
