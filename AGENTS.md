@@ -129,7 +129,7 @@ dotnet test frontends/desktop/ArchCracker.Desktop.sln
   但若已有同域 agent，先复用，不要为了“独立”重复开同角色。
 - 3 个以上独立方向、需要并行汇总：用 `workflow`；workflow 每次都会新建 agent，不适合同域后续迭代。
 - 每个任务必须写清：**目标、范围、输入文件、验收标准、禁止事项**；复用消息只给变更点，不重贴整份仓库。
-- 子智能体不共享本对话上下文；新建时 prompt 必须自包含。新建 label 用 `角色:领域`，便于下次找回。
+- 新建 `subagent` 不共享本对话上下文，prompt 必须自包含；`subagent_fork` 继承已完成轮次，prompt 只补变更点。新建 label 用 `角色:领域`，便于下次找回。
 - 同一 PR 不并行开两个 reviewer；需要第二意见时，串行换一个未参与该改动的已有 reviewer。
 
 ### 6.3 任务包格式

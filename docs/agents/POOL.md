@@ -1,8 +1,9 @@
 # 子智能体池与复用策略
 
 本文规定 ArchCracker 项目中“什么时候复用已有智能体、什么时候新建”的默认规则。
-它是 [`AGENTS.md`](../../AGENTS.md) §6.2 的展开，不依赖某个具体运行时；DSH、Codex、
-Claude Code 都按同一套角色槽位执行。
+它是 [`AGENTS.md`](../../AGENTS.md) §6.2 的展开，角色槽位与运行时无关；DSH 用
+`list_agents`/`send_message` 实现复用，Codex/Claude Code 等按同一套槽位人工登记，
+没有等价复用工具时再新建。
 
 ## 1. 目标
 
@@ -18,11 +19,14 @@ Claude Code 都按同一套角色槽位执行。
 | 槽位 | 典型职责 | 复用条件 | 新建条件 |
 |---|---|---|---|
 | `architect` | ADR、接口、跨平台约束、任务拆分 | 同一架构/契约议题的后续 | 需要独立架构评审且现有 architect 已参与该决策 |
+| `researcher` | 技术调研、许可/平台/依赖比较 | 同一主题的后续调研 | 新主题且无相关上下文；或需要独立复现 |
 | `core-engineer:core` | `acx-core` 引擎/调度/候选/FFI | 同一模块的后续实现、修复、测试 | 并行实现不同模块且互不阻塞 |
 | `core-engineer:cli` | CLI、退出码、集成测试 | 同一 CLI 切片 | 与 core 改动并行且文件不重叠 |
 | `frontend-engineer` | Avalonia/Compose/ArkUI、打包 | 同一前端切片 | 需要独立 UI 评审或不同平台 |
 | `qa-engineer` | 语料、差分、模糊、基准 | 同一格式/同一基准的后续 | 需要独立复现且现有 QA 已参与实现 |
+| `qa-engineer:gpu` | hashcat/GPU spike、CPU 回退验证 | 同一 spike/同一 GPU 结论的后续 | 需要独立性能/驱动验证 |
 | `reviewer:core` | 核心正确性/性能/许可 | 同域后续 PR | 现有 reviewer 是该 PR 作者，或需要第二意见 |
+| `reviewer:rar` | RAR/RAR4/RAR5 外部引擎与许可 | 同域后续 PR | 现有 RAR reviewer 参与了实现，或需要第二意见 |
 | `reviewer:docs` | 文档一致性/状态口径 | 同域后续文档 PR | 需要独立事实核查 |
 | `release-engineer` | CI、签名、安装包、发布 | 同一发布链 | 需要独立发布审计 |
 
@@ -92,12 +96,18 @@ Claude Code 都按同一套角色槽位执行。
 
 ## 8. 当前会话的落地方式
 
-会话内已有多个历史 agent（研究、M0 评审、实现、各 PR reviewer）。按以下方式收敛：
+> 截至 2026-11-25，当前 DSH 会话约有 **18 个历史 agent**（研究、M0 评审、实现、
+> W1/AES/RAR/RAR4/docs/guide reviewer、GPU 评估）。数量是运行时状态，不写入仓库；
+> 具体 id 以 `list_agents` 为准。历史 agent 不一定有 `角色:领域` label，按 description/领域人工映射；
+> 首次复用后，在新消息里补一句规范槽位，后续按该槽位找。
 
-- 研究类：按主题复用，不重复开同一主题的调研。
-- 实现类：core/CLI/字典/ZIP 各保留一个主实现者；后续修 bug/补测试回到对应实现者。
+按以下方式收敛：
+
+- 研究类：`researcher` 槽位，按主题复用，不重复开同一主题的调研。
+- 实现类：`core-engineer:core`（含字典/ZIP/core）与 `core-engineer:cli` 各保留一个主实现者，
+  共 2 个；后续修 bug/补测试回到对应实现者。
 - 评审类：按 `reviewer:core`、`reviewer:rar`、`reviewer:docs` 等领域收敛；同域后续 PR 复用最近一个，
   只有它参与实现时才换另一个已有 reviewer。
-- GPU/hashcat：复用已有 GPU 评估 agent，不按 spike 重开。
+- GPU/hashcat：`qa-engineer:gpu` 槽位，复用已有 GPU 评估 agent，不按 spike 重开。
 
 > 具体 agent id 属于当前 DSH 会话状态，不写入仓库；用 `list_agents` 查看并按 label/领域匹配。
