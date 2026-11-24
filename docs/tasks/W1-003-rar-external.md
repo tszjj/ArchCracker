@@ -2,7 +2,7 @@
 
 - 分支：`feat/w1-rar-external`
 - 角色：planner（主对话）、core-engineer（主对话实现）、reviewer（独立评审）
-- 状态：进行中
+- 状态：完成（PR #3，独立 reviewer approve，CI 6/6 绿）
 
 ## 目标
 
