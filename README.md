@@ -2,7 +2,7 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入外部 UnRAR（WinRAR 6.24 下均已端到端验证），RAR 预检已缓存（W1-003b），RAR4 `-ma4` 补验（W1-003c）；7z 已支持 AES-256、`-mhe=on` 头加密与首块探测，并用 7-Zip 26.04 差分（W1-004）；ZIP/7z/RAR 分卷与 SFX 已接入（W1-005）；W1-006 运行控制/断点已本地实现并通过 reviewer APPROVE，待用户大语料测试；W1-007 流式字典已本地实现并通过 reviewer APPROVE，待 500MB/1GB 正式基准。下一步 W1-007/008 字典与基准，再做 GUI；**W2-001 GPU/hashcat 已 Deferred，不在 W1/W2 启动**。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
+> **状态：W1 进行中（Windows 全栈优先）**。ZIP + 字典 + 多线程 CLI 垂直切片已跑通，ZIP 已支持 ZipCrypto 与 WinZip AES-128/192/256；RAR4/RAR5 已接入外部 UnRAR（WinRAR 6.24 下均已端到端验证），RAR 预检已缓存（W1-003b），RAR4 `-ma4` 补验（W1-003c）；7z 已支持 AES-256、`-mhe=on` 头加密与首块探测，并用 7-Zip 26.04 差分（W1-004）；ZIP/7z/RAR 分卷与 SFX 已接入（W1-005）；W1-006 运行控制/断点、W1-007 流式字典均已本地实现并通过 reviewer APPROVE；W1-008 三格式 1M×1GB 基准已完成（ZIP 42.247s、7z 1271.049s、RAR 4515.104s）。下一步 W1-007/008 字典与基准，再做 GUI；**W2-001 GPU/hashcat 已 Deferred，不在 W1/W2 启动**。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
@@ -45,7 +45,7 @@
 本迭代按“能装、能用、能卸载”的 Windows 产品推进：
 
 1. Rust 内核 + CLI：ZIP/7z/RAR（外部）+ 字典 + 多线程 + 运行控制/断点 + 基准。
-2. W1 收口：W1-006 暂停/停止/续跑已本地实现并通过 reviewer APPROVE，待用户大语料；W1-007 流式字典已本地实现并通过 reviewer APPROVE；W1-008 1M/1GB 基准；完成后按 W1 准出/W2 准入评审。
+2. W1 收口：W1-006/007 已本地实现并通过 reviewer APPROVE；W1-008 三格式 1M×1GB 基准已完成；随后走 W1 正确性长跑与准出评审。
 3. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、自动解压。
 4. Windows 交付：单一 Full 安装包、随包 UnRAR/hashcat、代码签名、崩溃转储、zh/en。
 5. 测试/基准：1M 字典、1GB 归档、缺卷/损坏/未加密分类、CPU/GPU 对照（GPU 仅 W2 退出后重新评估）。
