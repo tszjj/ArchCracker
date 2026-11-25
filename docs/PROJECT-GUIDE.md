@@ -1,6 +1,6 @@
 # ArchCracker 项目全景与开发指引
 
-> 最后更新：2026-11-24 · 阶段：**W1 进行中（Windows 全栈优先）**
+> 最后更新：2026-11-25 · 阶段：**W1 进行中（Windows 全栈优先）**
 >
 > 本文是项目结构、文档地图和开发进度的**单一入口**。它不替代架构/许可/任务文档；
 > 具体设计、验收证据和决策以链接文档为准。每次完成一个切片或调整排期时，先更新本文的状态。
@@ -24,17 +24,17 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 当前阶段 | **W1 进行中** | Windows 全栈优先；W2–W5 未开始 |
-| 已验收切片 | W1-001、W1-002、W1-003、W1-003b、W1-003c | 相关 PR 已合并（#4 为 Full 随包文档）；详见 §5 |
-| 内核能力 | ZIP、RAR（外部）、字典、多线程调度 | 7z、分卷、SFX、断点、暂停/停止未完成 |
+| 已完成切片 | W1-001、W1-002、W1-003、W1-003b、W1-003c、W1-004 | 前五个已合并；W1-004 为本地分支，按里程碑统一推送 |
+| 内核能力 | ZIP、7z、RAR（外部）、字典、多线程调度 | 分卷、SFX、断点、暂停/停止未完成 |
 | CLI | `acx -f <archive> -m dict -d <dict> -t N` | 仅字典模式；退出码 0/1/2/3 |
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 46、CLI 4、集成 9、FFI 2 | 本机 Windows + WinRAR 6.24；CI 6/6 通过 |
-| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml` |
+| 测试 | core 59、CLI 4、集成 19（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
+| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；W1-004 推送后需重跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
-> 最近一次全绿：`main` CI 6/6（2026-11-24）。
+> 最近一次全绿：`main` CI 6/6（2026-11-24）。W1-004 的本地验证为 fmt/clippy/test、MSRV 1.89、release build、cargo-deny 全通过；推送后以远端 CI 为准。
 
 ## 3. 实际目录结构
 
@@ -49,6 +49,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │     │     │  ├─ mod.rs                  # magic 检测、open/preflight、Factory trait
 │     │     │  ├─ info.rs                 # ArchiveInfo/ArchiveFormat/Encryption
 │     │     │  ├─ zip.rs                  # ZipCrypto + WinZip AES 会话
+│     │     │  ├─ sevenz.rs               # 7z AES/头加密/首块探测会话
 │     │     │  └─ rar.rs                  # 外部 UnRAR 会话、factory 预检缓存
 │     │     ├─ candidates/dictionary.rs   # 字典加载：BOM/UTF-8/UTF-16/GBK、去重
 │     │     ├─ engines/external.rs        # 外部进程边界：发现/stdin/超时/截断
@@ -57,7 +58,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │     │     └─ error.rs / lib.rs
 │     ├─ acx-cli/                         # CLI（直接依赖 acx-core）
 │     │  ├─ src/main.rs
-│     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_rar_external.rs
+│     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_sevenz.rs、w1_rar_external.rs
 │     └─ acx-ffi/                         # 最小 C ABI
 │        ├─ include/acx.h                 # ABI v0，仅 product/version/status
 │        └─ src/lib.rs
@@ -77,7 +78,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │  ├─ licensing.md                        # Apache-2.0 + 第三方 + RAR/hashcat 边界
 │  ├─ GITHUB.md                           # 仓库设置手册
 │  ├─ adr/                                # 0001 Rust、0002 前端拆分、0003 RAR、0004 Full 随包
-│  ├─ tasks/                              # W1-001/002/003/003b/003c、W2-001 任务与证据
+│  ├─ tasks/                              # W1-001/002/003/003b/003c/004、W2-001 任务与证据
 │  ├─ benchmarks/                         # ZIP 基线、RAR 预检缓存基准
 │  ├─ agents/                             # Agent 协作规范 + 7 个角色提示词
 │  └─ analysis/legacy-tools.md            # 三款旧工具的静态分析（内部研究，不执行样本）
@@ -142,6 +143,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W1-003 RAR 外部引擎](tasks/W1-003-rar-external.md) | UnRAR 进程调用、整包 `t`、错误映射 | 完成 |
 | [W1-003b RAR 预检缓存](tasks/W1-003b-rar-preflight-cache.md) | factory 缓存 `ArchiveInfo`，去掉每 worker 预检 | 完成 |
 | [W1-003c RAR4 `-ma4`](tasks/W1-003c-rar4-ma4.md) | RAR4 预检/退出码适配与端到端验证 | 完成 |
+| [W1-004 7z AES/头加密/首块](tasks/W1-004-sevenz.md) | `sevenz-rust2`、AES-256、`-mhe=on`、首块探测、CLI | 完成（本地，待推送） |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | 只有规格，未实现 |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -158,7 +160,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 阶段 | 状态 | 已完成 | 主要缺口 |
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
-| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、RAR4/RAR5（外部 + 预检缓存）、字典编码/去重、有界多线程调度、CLI 字典模式 | 7z、分卷/SFX、暂停/停止、断点、完整错误分类、1M/1GB 基准、流式字典/批处理 |
+| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、7z（AES/头加密/首块）、RAR4/RAR5（外部 + 预检缓存）、字典编码/去重、有界多线程调度、CLI 字典模式 | 分卷/SFX、暂停/停止、断点、完整错误分类、1M/1GB 基准、流式字典/批处理 |
 | **W2 引擎/攻击** | 未开始 | RAR 外部引擎已由 W1-003 提前交付；W2-001 只有规格 | hashcat spike、快筛、掩码/暴力/混合、分卷/SFX、批量/编码变体 |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
@@ -174,11 +176,11 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | RAR5 外部 UnRAR | ✅ 完成 | W1-003；整包 `t`，密码走 stdin；RAR5 已端到端验证 |
 | RAR4 外部 UnRAR | ✅ 完成 | W1-003c；WinRAR 6.24 生成 `-ma4` 样本；文件加密/未加密自动测试，`-hp` 头加密手工验证 |
 | RAR 预检缓存 | ✅ 完成 | W1-003b；`-t N` 不再产生 `2N` 次重复预检 |
-| 7z（AES/头加密/首块） | ⏭ **下一步** | `sevenz-rust2`；与 7-Zip CLI 差分 |
+| 7z（AES/头加密/首块） | ✅ 完成 | W1-004；`sevenz-rust2` 0.20.2；AES-256、`-mhe=on`、首块 64 KiB 探测 + 完整 CRC；7-Zip 26.04 差分 |
 | 分卷/SFX + 预检完整化 | ⏳ 未开始 | `.001`/`.z01`/`.partN`、PE overlay、缺卷检测 |
 | 暂停/停止 | ⏳ 未开始 | scheduler 目前只有命中/错误停止，没有用户暂停 |
 | 断点续跑 | ⏳ 未开始 | 归档指纹 + 字典偏移 + 原子写盘；强杀恢复 ≤ 1 批 |
-| 错误分类完整化 | ⏳ 部分 | 未加密/缺失引擎/格式已有；损坏/缺卷/头加密提示仍待补 |
+| 错误分类完整化 | ⏳ 部分 | 未加密/缺失引擎/格式/7z 头加密已有；损坏/缺卷提示仍待补 |
 | 1M 字典 / 1GB 归档基准 | ⏳ 部分 | 已有 ZIP 微基准 + RAR 启动基准；未做正式 p/s 矩阵 |
 | 流式字典/批处理 | ⏳ 未开始 | 当前 `Dictionary::load` 全量读入内存 |
 
@@ -192,13 +194,14 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dictionary> -t 4
 ```
 
 - ZIP：ZipCrypto、WinZip AES-128/192/256；
+- 7z：AES-256、`-mhe=on` 头加密、LZMA/LZMA2/COPY/BZip2/PPMd；
 - RAR4/RAR5：本机安装 WinRAR/UnRAR，或设置 `ACX_UNRAR`；
 - 退出码：0 命中，1 未找到，2 参数/字典错误，3 归档/引擎错误。
 
 **尚不可用 / 未验证**：
 
-- 7z；
-- 分卷/SFX；
+- 7z 分卷 `.7z.001`、SFX；
+- 分卷/SFX（ZIP/RAR/7z 全格式）；
 - 掩码/暴力/混合；
 - GUI、安装包、自动解压；
 - 断点续跑、暂停/停止；
@@ -216,12 +219,12 @@ W1 不能只用“能跑”收口；满足以下条件才进入 W2：
 
 ## 6. 推荐开发顺序
 
-> 以下 `W1-004` 等编号是**建议切片**，正式开工时在 `docs/tasks/` 新建任务文档并写清验收；
-> 已有正式任务文档的切片（W1-001/002/003/003b/003c、W2-001）以任务文档为准。
+> 以下 `W1-005` 等编号是**建议切片**，正式开工时在 `docs/tasks/` 新建任务文档并写清验收；
+> 已有正式任务文档的切片（W1-001/002/003/003b/003c/004、W2-001）以任务文档为准。
 
-按依赖和风险排序，下一步建议：
+按依赖和风险排序：
 
-1. **W1-004：7z 引擎**
+1. **W1-004：7z 引擎** — ✅ 已完成（见 [W1-004](tasks/W1-004-sevenz.md)）
    - `sevenz-rust2` 读取、AES-256、可选头加密；
    - 选择最小可验证块/首块探测；
    - CLI 按 magic 分发；与 7-Zip CLI 做差分 oracle；
@@ -318,7 +321,8 @@ roadmap 的复选框保留阶段级口径，切片级完成情况看 §5.2。
 5. **前端缺失**：`frontends/*` 目前只有 README；W3 之前不要按“已有 GUI”排期。
 6. **语料缺失**：没有提交样本归档/字典；`tests/` 仍是计划。正式基准前必须补生成脚本和清单。
 7. **旧工具样本**：`解密1/2/3` 只做静态分析，禁止执行；已被 `.gitignore` 排除。
-8. **性能数字**：现有 `docs/benchmarks/` 是非正式单机结果，不能外推到 7z/RAR KDF 或大归档。
+8. **7z 无认证器**：错误密码与损坏 payload 在 CRC 之前不可完全区分；完整 CRC 失败按 Miss，损坏归档可能表现为 `NOT FOUND`，没有独立“损坏”状态。头加密损坏也可能被当作头加密进入字典流程。
+9. **性能数字**：现有 `docs/benchmarks/` 是非正式单机结果，不能外推到 7z/RAR KDF 或大归档。
 
 ## 10. 快速阅读路径
 

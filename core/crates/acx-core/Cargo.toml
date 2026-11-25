@@ -9,10 +9,18 @@ description.workspace = true
 
 [dependencies]
 zip = { version = "9.8.2", default-features = false, features = ["deflate", "aes-crypto"] }
+# 0.25 requires Rust 1.93; the workspace MSRV is 1.89. 0.20.2 is the newest
+# release line that still builds on 1.89 and has the same read/AES API.
+sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["aes256", "bzip2", "ppmd"] }
 crc32fast = "1.5"
 thiserror = "2"
 encoding_rs = "0.8"
 crossbeam-channel = "0.5"
+
+[dev-dependencies]
+# Tests generate 7z fixtures in-process, so they need the writer/compressor
+# feature. Production builds deliberately do not enable `compress`.
+sevenz-rust2 = "0.20.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Globalization"] }

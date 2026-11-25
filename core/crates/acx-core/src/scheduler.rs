@@ -267,6 +267,7 @@ mod tests {
             encryption: Encryption::ZipCrypto,
             selected: Some(0),
             whole_archive: false,
+            header_encrypted: false,
             entries: Vec::new(),
         }
     }

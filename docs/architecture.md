@@ -56,7 +56,7 @@
 
 结论来自 2026-11 的技术调研（见 ADR-0001）：
 
-- 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。
+- 7z：`sevenz-rust2` 支持 AES-256、加密头（0.6+）、COPY/LZMA/LZMA2/PPMd/BZip2/Deflate/Brotli/LZ4/ZSTD 与 BCJ2 等过滤器，Apache-2.0。本项目当前只启用 `aes256`/`bzip2`/`ppmd`；Deflate/Brotli/LZ4/ZSTD 未启用，遇到会报不支持。
 - ZIP：`zip` crate 具备 ZipCrypto 与 WinZip AES（AE-1/AE-2，AES-128/192/256）读取能力；W1-002 已实现候选验证，第三方 7-Zip 差分待补；多卷需自建容器层。
 - RAR：解压用途由 UnRAR 许可允许；Windows Full 版随包**未修改的 `UnRAR.exe`**（仅进程），不把 unRAR 链接进主项目；hashcat 也仅外部进程。`unrar-rs` 仅本地实验，不是依赖。
 - 平台：Rust Android 为 Tier 2；`aarch64-unknown-linux-ohos` 为 Tier 2 with host tools，可用 OHOS clang 作为 linker。
@@ -70,7 +70,7 @@
 
 | 格式 | 加密 | 读取/解密 | 分卷 | 备注 |
 |---|---|---|---|---|
-| 7z | AES-256、可选头加密 | `sevenz-rust2` | 自建拼接 Reader（`.7z.001`） | SFX 扫描 PE overlay |
+| 7z | AES-256、可选头加密 | `sevenz-rust2`（W1-004 已实现 AES/`-mhe=on`/首块 + 完整 CRC；7-Zip 26.04 差分） | 自建拼接 Reader（`.7z.001`，未实现） | SFX 扫描 PE overlay |
 | ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
 | RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003/W1-003c 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
 | RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
@@ -90,6 +90,7 @@
 - 默认快速模式：store 条目用签名表（性能前提）；压缩条目用结构判据。
 - 严格模式：store 条目完整解压/CRC；慢但不会漏。
 - 命中由内置引擎（sevenz-rust2/zip）完整解压复核；CI 再用 7-Zip/unrar 做差分 oracle。设计目标是零误报，但不把绝对保证写进产品文案。
+- 7z：候选先解所选加密块首文件的前 64 KiB（LZMA/LZMA2 错误密钥通常立即失败），通过后再完整读取最小可验证条目并校验 CRC32；COPY 块跳过 probe，直接完整 CRC；`-mhe=on` 时先用候选解头，再走同样的完整 CRC。7z AES 没有认证器，CRC 失败与损坏 payload 不可完全区分，统一按 Miss。
 - 快筛误否决只在“快速模式”出现；UI 必须显示“未确认”，并提供严格模式复核。
 
 ### 4.3 RAR 与外部引擎策略（重要）
@@ -309,7 +310,7 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 | RAR/UnRAR 许可 | 非 OSI 组件、AV/商店风险 | Full 版随包未修改 UnRAR.exe + license，仅进程；WinRAR 不随包；见 ADR-0004 |
 | hashcat 随包 | AV 误报、驱动矩阵、更新成本 | 固定版本/哈希；外部进程；无 GPU 回落 CPU；发布前 Defender/VirusTotal |
 | GPU 驱动缺失 | GPU 不可用 | 检测 CUDA/HIP/OpenCL，明确提示，自动 CPU 回落 |
-| sevenz-rust2 边界 | 加密头/PPMd/异常包差异 | 差分测试（7-Zip oracle）；语料矩阵 |
+| sevenz-rust2 边界 | 分卷/其他压缩方法/异常包差异 | W1-004 已覆盖 AES/头加密/LZMA/LZMA2/COPY/BZip2/PPMd；分卷、Deflate/Brotli/LZ4/ZSTD 与损坏分类待补；7-Zip oracle 差分 |
 | HarmonyOS Rust 工具链 | 构建/加载不稳定 | 先 C ABI + 最小 NAPI spike；保留纯 ArkTS 降级 |
 | 移动端后台限制 | 长任务被挂起 | 前台服务/常亮/断点续算；不承诺后台 |
 | 应用商店政策 | 下架 | 仅自有档案声明；官网分发；不内置字典 |

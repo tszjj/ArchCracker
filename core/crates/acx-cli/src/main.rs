@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! ArchCracker command-line interface (W1: ZIP + external RAR dictionary slice).
+//! ArchCracker command-line interface (W1: ZIP, 7z, and external RAR).
 
-use acx_core::archive::{self, ArchiveFormat, ArchiveSessionFactory, RarFactory, ZipFactory};
+use acx_core::archive::{
+    self, ArchiveFormat, ArchiveSessionFactory, RarFactory, SevenZFactory, ZipFactory,
+};
 use acx_core::candidates::Dictionary;
 use acx_core::scheduler;
 use clap::Parser;
@@ -27,7 +29,7 @@ const EXIT_NOT_FOUND: u8 = 1;
     long_about = None
 )]
 struct Cli {
-    /// Archive to recover (ZIP, or RAR via a user-installed UnRAR).
+    /// Archive to recover (ZIP, 7z, or RAR via a user-installed UnRAR).
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     file: PathBuf,
 
@@ -74,12 +76,17 @@ fn run(cli: Cli) -> ExitCode {
     println!("Archive: {}", info.path.display());
     println!("Format: {}", info.format.as_str());
     println!("Encryption: {}", info.encryption.as_str());
-    if info.whole_archive || matches!(info.format, ArchiveFormat::Rar4 | ArchiveFormat::Rar5) {
+    if info.header_encrypted {
+        println!("Entries: n/a (encrypted header)");
+    } else if info.whole_archive || matches!(info.format, ArchiveFormat::Rar4 | ArchiveFormat::Rar5)
+    {
         println!("Entries: n/a (external RAR engine)");
     } else {
         println!("Entries: {}", info.entries.len());
     }
-    if info.whole_archive {
+    if info.header_encrypted {
+        println!("Selected: first encrypted entry after the password is known");
+    } else if info.whole_archive {
         println!("Selected: whole archive (external RAR test)");
     } else {
         match info.selected_entry() {
@@ -113,6 +120,13 @@ fn run(cli: Cli) -> ExitCode {
         ArchiveFormat::Zip => Arc::new(ZipFactory {
             path: cli.file.clone(),
         }),
+        ArchiveFormat::SevenZ => match SevenZFactory::from_info(cli.file.clone(), info.clone()) {
+            Ok(factory) => Arc::new(factory),
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_ARCHIVE);
+            }
+        },
         ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
             // `archive::preflight` already probed this RAR; reuse that result
             // instead of starting a second preflight in the factory.

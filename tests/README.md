@@ -35,3 +35,4 @@ tests/
 ## 当前状态
 
 M0：仅目录说明。P1 加入 ZIP/7z 语料生成器与首个差分用例。
+W1-004 起，7z 单测/CLI 集成测试在测试进程内用 `sevenz-rust2` writer 生成夹具；官方 7-Zip 26.04 `7zr` 仅作为本机差分 oracle（见 `docs/tasks/W1-004-sevenz.md`），二进制不提交。

@@ -13,6 +13,9 @@ pub enum AcxError {
     #[error("ZIP error: {0}")]
     Zip(#[from] zip::result::ZipError),
 
+    #[error("7z error: {0}")]
+    SevenZ(#[from] sevenz_rust2::Error),
+
     #[error("external engine error: {0}")]
     External(String),
 
