@@ -57,19 +57,22 @@
 - [x] ZIP：ZipCrypto + WinZip AES（W1-001/W1-002）
 - [x] 7z：`sevenz-rust2`；AES/头加密；首块探测（W1-004；7-Zip 26.04 差分）
 - [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003；RAR4/RAR5 已验证，W1-003c 补 RAR4 `-ma4`）；预检缓存（W1-003b）
-- [ ] 字典：流式、编码识别、去重、批处理
-- [ ] 调度：物理核数、有界队列、暂停/停止、命中仲裁
+- [ ] 字典：流式、编码识别、去重、批处理（W1-007）
+- [ ] 运行控制 + 断点：暂停/继续、优雅/强制停止、检查点、`--resume`（W1-006 合并 epic）
 - [x] 会话复用：每 worker 打开一次、RAR 预检在 factory 缓存；不每候选重开
-- [ ] 断点：归档指纹 + 字典偏移；强杀恢复
 - [ ] 错误分类：未加密/空包/损坏/缺卷/不支持/头加密
-- [ ] 基准语料与 p/s 报告
+- [ ] 基准语料与 p/s 报告（W1-008）
 
 **退出标准**
 
-- 1M 字典 × 1GB ZIP/7z/RAR（已知密码）完成，并记录 p/s（格式/线程/硬件）；"可接受"不作为验收措辞；
-- 取消 < 200 ms；强杀恢复误差 ≤ 1 批；
-- 错误分类 100% 正确（语料）；
-- 性能基线记录在 `docs/benchmarks/`。
+> 以 [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md) §5.4 为准。核心口径：
+
+- W1-001…W1-008 完成；CLI 字典模式覆盖 ZIP/7z/RAR、分卷、SFX；
+- 1M 字典 × 1GB ZIP/7z/RAR（已知密码）完成，并记录 p/s（格式/线程/硬件）；“可接受”不作为验收措辞；
+- 暂停/停止请求 ≤200 ms 被观察；优雅/强制停止 ≤2 s；强杀恢复误差 ≤1 批；
+- 已知密码 100% 命中；ZIP/ZipCrypto 10⁷ 错误候选 0 误报；7z/RAR5 抽样 ≥10⁵ 0 误报 + 差分；
+- 错误分类 100% 正确（语料）；性能基线记录在 `docs/benchmarks/`；
+- fmt/clippy/test/MSRV/release/cargo-deny 全绿；无 P0/P1 未关闭缺陷。
 
 **Agent 分工**：core-engineer（引擎/调度）+ qa（语料/基准）+ reviewer（每 PR）。
 
@@ -77,10 +80,17 @@
 
 ## W2 引擎与攻击（2–3 周）
 
-**目标**：覆盖 RAR/分卷/SFX/快筛/爆破，Windows CLI 达到 beta。
+**目标**：在 W1 准出后，补齐 CPU 快筛、掩码/暴力/混合、批量/编码变体，Windows CLI 达到 beta。GPU/hashcat 不在 W2 启动。
+
+**准入**：以 [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md) §5.5 为准：
+
+- W1 准出清单全部完成并有里程碑评审记录；
+- W2 任务文档、语料/差分 oracle、1GB/10⁷ 负例就绪；
+- W1 性能基线稳定，运行控制/断点接口不再大改；无 P0/P1；
+- CI/MSRV/许可门禁全绿；W2-001 GPU Deferred，不阻塞准入；GUI/移动端不提前引入。
 
 - [x] RAR 外部引擎：检测 `UnRAR.exe`/`unrar`；调用协议；错误映射；许可说明（W1-003；RAR4/RAR5 已验证；Full 随包 W4）
-- [ ] hashcat GPU 后端 spike：ZIP AES 13600 + RAR5 13000 提 hash；外部进程；CPU 回退（见 `docs/tasks/W2-001-hashcat-spike.md`）
+- [ ] **Deferred（W2 不启动）** hashcat GPU 后端 spike；W2 退出后重新评审（见 `docs/tasks/W2-001-hashcat-spike.md`）
 - [x] 分卷：7z/ZIP `.001` 拼接；RAR 交外部引擎；缺卷检测（W1-005；PKZIP `.z01` 明确不支持）
 - [x] SFX：PE overlay 扫描；数据区偏移（W1-005；7z/ZIP/RAR）
 - [ ] 快筛：ZIP verifier、RAR 头/密钥、7z 头 CRC/首块；严格模式
@@ -94,8 +104,9 @@
 
 - 已知密码 100% 命中；ZIP/ZipCrypto 10⁷ 错误候选 0 误报，7z/RAR5 抽样（≥10⁵）0 误报 + 差分；
 - 缺卷/损坏/未加密分类正确；
-- RAR 只通过外部 `UnRAR.exe`；hashcat 只通过外部进程，不是 Cargo 依赖；无 hashcat/GPU 时 CPU 多线程功能完整；
-- 快筛/严格模式结果差异可解释。
+- 快筛/严格模式结果差异可解释；
+- CPU 多线程路径完整；hashcat/GPU 未引入，不构成 W2 退出条件；
+- RAR 只通过外部 `UnRAR.exe`；无 unRAR/7-Zip RAR 源码或链接。
 
 **Agent 分工**：core-engineer ×2（引擎/候选）+ qa（差分测试）+ reviewer（许可）。
 

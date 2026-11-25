@@ -58,6 +58,7 @@ UnRAR 许可不是 OSI 自由许可，安装包必须在 NOTICE/THIRD_PARTY_NOTI
 
 ### 3.1 hashcat 与 GPU
 
+- 实现时点：W2-001 GPU/hashcat 后端已 **Deferred**，W2 不启动；CPU 路径是 W1/W2 的基线。W4 的 Full 随包策略不变，GPU 是否在 W4 前落地由后续评审决定。
 - Full 版随包固定版本 hashcat 二进制，附 MIT 许可与第三方声明；hashcat 只通过外部进程调用。
 - hashcat **不是核心 Rust 依赖**：`Cargo.toml`/`Cargo.lock` 不出现 hashcat、CUDA/HIP/OpenCL 绑定。
 - 不随包厂商 GPU 运行时/驱动（CUDA Toolkit、HIP SDK、Intel NEO、GPU 驱动）；这些由用户系统提供。hashcat 分发包自带的 OpenCL loader/压缩库随 hashcat 组件按其 MIT/第三方声明分发。

@@ -147,7 +147,7 @@ VERIFIED: cargo fmt/clippy/test (77 core + 34 CLI incl. 1 ignored + 2 FFI),
           split ZIP/7z/RAR, ZIP/7z SFX, missing-volume classification
 NOT VERIFIED: PKZIP spanned .z01, unusual SFX offsets, >32 MiB stub,
               RAR4 SFX -hp, volume/SFX performance, non-Windows runtime
-NEXT: W1-006 断点续跑
+NEXT: W1-006 运行控制与断点续跑（合并 epic）
 RISKS: ZIP/7z final-volume detection is heuristic; RAR diagnostics are
        localized/engine-dependent. PKZIP spanned and unusual SFX layouts
        are explicitly unsupported.

@@ -40,24 +40,25 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 2. **ZIP**：ZipCrypto + WinZip AES（W1-002 已实现 AE-1/AE-2、AES-128/192/256 读取/验证；7-Zip 差分待补）。
 3. **7z**：W1-004 已实现 `sevenz-rust2` 读取、AES-256、`-mhe=on` 头加密、首块 64 KiB 探测 + 完整 CRC；与 7-Zip 26.04 CLI 差分。
 4. **RAR（外部）**：W1-003 已实现检测 `UnRAR.exe`、整包 `t` 验证；密码走 stdin，不写 argv；W1-003b 在 factory 创建时预检一次并缓存，worker 不再重复预检；W1-003c 已在 WinRAR 6.24 下验证 RAR4 `-ma4` 与 RAR5。
-5. **字典**：流式、UTF-8/UTF-16/GBK、去重、空行/长行。
-6. **调度**：物理核数、有界队列、每 worker 独占会话、命中仲裁、暂停/停止。
-7. **断点**：归档指纹 + 字典偏移；强杀恢复。
-8. **CLI**：`-f -m dict -d -t --strict/--fast --resume --auto-extract`；退出码。
+5. **字典**：流式、UTF-8/UTF-16/GBK、去重、空行/长行（W1-007）。
+6. **运行控制与断点（W1-006 合并 epic）**：在现有有界队列/worker 上增加暂停/继续、优雅/强制停止、外部 UnRAR 子进程取消；连续批次水位、检查点原子写、`--resume` 指纹校验。
+7. **CLI**：`-f -m dict -d -t --strict/--fast --resume --auto-extract`；退出码。
 
-**W1 退出**：1M 字典在 ZIP/7z 样本上完成；RAR 样本通过外部 UnRAR 完成；p/s 记录；缺卷/损坏/未加密分类正确。
+**W1 准出**：以 [PROJECT-GUIDE §5.4](PROJECT-GUIDE.md#54-w1-准出标准) 为准。核心口径：1M 字典 × 1GB ZIP/7z/RAR 完成并记录 p/s；暂停/停止观察 ≤200 ms、停止 ≤2 s、强杀恢复 ≤1 批；已知密码 100% 命中，ZIP 10⁷/7z·RAR5 ≥10⁵ 错误候选 0 误报；缺卷/损坏/未加密分类 100% 正确；CI/MSRV/许可全绿。
 
 ## 4. W2：引擎与攻击
 
+**准入**：以 [PROJECT-GUIDE §5.5](PROJECT-GUIDE.md#55-w2-准入标准) 为准；W1 准出后启动。
+
 - 快筛：ZIP verifier、7z 头/首块、RAR 头/密钥（clean-room；只做否决）。
-- GPU 字典批量：hashcat 外部后端，ZIP AES 13600 + RAR5 13000 提 hash；`--gpu auto`；无 GPU/hashcat 回落 CPU。
+- **GPU/hashcat：W2-001 Deferred，W2 不启动**；W2 先完成 CPU 快筛、掩码/暴力、批量/编码。GPU 在 W2 退出后单独评审。
 - 掩码/暴力：字符集、长度、UInt128 键空间、分区、进度。
 - 分卷/SFX 已由 W1-005 提前交付；W2 只做异常布局/性能补强。
 - 批量：多包队列、包间密码复用。
 - 编码变体：UTF-8/GBK 双试（按格式开关）。
 - 成本预估：“预计 X 分钟/天”，超阈值确认。
 
-**W2 退出**：掩码/暴力可暂停/恢复；快筛 vs 严格模式差异可解释；0 误报（按格式抽样）；hashcat GPU spike 有同机基准与 CPU 回退证据。
+**W2 退出**：掩码/暴力可暂停/恢复；快筛 vs 严格模式差异可解释；0 误报（按格式抽样）；CPU 多线程路径完整；GPU/hashcat 不作为 W2 退出条件。
 
 ## 5. RAR 的 Windows 实现
 

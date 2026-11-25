@@ -181,7 +181,7 @@ VERIFIED: cargo fmt/clippy/test (59 core + 19 CLI incl. 1 ignored + 2 FFI),
           7zr 26.04 differential (file/header/stored/solid/unicode/plain)
 NOT VERIFIED: >64 MiB, no-CRC archives, 7z p/s benchmark,
               non-Windows runtime
-NEXT: W1-006 断点续跑
+NEXT: W1-006 运行控制与断点续跑（合并 epic）
 RISKS: 7z AES has no authenticator; corruption and wrong password can look
        identical. The CRC gate prevents false hits but may turn a damaged
        archive into "not found". Documented, not silently accepted as success.

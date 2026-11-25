@@ -110,6 +110,8 @@ W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` �
 
 ### 4.4 hashcat GPU 后端（可选，外部进程）
 
+> **实现状态：W2-001 Deferred，W2 不启动。** 以下为保留的设计约束；W4 的 Full 随包策略不变，CPU 多线程路径是 W1/W2 的基线。GPU 在 W2 退出后按任务文档的解除条件重新评审。
+
 - hashcat 随 Full 安装包分发（固定版本、MIT/第三方声明），但**不进入 Cargo 依赖**。
 - 后端流程：`ArchiveInfo` → Rust 提 hashspec → hashcat 外部进程（GPU）→ 命中候选交 `ArchiveSession` 完整复核。
 - 无 hashcat、无可用 GPU、驱动不满足或用户禁用 GPU 时，自动回落现有多线程 CPU 调度；CPU 功能与不带 hashcat 时一致。
