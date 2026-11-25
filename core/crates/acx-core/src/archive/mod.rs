@@ -15,6 +15,10 @@ pub use sevenz::{SevenZFactory, SevenZSession};
 pub use source::{ArchiveSource, VolumeReader};
 pub use zip::{ZipFactory, ZipSession};
 
+mod rar5_verify;
+
+pub use rar5_verify::Rar5Verifier;
+
 use crate::engines::external::CancelToken;
 use crate::error::{AcxError, Result};
 use std::path::Path;

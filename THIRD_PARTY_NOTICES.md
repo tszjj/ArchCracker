@@ -9,7 +9,7 @@
 | `zip` | ZIP 读写（`deflate` + `aes-crypto`） | MIT | 源码依赖 |
 | `sevenz-rust2` | 7z 读取（AES-256/头加密/LZMA/BZip2/PPMd） | Apache-2.0 | 源码依赖 |
 | `lzma-rust2` | `sevenz-rust2` 的 LZMA/LZMA2 传递依赖 | Apache-2.0 | 源码依赖 |
-| `aes` 0.8 / `cbc` / `sha2` / `getrandom` / `futures-*` / `version_check` | `sevenz-rust2` 的 AES/哈希传递依赖 | MIT OR Apache-2.0 | 源码依赖 |
+| `aes` 0.8 / `cbc` / `sha2` / `getrandom` / `futures-*` / `version_check` | `sevenz-rust2` 的 AES/哈希传递依赖；`sha2` 同时由 W1-009 RAR5 check 直接使用 | MIT OR Apache-2.0 | 源码依赖 |
 | `generic-array` | `sevenz-rust2` 的 AES 传递依赖 | MIT | 源码依赖 |
 | `bzip2` / `libbz2-rs-sys` | `sevenz-rust2` 的 BZip2 传递依赖 | MIT OR Apache-2.0；`libbz2-rs-sys` 为 bzip2-1.0.6 | 源码依赖 |
 | `ppmd-rust` | `sevenz-rust2` 的 PPMd 传递依赖 | CC0-1.0 OR MIT-0 | 源码依赖 |
@@ -25,7 +25,7 @@
 
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
-| `UnRAR.exe`（未修改） | RAR4/RAR5 测试/解压 | UnRAR License（非 OSI） | Full 安装包 `third_party/unrar/`，附 license.txt，仅进程 |
+| `UnRAR.exe`（未修改） | RAR4/RAR5 密码/完整性测试 oracle | UnRAR License（非 OSI） | Full 安装包 `third_party/unrar/`，附 license.txt，仅进程 |
 | hashcat（固定版本） | GPU 字典后端 | MIT + 第三方声明 | Full 安装包 `third_party/hashcat/`，仅进程 |
 
 > Full 版只有一个安装包，不分层。UnRAR/hashcat 的版本、来源、SHA-256 记录在 `third_party/manifest.json`；构建/发布按清单获取，运行时不在线更新。hashcat 分发包内的 OpenCL loader/压缩库按其各自许可声明。
