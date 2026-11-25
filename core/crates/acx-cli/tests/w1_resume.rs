@@ -136,6 +136,24 @@ fn resume_starts_after_the_checkpoint_watermark() {
 }
 
 #[test]
+fn missing_dictionary_exits_two() {
+    let temp = TempDir::new("missing-dict");
+    let archive = temp.join("encrypted.zip");
+    write_zip(&archive);
+    let missing = temp.join("does-not-exist.txt");
+
+    let output = acx()
+        .arg("-f")
+        .arg(&archive)
+        .arg("-d")
+        .arg(&missing)
+        .output()
+        .expect("run acx");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+}
+
+#[test]
 fn resume_starts_at_the_watermark_not_at_zero() {
     let temp = TempDir::new("starts-at-watermark");
     let archive = temp.join("encrypted.zip");
