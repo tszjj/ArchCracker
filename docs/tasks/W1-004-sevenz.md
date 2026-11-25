@@ -46,7 +46,7 @@
 
 COPY（stored）条目没有压缩流结构，首块探测无法否决；实现上直接跳过 probe，完整 CRC 校验负责区分（同时避免同一候选做两次 AES KDF）。为避免候选测试变成大文件解压：
 
-- 单条目完整校验上限 **64 MiB**；超过则返回 `Unsupported`；
+- 单条目完整校验在 W1-004 时上限 **64 MiB**；W1-006 已改为固定 8 KiB 缓冲区流式读取，不再按条目大小拒绝；
 - 首块探测上限 **64 KiB**。
 
 ### 2.4 密码编码
@@ -156,7 +156,7 @@ cargo test -p acx-cli --test w1_sevenz -- --ignored
 
 - 7z 分卷 `.7z.001`、SFX（W1-005 已补；本切片不覆盖）；
 - 7z 的 Brotli / LZ4 / ZSTD / Deflate 压缩方法未启用对应 feature（LZMA/LZMA2/COPY/BZip2/PPMd 可用）；
-- > 64 MiB 的验证目标（W1 明确拒绝）；
+- 1GB 7z 的完整候选验证时延与 p/s 未测（W1-006 已取消 64 MiB 上限，改为固定缓冲区流式读取）；
 - 7z 条目无 CRC 的归档（选择器要求 CRC；返回 `Unsupported`，不做无校验的 Hit）；
 - 重复文件名（目标按文件索引选择，但 `ArchiveReader` 的 name index 不参与验证，当前实现不依赖名字）；
 - 7z 性能 p/s 未做正式基准；
@@ -179,7 +179,7 @@ CHANGED: core/crates/acx-core/src/archive/{info,mod,sevenz}.rs,
 VERIFIED: cargo fmt/clippy/test (59 core + 19 CLI incl. 1 ignored + 2 FFI),
           cargo +1.89 test, release build, cargo-deny,
           7zr 26.04 differential (file/header/stored/solid/unicode/plain)
-NOT VERIFIED: >64 MiB, no-CRC archives, 7z p/s benchmark,
+NOT VERIFIED: 1GB 7z p/s, no-CRC archives, 7z p/s benchmark,
               non-Windows runtime
 NEXT: W1-006 运行控制与断点续跑（合并 epic）
 RISKS: 7z AES has no authenticator; corruption and wrong password can look

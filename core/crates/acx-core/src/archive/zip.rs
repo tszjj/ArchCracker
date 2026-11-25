@@ -20,10 +20,9 @@ use std::path::{Path, PathBuf};
 use zip::result::ZipError;
 use zip::{HasZipMetadata, ZipArchive};
 
-/// Hard cap for one verification pass during the W1 slice. The W1 corpus is
-/// tiny; refusing huge entries keeps a dictionary attack from turning into an
-/// accidental full-file decompression.
-const MAX_VERIFY_BYTES: u64 = 64 * 1024 * 1024;
+/// A fixed buffer used to stream large entries. Verification must not allocate
+/// a buffer proportional to the entry size; a 1 GB archive is a W1 target.
+const VERIFY_BUFFER: usize = 64 * 1024;
 
 /// One open ZIP archive, owned by a scheduler worker.
 pub struct ZipSession {
@@ -193,40 +192,30 @@ impl ZipSession {
 
         let expected_crc = entry.crc32();
         let declared_size = entry.size();
-        if declared_size > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected entry is {declared_size} bytes, larger than the {MAX_VERIFY_BYTES}-byte W1 verification cap"
-            )));
-        }
 
-        // Read through a `take` limit as well: the declared size lives in the
-        // archive and must not be trusted to bound the allocation.
-        let mut bytes = Vec::new();
-        if let Err(err) = (&mut entry)
-            .take(MAX_VERIFY_BYTES.saturating_add(1))
-            .read_to_end(&mut bytes)
-        {
-            // A candidate that slipped through the 1/256 ZipCrypto header
-            // check decrypts to garbage: the decompressor either fails or the
-            // crate's CRC reader reports a mismatch. Both surface as
-            // `InvalidData`/`UnexpectedEof` and mean "this password is wrong".
-            // Genuine I/O failures (disk, permissions) keep propagating so the
-            // scheduler can abort instead of silently recording misses.
-            if is_candidate_rejection(&err) {
-                return Ok(PasswordTest::Miss);
+        // Stream the full entry with a fixed buffer; do not allocate by size.
+        let mut hasher = crc32fast::Hasher::new();
+        let mut total = 0u64;
+        let mut buf = [0u8; VERIFY_BUFFER];
+        loop {
+            match entry.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => {
+                    hasher.update(&buf[..read]);
+                    total += read as u64;
+                }
+                Err(err) if is_candidate_rejection(&err) => return Ok(PasswordTest::Miss),
+                Err(err) => return Err(AcxError::Io(err)),
             }
-            return Err(AcxError::Io(err));
         }
 
-        if bytes.len() as u64 > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected entry decompresses past the {MAX_VERIFY_BYTES}-byte W1 verification cap"
-            )));
+        if total != declared_size {
+            return Ok(PasswordTest::Miss);
         }
 
         // Defense in depth against the ZipCrypto 1/256 false header pass: only
         // a full-content CRC match counts as a hit.
-        if crc32fast::hash(&bytes) == expected_crc {
+        if hasher.finalize() == expected_crc {
             Ok(PasswordTest::Hit)
         } else {
             Ok(PasswordTest::Miss)
@@ -248,31 +237,19 @@ impl ZipSession {
         };
 
         let declared_size = entry.size();
-        if declared_size > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected entry is {declared_size} bytes, larger than the {MAX_VERIFY_BYTES}-byte W1 verification cap"
-            )));
-        }
-
-        let mut bytes = Vec::new();
-        if let Err(err) = (&mut entry)
-            .take(MAX_VERIFY_BYTES.saturating_add(1))
-            .read_to_end(&mut bytes)
-        {
-            // After a verifier collision, AES decryption produces garbage and
-            // the final HMAC comparison fails (`InvalidData`); a corrupt
-            // deflate stream surfaces as `InvalidInput`. Both mean the
-            // candidate is not confirmed. Real I/O failures still propagate.
-            if is_candidate_rejection(&err) {
-                return Ok(PasswordTest::Miss);
+        let mut total = 0u64;
+        let mut buf = [0u8; VERIFY_BUFFER];
+        loop {
+            match entry.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => total += read as u64,
+                Err(err) if is_candidate_rejection(&err) => return Ok(PasswordTest::Miss),
+                Err(err) => return Err(AcxError::Io(err)),
             }
-            return Err(AcxError::Io(err));
         }
 
-        if bytes.len() as u64 > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected entry decompresses past the {MAX_VERIFY_BYTES}-byte W1 verification cap"
-            )));
+        if total != declared_size {
+            return Ok(PasswordTest::Miss);
         }
 
         // Reaching EOF means the AES reader consumed the authentication code

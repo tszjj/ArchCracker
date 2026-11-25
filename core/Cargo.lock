@@ -9,6 +9,7 @@ dependencies = [
  "acx-core",
  "clap",
  "sevenz-rust2",
+ "windows-sys",
  "zip",
 ]
 

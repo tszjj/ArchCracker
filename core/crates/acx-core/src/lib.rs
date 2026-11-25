@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod attack;
 pub mod candidates;
+pub mod checkpoint;
 pub mod engines;
 pub mod error;
 pub mod scheduler;

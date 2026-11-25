@@ -15,6 +15,7 @@ pub use sevenz::{SevenZFactory, SevenZSession};
 pub use source::{ArchiveSource, VolumeReader};
 pub use zip::{ZipFactory, ZipSession};
 
+use crate::engines::external::CancelToken;
 use crate::error::{AcxError, Result};
 use std::path::Path;
 
@@ -26,6 +27,10 @@ pub trait ArchiveSession: Send {
     /// engine has verified the entry content (CRC/HMAC) or, for external RAR,
     /// after the whole archive tested successfully.
     fn test_password(&mut self, password: &[u8]) -> Result<PasswordTest>;
+
+    /// Attach a cancellation token used by blocking external engines. Engines
+    /// whose candidate test is bounded in-process may ignore it.
+    fn set_cancel_token(&mut self, _token: CancelToken) {}
 }
 
 /// Opens independent sessions for scheduler workers.

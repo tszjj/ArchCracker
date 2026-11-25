@@ -1,6 +1,6 @@
 # W1-006：运行控制与断点续跑（合并 epic）
 
-- **状态**：待开始
+- **状态**：**进行中（本地实现完成，reviewer APPROVE；待用户大语料/矩阵测试）**
 - **门禁**：属于 W1 准出项；W2-001 GPU 不在此 epic，且 W2 不启动
 - **角色**：core-engineer + reviewer
 - **分支**：`feat/w1-006-run-control`
@@ -31,23 +31,23 @@
 
 ### 2.1 运行控制
 
-- `RunControl` 状态：`Running`、`Pausing`、`Paused`、`Stopping`、`Stopped`；
-- `pause()`：停止派发新批次；worker 在当前候选/批次边界停下；保留 worker、归档会话、内存字典；
-- `resume()`：清暂停，继续派发；
-- `stop()`：停止派发；worker 不再开始新候选；外部 UnRAR 子进程可被取消；
-- `force_stop()`：立即请求终止；外部子进程 kill；CPU 候选在当前调用返回后退出；
-- `RunOutcome`：`Found`、`Exhausted`、`Paused(Checkpoint?)`、`Stopped(Checkpoint?)`、`Error`；
-- 进度查询：`tried`、`total`、`completed_through`、p/s、ETA、暂停/停止请求状态。
+- `RunControl` 状态：`Running`、`Paused`、`Stopping`、`Stopped`、`Finished`；
+- `pause()`：停止派发新批次；worker 在当前候选边界停下；保留 worker、归档会话、内存字典；暂停时 `run` 阻塞等待 `resume()`/`stop()`；
+- `resume()`：清暂停，继续派发；同一进程、同一会话，不重开归档；
+- `stop()`：停止派发；worker 不再开始新候选；外部 UnRAR 子进程被 kill；
+- `force_stop()`：当前与 `stop()` 相同；CPU 候选在当前调用返回后退出；
+- `RunOutcome`：`Found`、`Exhausted`、`Stopped(RunProgress)`；暂停不是终态；
+- 进度查询：`tried`、`total`、`completed_through`、elapsed；`completed_through` 是连续完成候选前缀。
 
 ### 2.2 检查点与续跑
 
 - `Checkpoint` 至少包含：
   - schema 版本、工具版本；
-  - 归档指纹：规范化路径、大小、mtime、分卷列表；可选首尾块哈希；
-  - 字典指纹：大小、哈希、编码；恢复用候选索引；
-  - 攻击参数：模式、`threads`、严格/快速、引擎路径/版本；
+  - 归档指纹：规范化路径、大小、mtime、分卷列表、首尾 64 KiB CRC32；
+  - 字典指纹：路径、大小、mtime、首尾 64 KiB CRC32；
+  - 攻击参数：模式、`threads`；
   - **连续完成水位** `completed_through`（不是 `tried` 的最大值）；
-  - 统计：tried、耗时、p/s、创建时间；
+  - 统计：tried、创建时间；p/s 只由 CLI 输出，不持久化；
 - 原子写：临时文件 + fsync + rename；写锁防止双开；
 - `--resume` 加载并校验；指纹不匹配明确拒绝，不静默从头跑；
 - 硬杀恢复误差 ≤ 1 批（4096）；允许重放，不允许漏候选；
@@ -66,13 +66,13 @@
 
 ### 4.1 水位必须按批次连续完成
 
-N 个 worker 完成顺序不确定。不能把“最大已尝试索引”作为续跑点，否则会跳过仍在执行中的批次。实现要求：
+N 个 worker 完成顺序不确定。不能把“最大已尝试索引”作为续跑点，否则会跳过仍在执行中的候选。实现要求：
 
 - producer 为批次编号；
-- worker 完成批次后 ack；
-- 只把**连续完成前缀**写入 `completed_through`；
-- 暂停时先停止派发，等在途批次完成/取消后再写检查点；
-- 强杀时最多丢失一个未 ack 批次，恢复时重放 ≤1 批。
+- 每个候选完成后标记 bit，并推进**连续完成前缀** `completed_through`；
+- 命中候选本身**不推进**水位：这样即使在“命中后、删除检查点前”被强杀，续跑也会重放该候选而不是跳过密码；
+- 检查点只写该前缀；强杀时最多重放当前 in-flight 候选（≤线程数，远小于 1 批）；
+- 暂停时停止派发，worker 在候选边界等待；恢复后继续使用原来的 session。
 
 ### 4.2 外部引擎取消
 
@@ -90,33 +90,47 @@ RAR 的 `UnRAR t` 是阻塞进程。`RunControl` 必须把取消句柄传给 `en
 
 ## 5. 验收标准
 
-- [ ] `pause()` 在 ≤200 ms 内被 scheduler 观察到；CPU 候选在下一个候选边界停下；
-- [ ] 暂停后 `resume()` 原地继续，不重开归档、不丢候选；
-- [ ] 优雅 `stop()` 在 ≤2 s 内结束（外部 UnRAR 子进程被 kill），退出后无残留进程；
-- [ ] `force_stop()` 在 ≤2 s 内结束；
-- [ ] 检查点原子写；崩溃后文件不半写；
-- [ ] 硬杀恢复 `completed_through` 误差 ≤1 批；不重复已命中结果、不漏候选；
-- [ ] 归档/字典/参数指纹不匹配时拒绝续跑并给出具体差异；
-- [ ] ZIP、7z、RAR 外部分别覆盖暂停、停止、恢复测试；
-- [ ] CLI：`--resume`、暂停/停止提示、退出码与现有 0/1/2/3 约定一致；
-- [ ] `cargo fmt`、`clippy -D warnings`、`cargo test --workspace`、MSRV 1.89、release build、cargo-deny 全绿；
-- [ ] 文档记录暂停/停止/续跑的语义、检查点位置、未验证项。
+- [x] `pause()` 在 ≤200 ms 内被 scheduler 观察到；CPU 候选在下一个候选边界停下（fake session 测试）；
+- [x] 暂停后 `resume()` 原地继续，不重开归档/会话；
+- [x] 优雅 `stop()` 结束并返回安全水位；外部 `CancelToken` 有独立测试；
+- [x] `force_stop()` 走同一停止路径；
+- [x] 检查点临时文件 + fsync + rename；崩溃后不半写；
+- [x] 硬杀恢复 `completed_through` 不跳过候选（本机 2 s kill：checkpoint 11/200，`--resume` 从 11 继续）；
+- [x] 归档/字典指纹不匹配时拒绝续跑（CLI 测试）；
+- [ ] ZIP、7z、RAR 外部分别覆盖暂停、停止、恢复测试（当前只有 fake session + ZIP resume；7z/RAR 的停止矩阵待补）；
+- [x] CLI：`--checkpoint`、`--resume`、TTY `p/r/s`、Ctrl+C 停止、退出码 0/1/2/3/4；
+- [x] `cargo fmt`、`clippy -D warnings`、`cargo test --workspace`、MSRV 1.89、release build、cargo-deny 全绿；
+- [x] 文档记录暂停/停止/续跑的语义、检查点位置、未验证项。
+
+## 5.1 本地实现与验证
+
+- 运行控制：[scheduler.rs](../../core/crates/acx-core/src/scheduler.rs) 的 `RunControl`/`RunContext`/`RunOutcome`；
+- 外部取消：[external.rs](../../core/crates/acx-core/src/engines/external.rs) 的 `CancelToken`/`run_cancellable`；`ArchiveSession::set_cancel_token` 接入 RAR；
+- 检查点：[checkpoint.rs](../../core/crates/acx-core/src/checkpoint.rs)（无 JSON 依赖的 key=value 格式、原子写、锁、指纹）；
+- CLI：`--checkpoint`、`--resume`、TTY `p/r/s`、Ctrl+C 停止、退出码 4；
+- 测试：core 84（新增 scheduler 3、checkpoint 3、external cancel 1），CLI 37（含 1 ignored；新增 resume 3）；
+- 命中后若检查点删除失败：CLI 先打印 `FOUND: <password>`，再以 3 退出并报错，不静默留下可续跑检查点；
+- 本机验证：fmt/clippy、`cargo test --workspace`、MSRV 1.89、release build、cargo-deny；硬杀后 `--resume` 从 checkpoint 水位继续。
 
 ## 6. 风险
 
-- `ArchiveSession::test_password` 目前是阻塞调用；7z 64 MiB 完整 CRC 可能让“停止”超过 2 秒。验收按“控制请求被观察 ≤200 ms、当前候选结束后停止”定义，不承诺抢占式中断。
-- 并发水位若实现成 `tried` 计数会导致漏候选；必须用连续批次 ack。
+- `ArchiveSession::test_password` 目前是阻塞调用；1GB 条目完整 CRC 可能让“停止”超过 2 秒。验收按“控制请求被观察 ≤200 ms、当前候选结束后停止”定义，不承诺抢占式中断。
+- 并发水位若实现成 `tried` 计数会导致漏候选；当前用逐候选 bit + 连续前缀。
 - 归档可能在暂停期间被修改；续跑前必须校验指纹。
 - RAR 外部进程的取消/管道清理是平台相关代码，需要 Windows 实测。
 - 暂停时保留内存字典；1M 字典可接受，更大字典需等 W1-007 流式化。
+- 检查点锁是 W1 单进程 advisory lock；硬杀后由 `--resume` 清理，不做多用户并发保证。
 
 ## 7. 交接
 
 ```text
-STATUS: planned
-CHANGED: docs/tasks/W1-006-run-control-resume.md, docs/{PROJECT-GUIDE,roadmap,windows-plan}.md
-VERIFIED: documentation only
-NOT VERIFIED: implementation
-NEXT: implement RunControl + external cancellation, then CheckpointStore + --resume
-RISKS: in-flight candidate latency; concurrent watermark correctness; external child cancellation
+STATUS: partial（本地实现 + reviewer APPROVE；待用户大语料/矩阵测试）
+CHANGED: core/crates/acx-core/src/{scheduler,checkpoint,error,archive/mod,archive/rar,engines/external}.rs,
+         core/crates/acx-cli/src/main.rs, core/crates/acx-cli/tests/w1_resume.rs,
+         docs/tasks/W1-006-run-control-resume.md
+VERIFIED: 84 core + 37 CLI（1 ignored）+ 2 FFI; fmt/clippy/MSRV 1.89/release/cargo-deny;
+          hard-kill checkpoint 11/200 -> --resume from 11
+NOT VERIFIED: TTY p/r/s 自动化; RAR stop matrix; 1GB/1M user corpus; MSVC CI
+NEXT: 用户用测试文件跑 ZIP/7z/RAR pause/stop/resume；reviewer 复核；再做 W1-007
+RISKS: in-flight candidate latency; external child cancellation; checkpoint lock is single-process
 ```

@@ -60,7 +60,7 @@ pub trait ArchiveSessionFactory: Send + Sync { fn open(&self) -> Result<Box<dyn 
   - `archive.by_index_decrypt(idx, password)`：
     - `Err(ZipError::InvalidPassword)` → `Miss`；其他错误可返回 `Miss` 或 `Err`（说明理由）。
     - `Ok(mut file)`：读到 EOF（`Read::read_to_end`），用 `crc32fast` 计算输出 CRC，与 `file.crc32()` 比较；相等 `Hit`，否则 `Miss`（防 ZipCrypto 1/256 误通过）。
-  - 大条目可先限制 64 MiB（W1 语料很小），超出返回 `Err(AcxError::Unsupported("entry too large for W1 verification"))`。
+  - 历史上大条目限制 64 MiB（W1 语料很小）；W1-006 已改为固定 64 KiB 缓冲区流式验证，不再按大小拒绝。
 - `ZipFactory { path }` 实现 `ArchiveSessionFactory`。
 - 单元测试：用 `zip::ZipWriter` + `FileOptionsExt::with_deprecated_encryption` 在临时目录生成 ZipCrypto ZIP（密码 `P@ssw0rd123`），测试：
   - 预检 `encryption=ZipCrypto`、`selected` 是最小加密文件；
@@ -145,4 +145,4 @@ cargo run -p acx-cli -- --version
 - 手工复测 reviewer 语料：deflated 正确密码 exit 0、5000 错误密码 exit 1；空条目 exit 3。
 - 验证：`cargo test --workspace`（24 core + 4 CLI + 4 集成 + 2 FFI）通过；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 通过。
 - 基线：`docs/benchmarks/w1-zipcrypto.md`（1M 错误候选，release/4 线程约 1.6 s；极小条目，不能外推）。
-- 未覆盖：真实 AES ZIP、>64 MiB 条目、非 Windows 平台、大归档 p/s 基准（W1 后续）。
+- 未覆盖：真实 AES ZIP、1GB 条目性能、非 Windows 平台、大归档 p/s 基准（W1 后续）。

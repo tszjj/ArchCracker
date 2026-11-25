@@ -30,11 +30,6 @@ use sevenz_rust2::{Archive, BlockDecoder, EncoderMethod, Error as SevenZError, P
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
-/// Hard cap for one full verification pass. W1 targets the smallest entry; a
-/// larger entry is refused rather than turning a candidate test into a
-/// multi-gigabyte decompression.
-const MAX_VERIFY_BYTES: u64 = 64 * 1024 * 1024;
-
 /// How much plaintext the first-block probe reads before declaring the
 /// candidate structurally plausible.
 const PROBE_BYTES: u64 = 64 * 1024;
@@ -135,12 +130,6 @@ impl SevenZSession {
             .archive
             .as_ref()
             .ok_or_else(|| AcxError::Internal("7z session has no parsed archive".to_string()))?;
-        if archive.files[target].size > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected 7z entry is {} bytes, larger than the {MAX_VERIFY_BYTES}-byte W1 verification cap",
-                archive.files[target].size
-            )));
-        }
 
         let Some(password) = encode_password(password) else {
             // A dictionary entry that is not valid UTF-8 cannot be represented
@@ -193,12 +182,6 @@ impl SevenZSession {
                 "7z archive has no non-empty encrypted entry with a CRC to verify".to_string(),
             )
         })?;
-        if archive.files[target].size > MAX_VERIFY_BYTES {
-            return Err(AcxError::Unsupported(format!(
-                "selected 7z entry is {} bytes, larger than the {MAX_VERIFY_BYTES}-byte W1 verification cap",
-                archive.files[target].size
-            )));
-        }
 
         match verify_target(&mut file, &archive, target, &password) {
             Ok(()) => Ok(PasswordTest::Hit),
@@ -504,11 +487,6 @@ fn verify_target<R: Read + Seek>(
                     break;
                 }
                 total += read as u64;
-                if total > MAX_VERIFY_BYTES {
-                    return Err(SevenZError::Other(
-                        "7z entry exceeded the W1 verification cap".into(),
-                    ));
-                }
             }
             if total != expected {
                 return Err(SevenZError::Io(

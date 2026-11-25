@@ -41,10 +41,10 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 3. **7z**：W1-004 已实现 `sevenz-rust2` 读取、AES-256、`-mhe=on` 头加密、首块 64 KiB 探测 + 完整 CRC；与 7-Zip 26.04 CLI 差分。
 4. **RAR（外部）**：W1-003 已实现检测 `UnRAR.exe`、整包 `t` 验证；密码走 stdin，不写 argv；W1-003b 在 factory 创建时预检一次并缓存，worker 不再重复预检；W1-003c 已在 WinRAR 6.24 下验证 RAR4 `-ma4` 与 RAR5。
 5. **字典**：流式、UTF-8/UTF-16/GBK、去重、空行/长行（W1-007）。
-6. **运行控制与断点（W1-006 合并 epic）**：在现有有界队列/worker 上增加暂停/继续、优雅/强制停止、外部 UnRAR 子进程取消；连续批次水位、检查点原子写、`--resume` 指纹校验。
-7. **CLI**：`-f -m dict -d -t --strict/--fast --resume --auto-extract`；退出码。
+6. **运行控制与断点（W1-006 合并 epic）**：在现有有界队列/worker 上增加暂停/继续、优雅/强制停止、外部 UnRAR 子进程取消；连续批次水位、检查点原子写、`--resume` 指纹校验（已本地实现，reviewer APPROVE，待用户大语料测试）。
+7. **CLI**：`-f -m dict -d -t --strict/--fast --checkpoint --resume --auto-extract`；退出码 0/1/2/3/4（4=已停止并保存检查点）。
 
-**W1 准出**：以 [PROJECT-GUIDE §5.4](PROJECT-GUIDE.md#54-w1-准出标准) 为准。核心口径：1M 字典 × 1GB ZIP/7z/RAR 完成并记录 p/s；暂停/停止观察 ≤200 ms、停止 ≤2 s、强杀恢复 ≤1 批；已知密码 100% 命中，ZIP 10⁷/7z·RAR5 ≥10⁵ 错误候选 0 误报；缺卷/损坏/未加密分类 100% 正确；CI/MSRV/许可全绿。
+**W1 准出**：以 [PROJECT-GUIDE §5.4](PROJECT-GUIDE.md#54-w1-准出标准) 为准。核心口径：1M 字典 × 1GB ZIP/7z/RAR 完成并记录 p/s；暂停/停止请求观察 ≤200 ms、外部子进程 ≤2 s kill、1GB CPU 候选时延记录、强杀恢复 ≤1 批；已知密码 100% 命中，ZIP 10⁷/7z·RAR5 ≥10⁵ 错误候选 0 误报；缺卷/损坏/未加密分类 100% 正确；CI/MSRV/许可全绿。
 
 ## 4. W2：引擎与攻击
 

@@ -23,14 +23,14 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 当前阶段 | **W1 进行中** | 下一步 W1-006 运行控制/断点；W2–W5 未开始 |
+| 当前阶段 | **W1 进行中** | W1-006 本地实现（reviewer APPROVE，待大语料）；W2–W5 未开始 |
 | 已完成切片 | W1-001、W1-002、W1-003、W1-003b、W1-003c、W1-004、W1-005 | 前五已合并；W1-004/005 为本地分支，按里程碑统一推送 |
-| 内核能力 | ZIP、7z、RAR（外部）、分卷、SFX、字典、多线程调度 | W1-006 运行控制/断点、W1-007 流式字典未完成 |
-| CLI | `acx -f <archive> -m dict -d <dict> -t N` | 仅字典模式；退出码 0/1/2/3 |
+| 内核能力 | ZIP、7z、RAR（外部）、分卷、SFX、字典、多线程调度、运行控制/检查点 | W1-007 流式字典未完成；W1-006 reviewer APPROVE，待大语料 |
+| CLI | `acx -f <archive> -m dict -d <dict> -t N` | 仅字典模式；退出码 0/1/2/3/4（4=已停止并保存检查点） |
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 77、CLI 4、集成 34（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
+| 测试 | core 84、CLI 4、集成 37（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；W1-004/005 推送后需重跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
@@ -53,13 +53,14 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │     │     │  ├─ sevenz.rs               # 7z AES/头加密/首块探测会话
 │     │     │  └─ rar.rs                  # 外部 UnRAR 会话、factory 预检缓存
 │     │     ├─ candidates/dictionary.rs   # 字典加载：BOM/UTF-8/UTF-16/GBK、去重
-│     │     ├─ engines/external.rs        # 外部进程边界：发现/stdin/超时/截断
-│     │     ├─ scheduler.rs               # 有界队列 + 多 worker + 命中仲裁
+│     │     ├─ checkpoint.rs              # 断点指纹/原子写/续跑校验
+│     │     ├─ engines/external.rs        # 外部进程边界：发现/stdin/超时/取消/截断
+│     │     ├─ scheduler.rs               # 有界队列 + 多 worker + 暂停/停止/水位
 │     │     ├─ attack.rs                  # AttackMode/AttackSpec（目前仅 Dictionary）
 │     │     └─ error.rs / lib.rs
 │     ├─ acx-cli/                         # CLI（直接依赖 acx-core）
 │     │  ├─ src/main.rs
-│     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_sevenz.rs、w1_rar_external.rs、w1_volumes_sfx.rs
+│     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_sevenz.rs、w1_rar_external.rs、w1_volumes_sfx.rs、w1_resume.rs
 │     └─ acx-ffi/                         # 最小 C ABI
 │        ├─ include/acx.h                 # ABI v0，仅 product/version/status
 │        └─ src/lib.rs
@@ -146,7 +147,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W1-003c RAR4 `-ma4`](tasks/W1-003c-rar4-ma4.md) | RAR4 预检/退出码适配与端到端验证 | 完成 |
 | [W1-004 7z AES/头加密/首块](tasks/W1-004-sevenz.md) | `sevenz-rust2`、AES-256、`-mhe=on`、首块探测、CLI | 完成（本地，待推送） |
 | [W1-005 分卷/SFX](tasks/W1-005-volumes-sfx.md) | `.001/.0001`、`.partN.rar`、SFX、缺卷/截断/损坏分类 | 完成（本地，待推送） |
-| [W1-006 运行控制与断点续跑](tasks/W1-006-run-control-resume.md) | 暂停/继续、停止/取消、检查点、`--resume` | 待开始（合并 epic） |
+| [W1-006 运行控制与断点续跑](tasks/W1-006-run-control-resume.md) | 暂停/继续、停止/取消、检查点、`--resume` | 本地实现（reviewer APPROVE，待用户大语料） |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -181,7 +182,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | RAR 预检缓存 | ✅ 完成 | W1-003b；`-t N` 不再产生 `2N` 次重复预检 |
 | 7z（AES/头加密/首块） | ✅ 完成 | W1-004；`sevenz-rust2` 0.20.2；AES-256、`-mhe=on`、首块 64 KiB 探测 + 完整 CRC；7-Zip 26.04 差分 |
 | 分卷/SFX + 预检完整化 | ✅ 完成 | W1-005；ZIP/7z `.001` 拼接、RAR `.partN`/`.r00`、7z/ZIP/RAR SFX、缺卷/截断/损坏分类；PKZIP `.z01` 明确不支持 |
-| 运行控制 + 断点续跑 | ⏳ W1-006 | 暂停/继续、优雅/强制停止、检查点、`--resume`；合并原 W1-006 续跑 + 原 W1-007 暂停/停止 |
+| 运行控制 + 断点续跑 | 🚧 W1-006 | 本地实现（reviewer APPROVE）：暂停/继续、优雅/强制停止、检查点、`--resume`；待用户大语料测试 |
 | 字典/调度补全 | ⏳ W1-007 | 物理核数默认、流式字典/批处理，避免大字典全量常驻 |
 | 错误分类完整化 | ⏳ 部分 | 缺卷/截断/损坏/未加密已有预检分类（W1-005）；RAR 损坏仍走 External，前端错误码未映射 |
 | 1M 字典 / 1GB 归档基准 | ⏳ W1-008 | 已有 ZIP 微基准 + RAR 启动基准；未做正式 p/s 矩阵 |
@@ -198,7 +199,7 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dictionary> -t 4
 - ZIP：ZipCrypto、WinZip AES-128/192/256；`.zip.001` 分卷、简单 SFX；
 - 7z：AES-256、`-mhe=on` 头加密、LZMA/LZMA2/COPY/BZip2/PPMd；`.7z.001` 分卷、SFX；
 - RAR4/RAR5：本机安装 WinRAR/UnRAR，或设置 `ACX_UNRAR`；`.partN.rar`/`.r00` 分卷；
-- 退出码：0 命中，1 未找到，2 参数/字典错误，3 归档/引擎/缺卷错误。
+- 退出码：0 命中，1 未找到，2 参数/字典/续跑校验错误，3 归档/引擎/缺卷错误（含命中后检查点清理失败），4 已停止并保存检查点。
 
 **尚不可用 / 未验证**：
 
@@ -207,7 +208,7 @@ cargo run -p acx-cli -- -f <archive> -m dict -d <dictionary> -t 4
 - 掩码/暴力/混合；
 - GPU/hashcat 加速（W2-001 Deferred，W2 不启动）；
 - GUI、安装包、自动解压；
-- 暂停/停止/断点续跑（W1-006 计划中）；
+- 暂停/停止/断点续跑（W1-006 已本地实现，reviewer APPROVE，待大语料测试）；
 - Full 随包 UnRAR/hashcat（W4）；
 - Linux/macOS/Android/HarmonyOS 的实际产品交付。
 
@@ -232,7 +233,7 @@ W1 不能只用“能跑”收口。以下全部满足才算 W1 准出：
 **性能与可恢复性**
 
 - 1M 字典 × 1GB ZIP/7z/RAR（已知密码）完成，并记录 p/s、CPU、内存、ETA 误差；
-- 暂停/停止请求被 scheduler 观察 ≤200 ms；优雅停止 ≤2 s；强制停止 ≤2 s；
+- 暂停/停止请求被 scheduler 观察 ≤200 ms；外部 UnRAR 子进程 ≤2 s 内 kill；CPU 候选在测试调用返回后停止（1GB 候选的实际停止时延在基准中记录，不承诺 ≤2 s）；
 - 强杀恢复误差 ≤1 批（4096）；恢复后仍在合理时间内完成；
 - 1M 字典不出现无界内存增长；大字典路径由 W1-007 收口。
 

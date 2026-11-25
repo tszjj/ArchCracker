@@ -1,29 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! Multi-threaded dictionary scheduler.
+//! Multi-threaded dictionary scheduler with run control and progress.
 //!
-//! The main thread acts as the producer: it slices the candidate list into
-//! fixed-size index batches and hands them to the workers through a bounded
-//! `crossbeam-channel`. Every worker opens exactly one archive session and
-//! tests the candidates of the batches it receives until a hit is reported,
-//! an error occurs, or the candidate list is exhausted.
+//! The producer slices the candidate list into fixed-size index batches and
+//! hands them to workers through a bounded channel. Every worker owns one
+//! archive session and tests candidates until a hit, an error, or a stop.
 //!
-//! A shared [`AtomicBool`] stop flag keeps the producer from queueing more work
-//! after a hit/error, and lets workers skip the rest of an in-flight batch.
+//! Pause/stop is cooperative: workers check [`RunControl`] between candidates.
+//! A pause leaves workers and archive sessions alive and blocks the producer;
+//! a stop asks external engines to cancel and returns [`RunOutcome::Stopped`]
+//! with a candidate watermark that can be persisted by the CLI.
+//!
+//! Progress is tracked at candidate granularity, not by "most recent attempt".
+//! The watermark only advances over a contiguous completed prefix, so a
+//! concurrent run can never checkpoint past an untested candidate.
 
 use crate::archive::{ArchiveSessionFactory, PasswordTest};
+use crate::engines::external::CancelToken;
 use crate::error::{AcxError, Result};
-use crossbeam_channel::{bounded, Receiver};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, SendTimeoutError};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Number of candidate indices handed to a worker in one batch.
 const BATCH_SIZE: usize = 4096;
 
 /// Upper bound for worker threads; extra threads only add open sessions.
 const MAX_THREADS: usize = 256;
+
+/// How often workers poll control state while waiting for a batch.
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// A verified password found by the scheduler.
 #[derive(Debug, Clone)]
@@ -33,28 +42,278 @@ pub struct Hit {
     pub tried: u64,
 }
 
+/// Coarse scheduler state. Pause is not terminal; stop is.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunState {
+    Running = 0,
+    Paused = 1,
+    Stopping = 2,
+    Stopped = 3,
+    Finished = 4,
+}
+
+impl RunState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Paused,
+            2 => Self::Stopping,
+            3 => Self::Stopped,
+            4 => Self::Finished,
+            _ => Self::Running,
+        }
+    }
+}
+
+/// Thread-safe pause/stop control shared by the CLI, GUI, and scheduler.
+#[derive(Debug)]
+pub struct RunControl {
+    state: AtomicU8,
+    cancel: CancelToken,
+}
+
+impl Default for RunControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RunControl {
+    pub fn new() -> Self {
+        Self {
+            state: AtomicU8::new(RunState::Running as u8),
+            cancel: CancelToken::new(),
+        }
+    }
+
+    /// Request a pause. Returns false when the run is already stopping or done.
+    pub fn pause(&self) -> bool {
+        self.state
+            .compare_exchange(
+                RunState::Running as u8,
+                RunState::Paused as u8,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+    }
+
+    /// Resume a paused run. No-op when not paused.
+    pub fn resume(&self) -> bool {
+        self.state
+            .compare_exchange(
+                RunState::Paused as u8,
+                RunState::Running as u8,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+    }
+
+    /// Request a graceful stop. External engines receive the cancel token.
+    pub fn stop(&self) {
+        let previous = self.state.swap(RunState::Stopping as u8, Ordering::SeqCst);
+        if previous != RunState::Finished as u8 {
+            self.cancel.cancel();
+        }
+    }
+
+    /// Force stop is currently the same signal as stop; in-process candidate
+    /// tests cannot be preempted, external child processes are killed.
+    pub fn force_stop(&self) {
+        self.stop();
+    }
+
+    pub fn state(&self) -> RunState {
+        RunState::from_u8(self.state.load(Ordering::SeqCst))
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.state() == RunState::Paused
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        matches!(self.state(), RunState::Stopping | RunState::Stopped)
+    }
+
+    pub fn cancel_token(&self) -> CancelToken {
+        self.cancel.clone()
+    }
+
+    fn finish(&self) {
+        self.state.store(RunState::Finished as u8, Ordering::SeqCst);
+    }
+
+    fn mark_stopped(&self) {
+        self.state.store(RunState::Stopped as u8, Ordering::SeqCst);
+    }
+}
+
+/// Immutable point-in-time progress used by checkpoint writers and the CLI.
+#[derive(Debug, Clone)]
+pub struct RunProgress {
+    /// All candidates with index `< completed_through` have been tested.
+    pub completed_through: u64,
+    pub tried: u64,
+    pub total: u64,
+    pub elapsed: Duration,
+}
+
+/// Terminal result of a scheduler run.
+#[derive(Debug)]
+pub enum RunOutcome {
+    Found(Hit),
+    Exhausted,
+    /// The run was stopped by `RunControl`; the progress watermark is safe for
+    /// resuming (at most in-flight candidates are replayed).
+    Stopped(RunProgress),
+}
+
+struct ProgressState {
+    total: usize,
+    completed: Vec<AtomicBool>,
+    watermark: Mutex<usize>,
+    tried: AtomicU64,
+    started: Instant,
+}
+
+/// Shared run context. The CLI keeps one `Arc` and polls [`Self::snapshot`]
+/// from its checkpoint monitor while the scheduler blocks.
+pub struct RunContext {
+    total: usize,
+    start_index: usize,
+    threads: usize,
+    control: Arc<RunControl>,
+    progress: ProgressState,
+    found: AtomicBool,
+}
+
+impl RunContext {
+    pub fn new(total: usize, start_index: usize, tried: u64, threads: usize) -> Arc<Self> {
+        let start_index = start_index.min(total);
+        Arc::new(Self {
+            total,
+            start_index,
+            threads: threads.clamp(1, MAX_THREADS),
+            control: Arc::new(RunControl::new()),
+            progress: ProgressState {
+                total,
+                completed: (0..total).map(|_| AtomicBool::new(false)).collect(),
+                watermark: Mutex::new(start_index),
+                tried: AtomicU64::new(tried),
+                started: Instant::now(),
+            },
+            found: AtomicBool::new(false),
+        })
+    }
+
+    pub fn control(&self) -> &RunControl {
+        &self.control
+    }
+
+    /// Shared handle for a CLI signal handler or GUI control surface.
+    pub fn control_arc(&self) -> Arc<RunControl> {
+        Arc::clone(&self.control)
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
+    pub fn start_index(&self) -> usize {
+        self.start_index
+    }
+
+    pub fn threads(&self) -> usize {
+        self.threads
+    }
+
+    pub fn snapshot(&self) -> RunProgress {
+        let watermark = match self.progress.watermark.lock() {
+            Ok(guard) => *guard,
+            Err(poisoned) => *poisoned.into_inner(),
+        };
+        RunProgress {
+            completed_through: watermark as u64,
+            tried: self.progress.tried.load(Ordering::SeqCst),
+            total: self.total as u64,
+            elapsed: self.progress.started.elapsed(),
+        }
+    }
+
+    pub fn has_found(&self) -> bool {
+        self.found.load(Ordering::SeqCst)
+    }
+
+    fn mark_found(&self) {
+        self.found.store(true, Ordering::SeqCst);
+    }
+
+    fn record_tried(&self) -> u64 {
+        self.progress.tried.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn mark_completed(&self, index: usize) {
+        if index >= self.progress.total {
+            return;
+        }
+        self.progress.completed[index].store(true, Ordering::SeqCst);
+        let mut watermark = match self.progress.watermark.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        while *watermark < self.progress.total
+            && self.progress.completed[*watermark].load(Ordering::SeqCst)
+        {
+            *watermark += 1;
+        }
+    }
+}
+
 /// Run a dictionary attack over `passwords` using `threads` workers.
 ///
-/// Returns `Ok(Some(hit))` as soon as a worker reports a verified hit,
-/// `Ok(None)` when every candidate missed, and `Err` for the first worker
-/// error (session open or candidate test failure). An empty candidate list
-/// returns `Ok(None)` without opening any sessions. `threads` is clamped to
-/// `1..=256`.
+/// This compatibility wrapper keeps the original "return only hit or
+/// exhausted" behavior. New callers that need pause/stop should use
+/// [`run_with_context`].
 pub fn run(
     factory: Arc<dyn ArchiveSessionFactory>,
     passwords: Arc<Vec<Vec<u8>>>,
     threads: usize,
 ) -> Result<Option<Hit>> {
-    if passwords.is_empty() {
-        return Ok(None);
+    let context = RunContext::new(passwords.len(), 0, 0, threads);
+    match run_with_context(factory, passwords, context)? {
+        RunOutcome::Found(hit) => Ok(Some(hit)),
+        RunOutcome::Exhausted => Ok(None),
+        RunOutcome::Stopped(_) => Err(AcxError::Internal(
+            "scheduler stopped without an external stop request".to_string(),
+        )),
+    }
+}
+
+/// Run with a caller-owned [`RunContext`].
+///
+/// A pause blocks until [`RunControl::resume`] or [`RunControl::stop`]; worker
+/// sessions stay alive. A stop returns `Stopped` with the largest safe
+/// candidate watermark.
+pub fn run_with_context(
+    factory: Arc<dyn ArchiveSessionFactory>,
+    passwords: Arc<Vec<Vec<u8>>>,
+    context: Arc<RunContext>,
+) -> Result<RunOutcome> {
+    let total = passwords.len();
+    if context.total != total {
+        return Err(AcxError::Internal(format!(
+            "run context total {} does not match dictionary {total}",
+            context.total
+        )));
+    }
+    if context.start_index >= total {
+        context.control.finish();
+        return Ok(RunOutcome::Exhausted);
     }
 
-    let threads = threads.clamp(1, MAX_THREADS);
-    let total = passwords.len();
+    let threads = context.threads;
     let (batch_tx, batch_rx) = bounded::<(usize, usize)>(threads * 2);
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let tried = Arc::new(AtomicU64::new(0));
     let hit: Arc<Mutex<Option<Hit>>> = Arc::new(Mutex::new(None));
     let mut first_error: Option<AcxError> = None;
 
@@ -64,18 +323,13 @@ pub fn run(
             let batches: Receiver<(usize, usize)> = batch_rx.clone();
             let factory = Arc::clone(&factory);
             let passwords = Arc::clone(&passwords);
-            let stop = Arc::clone(&stop);
-            let tried = Arc::clone(&tried);
+            let context = Arc::clone(&context);
             let hit = Arc::clone(&hit);
 
             handles.push(scope.spawn(move || -> Result<()> {
-                let result =
-                    worker_loop(factory.as_ref(), &passwords, batches, &stop, &tried, &hit);
-                // A failing worker must wake the producer and its peers;
-                // otherwise the producer could keep filling the queue while
-                // the remaining workers wait for a batch nobody will take.
+                let result = worker_loop(factory.as_ref(), &passwords, batches, &context, &hit);
                 if result.is_err() {
-                    stop.store(true, Ordering::SeqCst);
+                    context.control.stop();
                 }
                 result
             }));
@@ -86,19 +340,24 @@ pub fn run(
         // forever on a full queue.
         drop(batch_rx);
 
-        // Producer: index batches, stopping early after a hit/error or when
-        // all workers are gone.
-        let mut start = 0;
-        while start < total && !stop.load(Ordering::SeqCst) {
-            let end = (start + BATCH_SIZE).min(total);
-            if batch_tx.send((start, end)).is_err() {
+        let mut start = context.start_index;
+        while start < total {
+            if context.control.is_stopping() {
                 break;
             }
-            start = end;
+            if context.control.is_paused() {
+                thread::sleep(POLL_INTERVAL);
+                continue;
+            }
+            let end = (start + BATCH_SIZE).min(total);
+            match batch_tx.send_timeout((start, end), POLL_INTERVAL) {
+                Ok(()) => start = end,
+                Err(SendTimeoutError::Timeout(_)) => continue,
+                Err(SendTimeoutError::Disconnected(_)) => break,
+            }
         }
         drop(batch_tx);
 
-        // Join in spawn order; the first error encountered is the one reported.
         for handle in handles {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -112,62 +371,96 @@ pub fn run(
         }
     });
 
-    if let Some(error) = first_error {
-        return Err(error);
-    }
-
     let found = match hit.lock() {
         Ok(mut slot) => slot.take(),
         Err(poisoned) => poisoned.into_inner().take(),
     };
-    Ok(found)
+    if let Some(hit) = found {
+        // A verified hit wins over an error from another worker: the password
+        // is already confirmed, and returning Err would make the CLI discard it.
+        context.control.finish();
+        return Ok(RunOutcome::Found(hit));
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+
+    let progress = context.snapshot();
+    if context.control.is_stopping() {
+        context.control.mark_stopped();
+        Ok(RunOutcome::Stopped(progress))
+    } else {
+        context.control.finish();
+        Ok(RunOutcome::Exhausted)
+    }
 }
 
 /// Consume batches until the list is exhausted, a hit is found, or stop is set.
-///
-/// The session is opened once per worker, before any batch is processed, so a
-/// preflight/session failure aborts the whole attack instead of being retried
-/// for every batch.
 fn worker_loop(
     factory: &dyn ArchiveSessionFactory,
     passwords: &[Vec<u8>],
     batches: Receiver<(usize, usize)>,
-    stop: &AtomicBool,
-    tried: &AtomicU64,
+    context: &RunContext,
     hit: &Mutex<Option<Hit>>,
 ) -> Result<()> {
     let mut session = factory.open()?;
+    session.set_cancel_token(context.control.cancel_token());
 
-    while !stop.load(Ordering::SeqCst) {
-        let (start, end) = match batches.recv() {
+    loop {
+        if context.control.is_stopping() {
+            break;
+        }
+        if context.control.is_paused() {
+            thread::sleep(POLL_INTERVAL);
+            continue;
+        }
+
+        let (start, end) = match batches.recv_timeout(POLL_INTERVAL) {
             Ok(batch) => batch,
-            // Producer finished (normal end) or all senders were dropped.
-            Err(_) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
 
-        for password in &passwords[start..end] {
-            if stop.load(Ordering::SeqCst) {
+        for (index, password) in passwords.iter().enumerate().take(end).skip(start) {
+            while context.control.is_paused() && !context.control.is_stopping() {
+                thread::sleep(POLL_INTERVAL);
+            }
+            if context.control.is_stopping() {
                 break;
             }
 
-            if session.test_password(password)? == PasswordTest::Hit {
-                // Count this candidate before publishing the hit so `tried`
-                // reflects an attempt, not just the misses before it.
-                let attempt = tried.fetch_add(1, Ordering::SeqCst) + 1;
-                stop.store(true, Ordering::SeqCst);
-                let mut slot = match hit.lock() {
-                    Ok(slot) => slot,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                if slot.is_none() {
-                    *slot = Some(Hit {
-                        password: password.clone(),
-                        tried: attempt,
-                    });
+            match session.test_password(password) {
+                Ok(PasswordTest::Hit) => {
+                    let attempt = context.record_tried();
+                    context.mark_found();
+                    // Do not advance the completed watermark past a hit. If the
+                    // process is killed between this hit and the CLI removing
+                    // the checkpoint, resume must replay this candidate rather
+                    // than start after the password.
+                    let mut slot = match hit.lock() {
+                        Ok(slot) => slot,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    if slot.is_none() {
+                        *slot = Some(Hit {
+                            password: password.clone(),
+                            tried: attempt,
+                        });
+                    }
+                    context.control.stop();
+                    return Ok(());
                 }
-                return Ok(());
+                Ok(PasswordTest::Miss) => {
+                    context.record_tried();
+                    context.mark_completed(index);
+                }
+                Err(AcxError::Cancelled) => return Ok(()),
+                Err(error) => {
+                    context.control.stop();
+                    return Err(error);
+                }
             }
-            tried.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -188,6 +481,7 @@ mod tests {
         info: ArchiveInfo,
         secret: Vec<u8>,
         attempts: Arc<Mutex<Vec<Vec<u8>>>>,
+        delay: Duration,
     }
 
     impl ArchiveSession for FakeSession {
@@ -196,6 +490,9 @@ mod tests {
         }
 
         fn test_password(&mut self, password: &[u8]) -> Result<PasswordTest> {
+            if !self.delay.is_zero() {
+                thread::sleep(self.delay);
+            }
             let mut attempts = match self.attempts.lock() {
                 Ok(attempts) => attempts,
                 Err(poisoned) => poisoned.into_inner(),
@@ -215,15 +512,21 @@ mod tests {
         attempts: Arc<Mutex<Vec<Vec<u8>>>>,
         opens: AtomicUsize,
         fail_open: bool,
+        delay: Duration,
     }
 
     impl FakeFactory {
         fn new(secret: &[u8]) -> Self {
+            Self::with_delay(secret, Duration::ZERO)
+        }
+
+        fn with_delay(secret: &[u8], delay: Duration) -> Self {
             Self {
                 secret: secret.to_vec(),
                 attempts: Arc::new(Mutex::new(Vec::new())),
                 opens: AtomicUsize::new(0),
                 fail_open: false,
+                delay,
             }
         }
 
@@ -256,6 +559,7 @@ mod tests {
                 info: fake_info(),
                 secret: self.secret.clone(),
                 attempts: Arc::clone(&self.attempts),
+                delay: self.delay,
             }))
         }
     }
@@ -277,8 +581,6 @@ mod tests {
         passwords: Vec<Vec<u8>>,
         threads: usize,
     ) -> Result<Option<Hit>> {
-        // `run` takes `Arc<dyn ArchiveSessionFactory>`; clone the concrete
-        // `Arc<FakeFactory>` first and let unsizing coerce it at the call.
         let factory: Arc<FakeFactory> = Arc::clone(factory);
         run(factory, Arc::new(passwords), threads)
     }
@@ -293,7 +595,6 @@ mod tests {
             .expect("correct password must be found");
 
         assert_eq!(hit.password, SECRET);
-        // One worker and one batch: `wrong1` misses, `SECRET` hits.
         assert_eq!(hit.tried, 2);
         assert_eq!(factory.opens(), 1);
     }
@@ -313,7 +614,6 @@ mod tests {
     #[test]
     fn four_threads_visit_each_candidate_exactly_once() {
         let factory = Arc::new(FakeFactory::new(SECRET));
-        // More than two full batches so several rounds of work are dispatched.
         let passwords: Vec<Vec<u8>> = (0..10_000)
             .map(|index| format!("wrong-{index}").into_bytes())
             .collect();
@@ -327,7 +627,6 @@ mod tests {
         let mut expected = passwords;
         attempted.sort_unstable();
         expected.sort_unstable();
-        // Every candidate appears exactly once: no lost or duplicated indices.
         assert_eq!(attempted, expected);
     }
 
@@ -351,5 +650,76 @@ mod tests {
 
         assert!(matches!(error, AcxError::Unsupported(_)));
         assert_eq!(factory.opens(), 4);
+    }
+
+    #[test]
+    fn hit_does_not_advance_watermark_past_the_password() {
+        let factory = Arc::new(FakeFactory::new(SECRET));
+        let passwords = Arc::new(vec![
+            b"wrong-0".to_vec(),
+            SECRET.to_vec(),
+            b"wrong-2".to_vec(),
+        ]);
+        let context = RunContext::new(passwords.len(), 0, 0, 1);
+        let observer = Arc::clone(&context);
+        let factory_dyn: Arc<dyn ArchiveSessionFactory> = factory;
+        let outcome = run_with_context(factory_dyn, passwords, context).expect("run");
+        assert!(matches!(outcome, RunOutcome::Found(_)));
+        assert!(
+            observer.snapshot().completed_through <= 1,
+            "watermark must not pass the hit candidate"
+        );
+    }
+
+    #[test]
+    fn pause_blocks_workers_and_resume_continues() {
+        let factory = Arc::new(FakeFactory::with_delay(SECRET, Duration::from_millis(1)));
+        let passwords: Arc<Vec<Vec<u8>>> = Arc::new(
+            (0..2_000)
+                .map(|index| {
+                    if index == 1_500 {
+                        SECRET.to_vec()
+                    } else {
+                        format!("wrong-{index}").into_bytes()
+                    }
+                })
+                .collect(),
+        );
+        let context = RunContext::new(passwords.len(), 0, 0, 2);
+        let control = context.control_arc();
+        let factory_dyn: Arc<dyn ArchiveSessionFactory> = factory.clone();
+        let handle =
+            thread::spawn(move || run_with_context(factory_dyn, Arc::clone(&passwords), context));
+
+        thread::sleep(Duration::from_millis(30));
+        assert!(control.pause(), "pause request must be accepted");
+        thread::sleep(Duration::from_millis(80));
+        assert_eq!(control.state(), RunState::Paused);
+        control.resume();
+        let outcome = handle.join().expect("join").expect("run");
+        assert!(matches!(&outcome, RunOutcome::Found(_)), "{outcome:?}");
+    }
+
+    #[test]
+    fn stop_returns_a_safe_watermark() {
+        let factory = Arc::new(FakeFactory::with_delay(SECRET, Duration::from_millis(1)));
+        let passwords: Vec<Vec<u8>> = (0..2_000)
+            .map(|index| format!("wrong-{index}").into_bytes())
+            .collect();
+        let context = RunContext::new(passwords.len(), 0, 0, 2);
+        let control = context.control_arc();
+        let factory_dyn: Arc<dyn ArchiveSessionFactory> = factory.clone();
+        let handle =
+            thread::spawn(move || run_with_context(factory_dyn, Arc::new(passwords), context));
+
+        thread::sleep(Duration::from_millis(30));
+        control.stop();
+        let outcome = handle.join().expect("join").expect("run");
+        let progress = match outcome {
+            RunOutcome::Stopped(progress) => progress,
+            other => panic!("expected stopped, got {other:?}"),
+        };
+        assert!(progress.completed_through < progress.total);
+        assert!(progress.tried >= progress.completed_through);
     }
 }
