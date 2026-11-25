@@ -70,11 +70,13 @@
 
 | 格式 | 加密 | 读取/解密 | 分卷 | 备注 |
 |---|---|---|---|---|
-| 7z | AES-256、可选头加密 | `sevenz-rust2`（W1-004 已实现 AES/`-mhe=on`/首块 + 完整 CRC；7-Zip 26.04 差分） | 自建拼接 Reader（`.7z.001`，未实现） | SFX 扫描 PE overlay |
-| ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | `.zip.001` 拼接；PKZIP `.z01` P2 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；multi-disk 由我们补 |
-| RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003/W1-003c 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证） | 外部引擎处理 | 仅进程，不链接 |
-| SFX | 继承底层 | 定位 overlay 后交引擎 | 同底层 | |
+| 7z | AES-256、可选头加密 | `sevenz-rust2`（W1-004 已实现 AES/`-mhe=on`/首块 + 完整 CRC；7-Zip 26.04 差分） | W1-005 自建 `VolumeReader`（`.7z.001`/`.0001`） | SFX 扫描 PE overlay（W1-005） |
+| ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | W1-005 `VolumeReader`（`.zip.001`）；PKZIP `.z01` 明确不支持 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；SFX 已支持简单 stub |
+| RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003/W1-003c 已端到端验证） | 外部引擎处理；W1-005 校验 `.partN`/`.r00` 并传第一分卷 | 仅进程，不链接；SFX 交外部引擎 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证） | 外部引擎处理；W1-005 校验 `.partN` 并传第一分卷 | 仅进程，不链接；SFX 交外部引擎 |
+| SFX | 继承底层 | W1-005 定位 PE overlay 后交引擎 | 同底层；PKZIP spanned 不支持 | 7z/ZIP 用偏移 Reader，RAR 交 UnRAR |
+
+W1-005 的 `ArchiveSource` 把“物理路径”解析为“格式 + 连续分卷 + 起始偏移”：ZIP/7z 通过 `VolumeReader` 看到单一逻辑流，RAR 只把第一分卷交给外部 UnRAR。缺卷在进入字典前返回 `MissingVolume`（源解析或预检阶段）；截断/损坏分别返回 `Truncated`/`Corrupt`。
 
 ### 4.2 快筛与确认
 
@@ -310,7 +312,8 @@ Android/HarmonyOS 的 CI 需要 SDK/签名密钥；M0 只建 desktop 三平台�
 | RAR/UnRAR 许可 | 非 OSI 组件、AV/商店风险 | Full 版随包未修改 UnRAR.exe + license，仅进程；WinRAR 不随包；见 ADR-0004 |
 | hashcat 随包 | AV 误报、驱动矩阵、更新成本 | 固定版本/哈希；外部进程；无 GPU 回落 CPU；发布前 Defender/VirusTotal |
 | GPU 驱动缺失 | GPU 不可用 | 检测 CUDA/HIP/OpenCL，明确提示，自动 CPU 回落 |
-| sevenz-rust2 边界 | 分卷/其他压缩方法/异常包差异 | W1-004 已覆盖 AES/头加密/LZMA/LZMA2/COPY/BZip2/PPMd；分卷、Deflate/Brotli/LZ4/ZSTD 与损坏分类待补；7-Zip oracle 差分 |
+| sevenz-rust2 边界 | 分卷/其他压缩方法/异常包差异 | W1-004 已覆盖 AES/头加密/LZMA/LZMA2/COPY/BZip2/PPMd；Deflate/Brotli/LZ4/ZSTD 与损坏分类待补；7-Zip oracle 差分 |
+| 分卷/SFX 边界 | 缺卷误判、异常 PE stub、PKZIP spanned | W1-005 `.001/.0001/.partN/.r00` + SFX；PKZIP `.z01` 明确不支持；最后卷缺失用启发式/volume flag；fuzz 待补 |
 | HarmonyOS Rust 工具链 | 构建/加载不稳定 | 先 C ABI + 最小 NAPI spike；保留纯 ArkTS 降级 |
 | 移动端后台限制 | 长任务被挂起 | 前台服务/常亮/断点续算；不承诺后台 |
 | 应用商店政策 | 下架 | 仅自有档案声明；官网分发；不内置字典 |

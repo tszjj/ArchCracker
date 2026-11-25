@@ -154,7 +154,7 @@ cargo test -p acx-cli --test w1_sevenz -- --ignored
 
 **未验证 / 已知边界**：
 
-- 7z 分卷 `.7z.001`、SFX；
+- 7z 分卷 `.7z.001`、SFX（W1-005 已补；本切片不覆盖）；
 - 7z 的 Brotli / LZ4 / ZSTD / Deflate 压缩方法未启用对应 feature（LZMA/LZMA2/COPY/BZip2/PPMd 可用）；
 - > 64 MiB 的验证目标（W1 明确拒绝）；
 - 7z 条目无 CRC 的归档（选择器要求 CRC；返回 `Unsupported`，不做无校验的 Hit）；
@@ -179,9 +179,9 @@ CHANGED: core/crates/acx-core/src/archive/{info,mod,sevenz}.rs,
 VERIFIED: cargo fmt/clippy/test (59 core + 19 CLI incl. 1 ignored + 2 FFI),
           cargo +1.89 test, release build, cargo-deny,
           7zr 26.04 differential (file/header/stored/solid/unicode/plain)
-NOT VERIFIED: 7z volumes/SFX, >64 MiB, no-CRC archives, 7z p/s benchmark,
+NOT VERIFIED: >64 MiB, no-CRC archives, 7z p/s benchmark,
               non-Windows runtime
-NEXT: W1-005 分卷/SFX 与预检完整化
+NEXT: W1-006 断点续跑
 RISKS: 7z AES has no authenticator; corruption and wrong password can look
        identical. The CRC gate prevents false hits but may turn a damaged
        archive into "not found". Documented, not silently accepted as success.

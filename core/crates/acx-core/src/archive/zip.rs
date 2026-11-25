@@ -12,9 +12,9 @@
 //! zero CRC and AE-1's CRC is weaker than the authentication code.
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
+use super::source::{ArchiveSource, VolumeReader};
 use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::error::{AcxError, Result};
-use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use zip::result::ZipError;
@@ -27,7 +27,7 @@ const MAX_VERIFY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// One open ZIP archive, owned by a scheduler worker.
 pub struct ZipSession {
-    archive: ZipArchive<File>,
+    archive: ZipArchive<VolumeReader>,
     info: ArchiveInfo,
 }
 
@@ -39,8 +39,16 @@ impl ZipSession {
     /// entries is rejected with [`AcxError::EmptyArchive`]; an archive without
     /// encrypted entries is *not* an error (callers decide what to do).
     pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path)?;
-        let mut archive = ZipArchive::new(file)?;
+        let source = ArchiveSource::resolve(path)?;
+        if source.format != ArchiveFormat::Zip {
+            return Err(AcxError::Unsupported(format!(
+                "not a ZIP archive (detected {})",
+                source.format.as_str()
+            )));
+        }
+        let reader = source.reader()?;
+        let mut archive =
+            ZipArchive::new(reader).map_err(|error| classify_zip_open(&source, error))?;
         if archive.is_empty() {
             return Err(AcxError::EmptyArchive);
         }
@@ -283,6 +291,34 @@ fn is_candidate_rejection(err: &std::io::Error) -> bool {
             | std::io::ErrorKind::InvalidInput
             | std::io::ErrorKind::UnexpectedEof
     )
+}
+
+/// Turn an archive-open failure into a preflight classification instead of a
+/// generic ZIP error, so the CLI can distinguish truncated from damaged.
+fn classify_zip_open(source: &ArchiveSource, error: ZipError) -> AcxError {
+    let classified = match error {
+        ZipError::Io(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+            AcxError::Truncated("ZIP central directory is incomplete".to_string())
+        }
+        ZipError::Io(error) => AcxError::Io(error),
+        ZipError::InvalidArchive(message)
+            if message.to_ascii_lowercase().contains("central directory")
+                || message.to_ascii_lowercase().contains("eocd")
+                || message.to_ascii_lowercase().contains("cdfh") =>
+        {
+            AcxError::Truncated("ZIP central directory is missing".to_string())
+        }
+        ZipError::InvalidArchive(message)
+            if message.to_ascii_lowercase().contains("multi-disk")
+                || message.to_ascii_lowercase().contains("multi disk") =>
+        {
+            AcxError::Unsupported("multi-disk ZIP files are not supported".to_string())
+        }
+        ZipError::InvalidArchive(message) => AcxError::Corrupt(message.into_owned()),
+        ZipError::UnsupportedArchive(message) => AcxError::Unsupported(message.to_string()),
+        other => AcxError::Zip(other),
+    };
+    source.classify_incomplete(classified)
 }
 
 /// Opens a fresh [`ZipSession`] per scheduler worker.

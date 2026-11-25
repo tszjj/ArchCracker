@@ -36,7 +36,7 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 
 按以下顺序实现，每步可独立验收：
 
-1. **归档预检**：格式/加密/条目/最小加密条目/分卷/SFX；错误分类。
+1. **归档预检**：格式/加密/条目/最小加密条目/分卷/SFX；错误分类（W1-005 已实现分卷/SFX、缺卷/截断/损坏）。
 2. **ZIP**：ZipCrypto + WinZip AES（W1-002 已实现 AE-1/AE-2、AES-128/192/256 读取/验证；7-Zip 差分待补）。
 3. **7z**：W1-004 已实现 `sevenz-rust2` 读取、AES-256、`-mhe=on` 头加密、首块 64 KiB 探测 + 完整 CRC；与 7-Zip 26.04 CLI 差分。
 4. **RAR（外部）**：W1-003 已实现检测 `UnRAR.exe`、整包 `t` 验证；密码走 stdin，不写 argv；W1-003b 在 factory 创建时预检一次并缓存，worker 不再重复预检；W1-003c 已在 WinRAR 6.24 下验证 RAR4 `-ma4` 与 RAR5。
@@ -52,7 +52,7 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 - 快筛：ZIP verifier、7z 头/首块、RAR 头/密钥（clean-room；只做否决）。
 - GPU 字典批量：hashcat 外部后端，ZIP AES 13600 + RAR5 13000 提 hash；`--gpu auto`；无 GPU/hashcat 回落 CPU。
 - 掩码/暴力：字符集、长度、UInt128 键空间、分区、进度。
-- 分卷/SFX：`.001` 拼接、PE overlay、缺卷提示。
+- 分卷/SFX 已由 W1-005 提前交付；W2 只做异常布局/性能补强。
 - 批量：多包队列、包间密码复用。
 - 编码变体：UTF-8/GBK 双试（按格式开关）。
 - 成本预估：“预计 X 分钟/天”，超阈值确认。

@@ -6,15 +6,16 @@
 pub mod info;
 pub mod rar;
 pub mod sevenz;
+pub mod source;
 pub mod zip;
 
 pub use info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 pub use rar::{RarFactory, RarSession};
 pub use sevenz::{SevenZFactory, SevenZSession};
+pub use source::{ArchiveSource, VolumeReader};
 pub use zip::{ZipFactory, ZipSession};
 
 use crate::error::{AcxError, Result};
-use std::io::Read;
 use std::path::Path;
 
 /// One open archive, owned by a worker thread.
@@ -33,22 +34,14 @@ pub trait ArchiveSessionFactory: Send + Sync {
 }
 
 /// Detect the archive format by magic bytes.
+///
+/// Resolves continuation parts first, so `preflight` on `movie.7z.002` sees the
+/// same logical archive as `movie.7z.001`.
 pub(crate) fn detect_format(path: &Path) -> Result<ArchiveFormat> {
-    let mut file = std::fs::File::open(path)?;
-    let mut magic = [0u8; 8];
-    let mut filled = 0;
-    while filled < magic.len() {
-        match file.read(&mut magic[filled..]) {
-            Ok(0) => break,
-            Ok(read) => filled += read,
-            Err(error) => return Err(AcxError::Io(error)),
-        }
-    }
-    let magic = &magic[..filled];
-    detect_magic(magic)
+    Ok(source::ArchiveSource::resolve(path)?.format)
 }
 
-fn detect_magic(magic: &[u8]) -> Result<ArchiveFormat> {
+pub(crate) fn detect_magic(magic: &[u8]) -> Result<ArchiveFormat> {
     if magic.starts_with(b"PK\x03\x04") || magic.starts_with(b"PK\x05\x06") {
         Ok(ArchiveFormat::Zip)
     } else if magic.starts_with(b"7z\xbc\xaf\x27\x1c") {

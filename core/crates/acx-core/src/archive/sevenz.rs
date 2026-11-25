@@ -23,10 +23,11 @@
 //! check before returning a hit.
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
+use super::source::ArchiveSource;
 use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::error::{AcxError, Result};
 use sevenz_rust2::{Archive, BlockDecoder, EncoderMethod, Error as SevenZError, Password};
-use std::fs::File;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 /// Hard cap for one full verification pass. W1 targets the smallest entry; a
@@ -40,7 +41,7 @@ const PROBE_BYTES: u64 = 64 * 1024;
 
 /// One open 7z archive, owned by a scheduler worker.
 pub struct SevenZSession {
-    path: PathBuf,
+    source: ArchiveSource,
     info: ArchiveInfo,
     /// Parsed metadata for archives whose headers are not encrypted. Header
     /// encrypted archives cannot be parsed until a candidate is supplied, so
@@ -55,10 +56,21 @@ impl SevenZSession {
     /// header-encrypted archive returns `PasswordRequired`, which is recorded
     /// as `header_encrypted` rather than treated as an error.
     pub fn open(path: &Path) -> Result<Self> {
-        let (archive, header_encrypted) = read_metadata(path)?;
+        let source = ArchiveSource::resolve(path)?;
+        if source.format != ArchiveFormat::SevenZ {
+            return Err(AcxError::Unsupported(format!(
+                "not a 7z archive (detected {})",
+                source.format.as_str()
+            )));
+        }
+        let mut reader = source.reader()?;
+        let (archive, header_encrypted) = match read_metadata(&mut reader) {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(source.classify_incomplete(error)),
+        };
         if header_encrypted {
             return Ok(Self {
-                path: path.to_path_buf(),
+                source,
                 info: ArchiveInfo {
                     path: path.to_path_buf(),
                     format: ArchiveFormat::SevenZ,
@@ -104,7 +116,7 @@ impl SevenZSession {
             entries: describe_entries(&archive),
         };
         Ok(Self {
-            path: path.to_path_buf(),
+            source,
             info,
             archive: Some(archive),
         })
@@ -145,21 +157,21 @@ impl SevenZSession {
         // reject, so skipping it avoids a second AES KDF; the full CRC check
         // below is the only meaningful test for stored entries.
         if !block_is_stored(archive, block) {
-            let mut probe_file = File::open(&self.path)?;
+            let mut probe_file = self.source.reader()?;
             match probe_first_file(&mut probe_file, archive, block, &password) {
                 Ok(()) => {}
                 Err(error) if is_candidate_rejection(&error) => return Ok(PasswordTest::Miss),
-                Err(error) => return Err(AcxError::SevenZ(error)),
+                Err(error) => return Err(classify_sevenz_open(error)),
             }
         }
 
         // Tier 2: consume the selected entry to EOF so the crate verifies its
         // CRC32 (and, for the last entry of a block, the block CRC).
-        let mut verify_file = File::open(&self.path)?;
+        let mut verify_file = self.source.reader()?;
         match verify_target(&mut verify_file, archive, target, &password) {
             Ok(()) => Ok(PasswordTest::Hit),
             Err(error) if is_candidate_rejection(&error) => Ok(PasswordTest::Miss),
-            Err(error) => Err(AcxError::SevenZ(error)),
+            Err(error) => Err(classify_sevenz_open(error)),
         }
     }
 
@@ -167,11 +179,11 @@ impl SevenZSession {
         let Some(password) = encode_password(password) else {
             return Ok(PasswordTest::Miss);
         };
-        let mut file = File::open(&self.path)?;
+        let mut file = self.source.reader()?;
         let archive = match Archive::read(&mut file, &password) {
             Ok(archive) => archive,
             Err(error) if is_candidate_rejection(&error) => return Ok(PasswordTest::Miss),
-            Err(error) => return Err(AcxError::SevenZ(error)),
+            Err(error) => return Err(classify_sevenz_open(error)),
         };
         if archive.files.is_empty() {
             return Err(AcxError::EmptyArchive);
@@ -191,7 +203,7 @@ impl SevenZSession {
         match verify_target(&mut file, &archive, target, &password) {
             Ok(()) => Ok(PasswordTest::Hit),
             Err(error) if is_candidate_rejection(&error) => Ok(PasswordTest::Miss),
-            Err(error) => Err(AcxError::SevenZ(error)),
+            Err(error) => Err(classify_sevenz_open(error)),
         }
     }
 }
@@ -202,13 +214,14 @@ impl ArchiveSession for SevenZSession {
     }
 
     fn test_password(&mut self, password: &[u8]) -> Result<PasswordTest> {
-        if self.info.header_encrypted {
+        let result = if self.info.header_encrypted {
             self.test_header_encrypted(password)
         } else if self.info.encryption == Encryption::Aes {
             self.test_file_encrypted(password)
         } else {
             Err(AcxError::NotEncrypted)
-        }
+        };
+        result.map_err(|error| self.source.classify_incomplete(error))
     }
 }
 
@@ -220,7 +233,7 @@ impl ArchiveSession for SevenZSession {
 /// password, so each worker tests candidates directly.
 #[derive(Debug)]
 pub struct SevenZFactory {
-    pub path: PathBuf,
+    source: ArchiveSource,
     info: ArchiveInfo,
     archive: Option<Archive>,
 }
@@ -230,7 +243,7 @@ impl SevenZFactory {
     pub fn new(path: PathBuf) -> Result<Self> {
         let session = SevenZSession::open(&path)?;
         Ok(Self {
-            path,
+            source: session.source,
             info: session.info,
             archive: session.archive,
         })
@@ -253,10 +266,15 @@ impl SevenZFactory {
                 "cached 7z metadata belongs to a different archive".to_string(),
             ));
         }
+        let source = ArchiveSource::resolve(&path)?;
         let archive = if info.header_encrypted {
             None
         } else {
-            let (archive, header_encrypted) = read_metadata(&path)?;
+            let mut reader = source.reader()?;
+            let (archive, header_encrypted) = match read_metadata(&mut reader) {
+                Ok(metadata) => metadata,
+                Err(error) => return Err(source.classify_incomplete(error)),
+            };
             if header_encrypted {
                 return Err(AcxError::Unsupported(
                     "archive header is encrypted but cached metadata says it is not".to_string(),
@@ -267,7 +285,7 @@ impl SevenZFactory {
             })?)
         };
         Ok(Self {
-            path,
+            source,
             info,
             archive,
         })
@@ -282,7 +300,7 @@ impl SevenZFactory {
 impl ArchiveSessionFactory for SevenZFactory {
     fn open(&self) -> Result<Box<dyn ArchiveSession>> {
         Ok(Box::new(SevenZSession {
-            path: self.path.clone(),
+            source: self.source.clone(),
             info: self.info.clone(),
             archive: self.archive.clone(),
         }))
@@ -294,12 +312,41 @@ impl ArchiveSessionFactory for SevenZFactory {
 /// Returns `(metadata, header_encrypted)`. A `PasswordRequired` from an empty
 /// password is the crate's signal that the encoded header uses AES; every other
 /// error is a malformed or unsupported archive.
-fn read_metadata(path: &Path) -> Result<(Option<Archive>, bool)> {
-    let mut file = File::open(path)?;
-    match Archive::read(&mut file, &Password::empty()) {
+fn read_metadata<R: Read + Seek>(reader: &mut R) -> Result<(Option<Archive>, bool)> {
+    match Archive::read(reader, &Password::empty()) {
         Ok(archive) => Ok((Some(archive), false)),
         Err(SevenZError::PasswordRequired) => Ok((None, true)),
-        Err(error) => Err(AcxError::SevenZ(error)),
+        Err(error) => Err(classify_sevenz_open(error)),
+    }
+}
+
+/// Classify a header parse failure before any candidate is tested.
+fn classify_sevenz_open(error: SevenZError) -> AcxError {
+    match error {
+        SevenZError::BadSignature(_) => {
+            AcxError::Corrupt("7z signature is missing or invalid".to_string())
+        }
+        SevenZError::UnsupportedVersion { major, minor } => {
+            AcxError::Unsupported(format!("unsupported 7z version {major}.{minor}"))
+        }
+        SevenZError::ChecksumVerificationFailed | SevenZError::NextHeaderCrcMismatch => {
+            AcxError::Corrupt("7z header checksum failed".to_string())
+        }
+        SevenZError::Io(error, _) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+            AcxError::Truncated("7z header is incomplete".to_string())
+        }
+        SevenZError::Io(error, _) => AcxError::Io(error),
+        SevenZError::UnsupportedCompressionMethod(method) => {
+            AcxError::Unsupported(format!("unsupported 7z compression method {method}"))
+        }
+        SevenZError::Unsupported(message) => AcxError::Unsupported(message.into_owned()),
+        SevenZError::MaxMemLimited { max_kb, actaul_kb } => AcxError::Unsupported(format!(
+            "7z needs {actaul_kb} KiB of memory, above the {max_kb} KiB limit"
+        )),
+        SevenZError::ExternalUnsupported => {
+            AcxError::Unsupported("external 7z streams are not supported".to_string())
+        }
+        other => AcxError::Corrupt(format!("7z header parse failed: {other}")),
     }
 }
 
@@ -403,8 +450,8 @@ fn describe_entries(archive: &Archive) -> Vec<EntryInfo> {
 }
 
 /// Read a prefix of the first file in `block` to reject an obviously wrong key.
-fn probe_first_file(
-    file: &mut File,
+fn probe_first_file<R: Read + Seek>(
+    file: &mut R,
     archive: &Archive,
     block: usize,
     password: &Password,
@@ -427,8 +474,8 @@ fn probe_first_file(
 }
 
 /// Read the complete target entry and let the crate verify its CRC.
-fn verify_target(
-    file: &mut File,
+fn verify_target<R: Read + Seek>(
+    file: &mut R,
     archive: &Archive,
     target: usize,
     password: &Password,
