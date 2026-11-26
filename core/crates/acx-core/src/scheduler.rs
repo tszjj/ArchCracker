@@ -17,6 +17,7 @@
 //! concurrent run can never checkpoint past an untested candidate.
 
 use crate::archive::{ArchiveSessionFactory, PasswordTest};
+use crate::candidates::{CandidateBatch, CandidateSource};
 use crate::engines::external::CancelToken;
 use crate::error::{AcxError, Result};
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, SendTimeoutError};
@@ -33,6 +34,11 @@ const MAX_THREADS: usize = 256;
 
 /// How often workers poll control state while waiting for a batch.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Hard cap on queued batches so a large `-t` cannot multiply batch memory by
+/// 2×threads without bound. 32 × 4096 candidates is still ample to feed 256
+/// workers.
+const MAX_IN_FLIGHT_BATCHES: usize = 32;
 
 /// A verified password found by the scheduler.
 #[derive(Debug, Clone)]
@@ -171,7 +177,9 @@ pub enum RunOutcome {
 
 struct ProgressState {
     total: usize,
-    completed: Vec<AtomicBool>,
+    /// One bit per candidate; `total/8` bytes, not a `Vec<bool>` or
+    /// `Vec<AtomicBool>`. The watermark scan reads this compact frontier.
+    completed: Vec<AtomicU64>,
     watermark: Mutex<usize>,
     tried: AtomicU64,
     started: Instant,
@@ -198,7 +206,7 @@ impl RunContext {
             control: Arc::new(RunControl::new()),
             progress: ProgressState {
                 total,
-                completed: (0..total).map(|_| AtomicBool::new(false)).collect(),
+                completed: (0..total.div_ceil(64)).map(|_| AtomicU64::new(0)).collect(),
                 watermark: Mutex::new(start_index),
                 tried: AtomicU64::new(tried),
                 started: Instant::now(),
@@ -257,14 +265,19 @@ impl RunContext {
         if index >= self.progress.total {
             return;
         }
-        self.progress.completed[index].store(true, Ordering::SeqCst);
+        let word = index / 64;
+        let bit = 1u64 << (index % 64);
+        self.progress.completed[word].fetch_or(bit, Ordering::SeqCst);
         let mut watermark = match self.progress.watermark.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        while *watermark < self.progress.total
-            && self.progress.completed[*watermark].load(Ordering::SeqCst)
-        {
+        while *watermark < self.progress.total {
+            let word = *watermark / 64;
+            let bit = 1u64 << (*watermark % 64);
+            if self.progress.completed[word].load(Ordering::SeqCst) & bit == 0 {
+                break;
+            }
             *watermark += 1;
         }
     }
@@ -307,27 +320,46 @@ pub fn run_with_context(
             context.total
         )));
     }
+    let source = Box::new(MemorySource::new(passwords, context.start_index));
+    run_with_source(factory, source, context)
+}
+
+/// Run with a bounded-memory [`CandidateSource`].
+///
+/// The source must already be positioned at `context.start_index`; the
+/// scheduler verifies the first batch's start index before dispatching it.
+pub fn run_with_source(
+    factory: Arc<dyn ArchiveSessionFactory>,
+    mut source: Box<dyn CandidateSource>,
+    context: Arc<RunContext>,
+) -> Result<RunOutcome> {
+    let total = source.total();
+    if context.total != total {
+        return Err(AcxError::Internal(format!(
+            "run context total {} does not match candidate source total {total}",
+            context.total
+        )));
+    }
     if context.start_index >= total {
         context.control.finish();
         return Ok(RunOutcome::Exhausted);
     }
 
     let threads = context.threads;
-    let (batch_tx, batch_rx) = bounded::<(usize, usize)>(threads * 2);
+    let (batch_tx, batch_rx) = bounded::<CandidateBatch>((threads * 2).min(MAX_IN_FLIGHT_BATCHES));
     let hit: Arc<Mutex<Option<Hit>>> = Arc::new(Mutex::new(None));
     let mut first_error: Option<AcxError> = None;
 
     thread::scope(|scope| {
         let mut handles = Vec::with_capacity(threads);
         for _ in 0..threads {
-            let batches: Receiver<(usize, usize)> = batch_rx.clone();
+            let batches: Receiver<CandidateBatch> = batch_rx.clone();
             let factory = Arc::clone(&factory);
-            let passwords = Arc::clone(&passwords);
             let context = Arc::clone(&context);
             let hit = Arc::clone(&hit);
 
             handles.push(scope.spawn(move || -> Result<()> {
-                let result = worker_loop(factory.as_ref(), &passwords, batches, &context, &hit);
+                let result = worker_loop(factory.as_ref(), batches, &context, &hit);
                 if result.is_err() {
                     context.control.stop();
                 }
@@ -340,8 +372,9 @@ pub fn run_with_context(
         // forever on a full queue.
         drop(batch_rx);
 
-        let mut start = context.start_index;
-        while start < total {
+        let mut expected_index = context.start_index;
+        let mut pending: Option<CandidateBatch> = None;
+        loop {
             if context.control.is_stopping() {
                 break;
             }
@@ -349,12 +382,42 @@ pub fn run_with_context(
                 thread::sleep(POLL_INTERVAL);
                 continue;
             }
-            let end = (start + BATCH_SIZE).min(total);
-            match batch_tx.send_timeout((start, end), POLL_INTERVAL) {
-                Ok(()) => start = end,
-                Err(SendTimeoutError::Timeout(_)) => continue,
+
+            let batch = match pending.take() {
+                Some(batch) => batch,
+                None => match source.next_batch(BATCH_SIZE) {
+                    Ok(Some(batch)) => batch,
+                    Ok(None) => break,
+                    Err(error) => {
+                        first_error = Some(error);
+                        context.control.stop();
+                        break;
+                    }
+                },
+            };
+            if batch.start_index != expected_index || batch.candidates.is_empty() {
+                first_error = Some(AcxError::Internal(format!(
+                    "candidate source returned batch start {} while {} was expected",
+                    batch.start_index, expected_index
+                )));
+                context.control.stop();
+                break;
+            }
+            let batch_len = batch.candidates.len();
+
+            match batch_tx.send_timeout(batch, POLL_INTERVAL) {
+                Ok(()) => {
+                    expected_index += batch_len;
+                }
+                Err(SendTimeoutError::Timeout(batch)) => pending = Some(batch),
                 Err(SendTimeoutError::Disconnected(_)) => break,
             }
+        }
+        if first_error.is_none() && !context.control.is_stopping() && expected_index != total {
+            first_error = Some(AcxError::Internal(format!(
+                "candidate source ended at {expected_index} before total {total}"
+            )));
+            context.control.stop();
         }
         drop(batch_tx);
 
@@ -396,11 +459,43 @@ pub fn run_with_context(
     }
 }
 
-/// Consume batches until the list is exhausted, a hit is found, or stop is set.
+/// In-memory source used by the legacy `run`/`run_with_context` APIs.
+struct MemorySource {
+    entries: Arc<Vec<Vec<u8>>>,
+    next: usize,
+}
+
+impl MemorySource {
+    fn new(entries: Arc<Vec<Vec<u8>>>, start_index: usize) -> Self {
+        let next = start_index.min(entries.len());
+        Self { entries, next }
+    }
+}
+
+impl CandidateSource for MemorySource {
+    fn total(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn next_batch(&mut self, max: usize) -> Result<Option<CandidateBatch>> {
+        if max == 0 || self.next >= self.entries.len() {
+            return Ok(None);
+        }
+        let start_index = self.next;
+        let end = (start_index + max).min(self.entries.len());
+        let candidates = self.entries[start_index..end].to_vec();
+        self.next = end;
+        Ok(Some(CandidateBatch {
+            start_index,
+            candidates,
+        }))
+    }
+}
+
+/// Consume batches until the source is exhausted, a hit is found, or stop is set.
 fn worker_loop(
     factory: &dyn ArchiveSessionFactory,
-    passwords: &[Vec<u8>],
-    batches: Receiver<(usize, usize)>,
+    batches: Receiver<CandidateBatch>,
     context: &RunContext,
     hit: &Mutex<Option<Hit>>,
 ) -> Result<()> {
@@ -416,13 +511,14 @@ fn worker_loop(
             continue;
         }
 
-        let (start, end) = match batches.recv_timeout(POLL_INTERVAL) {
+        let batch = match batches.recv_timeout(POLL_INTERVAL) {
             Ok(batch) => batch,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         };
 
-        for (index, password) in passwords.iter().enumerate().take(end).skip(start) {
+        for (offset, password) in batch.candidates.iter().enumerate() {
+            let index = batch.start_index + offset;
             while context.control.is_paused() && !context.control.is_stopping() {
                 thread::sleep(POLL_INTERVAL);
             }
@@ -669,6 +765,40 @@ mod tests {
             observer.snapshot().completed_through <= 1,
             "watermark must not pass the hit candidate"
         );
+    }
+
+    struct ShortSource {
+        total: usize,
+        yielded: bool,
+    }
+
+    impl CandidateSource for ShortSource {
+        fn total(&self) -> usize {
+            self.total
+        }
+
+        fn next_batch(&mut self, _max: usize) -> Result<Option<CandidateBatch>> {
+            if self.yielded {
+                return Ok(None);
+            }
+            self.yielded = true;
+            Ok(Some(CandidateBatch {
+                start_index: 0,
+                candidates: vec![b"wrong".to_vec()],
+            }))
+        }
+    }
+
+    #[test]
+    fn source_ending_before_total_is_an_error() {
+        let factory: Arc<dyn ArchiveSessionFactory> = Arc::new(FakeFactory::new(SECRET));
+        let context = RunContext::new(2, 0, 0, 1);
+        let source = Box::new(ShortSource {
+            total: 2,
+            yielded: false,
+        });
+        let error = run_with_source(factory, source, context).expect_err("short source must fail");
+        assert!(matches!(error, AcxError::Internal(_)));
     }
 
     #[test]

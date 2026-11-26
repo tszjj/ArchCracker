@@ -57,7 +57,7 @@
 - [x] ZIP：ZipCrypto + WinZip AES（W1-001/W1-002）
 - [x] 7z：`sevenz-rust2`；AES/头加密；首块探测（W1-004；7-Zip 26.04 差分）
 - [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003；RAR4/RAR5 已验证，W1-003c 补 RAR4 `-ma4`）；预检缓存（W1-003b）
-- [ ] 字典：流式、编码识别、去重、批处理（W1-007）
+- [ ] 字典：流式、编码识别、批处理（W1-007；本地实现 reviewer APPROVE，待 500MB/1M 基准；流式默认不做全局去重）
 - [ ] 运行控制 + 断点：暂停/继续、优雅/强制停止、检查点、`--resume`（W1-006 合并 epic；本地实现 reviewer APPROVE，待大语料）
 - [x] 会话复用：每 worker 打开一次、RAR 预检在 factory 缓存；不每候选重开
 - [ ] 错误分类：未加密/空包/损坏/缺卷/不支持/头加密

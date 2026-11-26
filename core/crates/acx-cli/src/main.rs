@@ -7,8 +7,9 @@ use acx_core::archive::{
     self, ArchiveFormat, ArchiveSessionFactory, ArchiveSource, RarFactory, SevenZFactory,
     ZipFactory,
 };
-use acx_core::candidates::Dictionary;
+use acx_core::candidates::DictionaryStream;
 use acx_core::checkpoint::{ArchiveFingerprint, Checkpoint, CheckpointStore, FileFingerprint};
+use acx_core::error::AcxError;
 use acx_core::scheduler::{self, RunContext, RunControl, RunOutcome};
 use clap::Parser;
 use std::io::IsTerminal;
@@ -119,19 +120,6 @@ fn run(cli: Cli) -> ExitCode {
         return ExitCode::from(EXIT_ARCHIVE);
     }
 
-    let dictionary = match Dictionary::load(&cli.dictionary) {
-        Ok(dictionary) => dictionary,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-    println!("Passwords: {}", dictionary.len());
-    if dictionary.is_empty() {
-        eprintln!("acx: dictionary is empty");
-        return ExitCode::from(EXIT_USAGE);
-    }
-
     let factory: Arc<dyn ArchiveSessionFactory> = match info.format {
         ArchiveFormat::Zip => Arc::new(ZipFactory {
             path: cli.file.clone(),
@@ -155,8 +143,6 @@ fn run(cli: Cli) -> ExitCode {
             }
         }
     };
-    let passwords = Arc::new(dictionary.entries().to_vec());
-    let total = passwords.len();
     let checkpoint_path = cli
         .checkpoint
         .clone()
@@ -179,7 +165,7 @@ fn run(cli: Cli) -> ExitCode {
         Ok(fingerprint) => fingerprint,
         Err(error) => {
             eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_ARCHIVE);
+            return ExitCode::from(EXIT_USAGE);
         }
     };
 
@@ -198,7 +184,10 @@ fn run(cli: Cli) -> ExitCode {
         }
     };
 
-    let (start_index, tried) = if cli.resume {
+    let mut start_index = 0usize;
+    let mut tried = 0u64;
+    let mut loaded_checkpoint = None;
+    if cli.resume {
         let checkpoint = match store.load() {
             Ok(checkpoint) => checkpoint,
             Err(error) => {
@@ -206,6 +195,32 @@ fn run(cli: Cli) -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
         };
+        start_index = match usize::try_from(checkpoint.completed_through) {
+            Ok(start) => start,
+            Err(_) => {
+                eprintln!("acx: checkpoint watermark is too large");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        tried = checkpoint.tried;
+        loaded_checkpoint = Some(checkpoint);
+    }
+
+    let dictionary = match DictionaryStream::open(&cli.dictionary, start_index) {
+        Ok(dictionary) => dictionary,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let total = dictionary.total();
+    println!("Passwords: {total}");
+    if total == 0 {
+        eprintln!("acx: dictionary is empty");
+        return ExitCode::from(EXIT_USAGE);
+    }
+
+    if let Some(checkpoint) = loaded_checkpoint.as_ref() {
         if let Err(error) = checkpoint.validate(
             &archive_fingerprint,
             &dictionary_fingerprint,
@@ -215,22 +230,12 @@ fn run(cli: Cli) -> ExitCode {
             eprintln!("acx: {error}");
             return ExitCode::from(EXIT_USAGE);
         }
-        let start = match usize::try_from(checkpoint.completed_through) {
-            Ok(start) => start,
-            Err(_) => {
-                eprintln!("acx: checkpoint watermark is too large");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
         println!(
-            "Resume: {} (candidate {start}/{total}, tried {})",
+            "Resume: {} (candidate {start_index}/{total}, tried {})",
             checkpoint_path.display(),
             checkpoint.tried
         );
-        (start, checkpoint.tried)
-    } else {
-        (0, 0)
-    };
+    }
 
     if start_index >= total {
         let _ = store.remove();
@@ -273,7 +278,7 @@ fn run(cli: Cli) -> ExitCode {
         Arc::clone(&monitor_error),
     );
 
-    let outcome = scheduler::run_with_context(factory, passwords, Arc::clone(&context));
+    let outcome = scheduler::run_with_source(factory, Box::new(dictionary), Arc::clone(&context));
     finished.store(true, Ordering::SeqCst);
     let _ = monitor.join();
     if let Some(error) = monitor_error
@@ -343,7 +348,12 @@ fn run(cli: Cli) -> ExitCode {
                 }
             }
             eprintln!("acx: {error}");
-            ExitCode::from(EXIT_ARCHIVE)
+            let exit = if matches!(&error, AcxError::Dictionary(_)) {
+                EXIT_USAGE
+            } else {
+                EXIT_ARCHIVE
+            };
+            ExitCode::from(exit)
         }
     }
 }
