@@ -113,6 +113,8 @@ PREFIX-?1?1?1            固定前缀 + 3 个自定义字符
 - 不分配完整键空间；不生成完整字典；
 - 预计常驻内存增量：≤1 MB（不含归档/引擎会话）+ W1 既有批次内存。
 
+**实现（W2-003a，2026-11-27）**：`MaskEstimate.space` 输出实际估算：水位位图 `ceil(keyspace/8)` 字节 + `(threads+3)` 个在飞批次 + 源缓冲；位图 >128 MB 时警告；不含归档会话。公共函数见 [W2-003a](W2-003a-space-estimate.md)。
+
 **不生成** `95^8` 这种数组；只保存当前位置/索引。
 
 ### 3.2 时间复杂度
@@ -220,6 +222,8 @@ mask: ?u?l?l?l?d?d
 positions: 6
 keyspace: 26^3 * 10^2 = 1,757,600
 fits_usize: true
+watermark bitmap: 219,700 B (0.2 MB, 1,757,600 candidates)
+estimated peak (core): 0.4 MB (+ archive sessions, 4 batches in flight)
 format: zip (25,409/s measured)
 eta: 69.2 s
 24h capacity: 2,195,337,600 candidates
