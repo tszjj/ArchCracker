@@ -5,10 +5,12 @@
 
 pub mod info;
 pub mod rar;
+pub mod sevenz;
 pub mod zip;
 
 pub use info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 pub use rar::{RarFactory, RarSession};
+pub use sevenz::{SevenZFactory, SevenZSession};
 pub use zip::{ZipFactory, ZipSession};
 
 use crate::error::{AcxError, Result};
@@ -49,6 +51,8 @@ pub(crate) fn detect_format(path: &Path) -> Result<ArchiveFormat> {
 fn detect_magic(magic: &[u8]) -> Result<ArchiveFormat> {
     if magic.starts_with(b"PK\x03\x04") || magic.starts_with(b"PK\x05\x06") {
         Ok(ArchiveFormat::Zip)
+    } else if magic.starts_with(b"7z\xbc\xaf\x27\x1c") {
+        Ok(ArchiveFormat::SevenZ)
     } else if magic.starts_with(b"Rar!\x1a\x07\x00") {
         Ok(ArchiveFormat::Rar4)
     } else if magic.starts_with(b"Rar!\x1a\x07\x01\x00") {
@@ -65,6 +69,7 @@ fn detect_magic(magic: &[u8]) -> Result<ArchiveFormat> {
 pub fn open(path: &Path) -> Result<Box<dyn ArchiveSession>> {
     match detect_format(path)? {
         ArchiveFormat::Zip => Ok(Box::new(ZipSession::open(path)?)),
+        ArchiveFormat::SevenZ => Ok(Box::new(SevenZSession::open(path)?)),
         ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => Ok(Box::new(RarSession::open(path)?)),
     }
 }
@@ -80,10 +85,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_zip_rar4_and_rar5_magic() {
+    fn detects_zip_sevenz_rar4_and_rar5_magic() {
         assert_eq!(
             detect_magic(b"PK\x03\x04").expect("zip"),
             ArchiveFormat::Zip
+        );
+        assert_eq!(
+            detect_magic(b"7z\xbc\xaf\x27\x1c").expect("7z"),
+            ArchiveFormat::SevenZ
         );
         assert_eq!(
             detect_magic(b"Rar!\x1a\x07\x00rest").expect("rar4"),

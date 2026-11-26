@@ -2,11 +2,17 @@
 
 本文件列出随 ArchCracker 分发或构建时使用的第三方组件。发布前由 CI 生成完整清单（`cargo about` / `cargo deny`），本文件保留人工摘要。许可明细以 [`docs/licensing.md`](docs/licensing.md) 与 [ADR-0004](docs/adr/0004-bundled-engines.md) 为准。
 
-## 当前源码依赖（W1-003）
+## 当前源码依赖（W1-004）
 
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
 | `zip` | ZIP 读写（`deflate` + `aes-crypto`） | MIT | 源码依赖 |
+| `sevenz-rust2` | 7z 读取（AES-256/头加密/LZMA/BZip2/PPMd） | Apache-2.0 | 源码依赖 |
+| `lzma-rust2` | `sevenz-rust2` 的 LZMA/LZMA2 传递依赖 | Apache-2.0 | 源码依赖 |
+| `aes` 0.8 / `cbc` / `sha2` / `getrandom` / `futures-*` / `version_check` | `sevenz-rust2` 的 AES/哈希传递依赖 | MIT OR Apache-2.0 | 源码依赖 |
+| `generic-array` | `sevenz-rust2` 的 AES 传递依赖 | MIT | 源码依赖 |
+| `bzip2` / `libbz2-rs-sys` | `sevenz-rust2` 的 BZip2 传递依赖 | MIT OR Apache-2.0；`libbz2-rs-sys` 为 bzip2-1.0.6 | 源码依赖 |
+| `ppmd-rust` | `sevenz-rust2` 的 PPMd 传递依赖 | CC0-1.0 OR MIT-0 | 源码依赖 |
 | `aes` / `hmac` / `pbkdf2` / `sha1` / `block-buffer` / `cipher` / `cmov` / `const-oid` / `cpubits` / `cpufeatures` / `crypto-common` / `ctutils` / `digest` / `hybrid-array` / `inout` / `typenum` / `zeroize` / `zeroize_derive` / `getrandom` / `constant_time_eq` | `zip` 的 WinZip AES 传递依赖 | MIT OR Apache-2.0；`constant_time_eq` 为 CC0-1.0 OR MIT-0 OR Apache-2.0 | 源码依赖 |
 | `crc32fast` | CRC32 校验 | MIT OR Apache-2.0 | 源码依赖 |
 | `thiserror` | 错误类型 | MIT OR Apache-2.0 | 源码依赖 |
@@ -28,7 +34,6 @@
 
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
-| sevenz-rust2 | 7z | Apache-2.0 | 源码依赖 |
 | Avalonia | 桌面 UI | MIT | NuGet |
 | .NET Runtime | 桌面运行时 | MIT | 自包含发布 |
 | Jetpack Compose | Android UI | Apache-2.0 | Gradle |

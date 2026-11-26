@@ -228,6 +228,7 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
             encryption: Encryption::None,
             selected: None,
             whole_archive: false,
+            header_encrypted: false,
             entries: Vec::new(),
         }),
         Some(11) => {
@@ -300,6 +301,7 @@ fn encrypted_info(path: &Path, format: ArchiveFormat) -> ArchiveInfo {
         encryption: Encryption::Rar,
         selected: None,
         whole_archive: true,
+        header_encrypted: false,
         entries: Vec::new(),
     }
 }
@@ -470,6 +472,7 @@ mod tests {
             encryption: Encryption::Rar,
             selected: None,
             whole_archive: true,
+            header_encrypted: false,
             entries: Vec::new(),
         };
         let factory = RarFactory::with_cached_info(
@@ -497,6 +500,7 @@ mod tests {
             encryption: Encryption::ZipCrypto,
             selected: Some(0),
             whole_archive: false,
+            header_encrypted: false,
             entries: Vec::new(),
         };
         let error = RarFactory::from_info(PathBuf::from("archive.zip"), info)
@@ -512,6 +516,7 @@ mod tests {
             encryption: Encryption::Rar,
             selected: None,
             whole_archive: true,
+            header_encrypted: false,
             entries: Vec::new(),
         };
         let error = RarFactory::from_info(PathBuf::from("two.rar"), info)

@@ -15,6 +15,10 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    # sevenz-rust2's bzip2/ppmd readers.
+    "bzip2-1.0.6",
+    "CC0-1.0",
+    "MIT-0",
 ]
 confidence-threshold = 0.8
 

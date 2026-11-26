@@ -134,6 +134,7 @@ impl ZipSession {
                 encryption,
                 selected,
                 whole_archive: false,
+                header_encrypted: false,
                 entries,
             },
         })
