@@ -36,7 +36,7 @@ W2-002 的掩码攻击要求用户写出固定长度的表达式（`?d?d?d?d`）
 | 字符集表达式 | 与 W2-002 掩码 position 语法相同：`?d ?l ?u ?s ?a ?1..?4` + 字面量；`?b` 不实现；非 ASCII 字面量报错 |
 | 自定义字符集 | `--custom-charset1..4`，规则同 W2-002（可含内置集合与字面量、展开去重、不允许递归、≤256 字节） |
 | 长度区间 | `--min-len N --max-len M`，均 ≥1；`min > max` 报错；上限 128（与 W2-002 掩码长度一致） |
-| 遍历顺序 | 长度从小到大；同一长度内按字符集顺序做 odometer 递增；固定位置按字面量处理 |
+| 遍历顺序 | 长度从小到大；同一长度内按字符集顺序做 odometer 递增；`--brute` 无固定位置（字面量进入字符集），固定位置用 `--mask` |
 | 单长度键空间 | 各位置字符集长度的乘积（含字面量位置，贡献因子 1） |
 | 总键空间 | `Σ_{L=min}^{max} keyspace(L)`，用 `u128` 估算；执行侧要求 ≤ `usize::MAX` |
 | 最大执行键空间 | **`usize::MAX`**（与 W2-002 一致；当前 `CandidateBatch.start_index` 与 `CandidateSource.total()` 是 `usize`） |
@@ -74,7 +74,7 @@ BruteEstimate
 
 - 按长度 `L = min_len..=max_len` 依次处理；
 - 每个长度把 `start_index` 减去该长度的累计前缀，解码成 `digits`（base = `charset.len()`）；
-- 按 odometer 递增生成候选字节串，固定位置直接填字面量；
+- 按 odometer 递增生成候选字节串（`--brute` 没有固定位置，字面量已进入字符集）；
 - 候选写入复用的输出 buffer，遵守 W1 的 4096 in-flight 与 8 MiB/批上限；
 - 一个长度耗尽后切到下一个长度，`next_index` 保持全局连续；
 - 不按候选做除法/分配；批次边界不重不漏。
@@ -106,7 +106,7 @@ BruteEstimate
 ```text
 schema=2
 attack_mode=brute
-attack_signature=<sha256 hex>   // canonical(charset_text, min_len, max_len)
+attack_signature=<sha256 hex>   // canonical(charset_text, custom1..4, min_len, max_len)
 dictionary 行缺失 -> None
 completed_through=<全局索引 u64>
 tried=<u64>
@@ -179,7 +179,7 @@ total=<u64>
 - **键空间**：逐长度 `checked_mul`、总和 `checked_add`，全部用 `u128`；超过 `u128` 直接报错。`--estimate` 仍展示超过 `usize::MAX` 的键空间与警告，实际攻击拒绝执行。
 - **指纹**：`attack_mode=brute`，签名输入为原始 `--brute` 文本 + 4 个 `--custom-charset*` 原文 + `min_len` + `max_len`，与 W2-002 掩码同策略（任一文本/区间变化都拒绝 `--resume`）；checkpoint 的 `dictionary` 行缺失（`None`）。
 - **语义**：`--brute` 表达式按字符集展开，字面量进入字符集；固定位置用 `--mask`（§4.1 的早期“字面量位置”表述以此为准）。
-- **测试**：`cargo test --workspace` 120 core / 54 CLI passed（另有 1 ignored）/ 2 FFI；新增 13 个 `candidates::brute` 单测（顺序、批次边界、全索引续跑、1M 生成、警告、指纹）与 10 个 `tests/w2_brute.rs` 端到端用例（命中、自定义字符集、估算、长度边界续跑、指纹拒绝、参数组合、超 `usize` 拒绝）。
+- **测试**：`cargo test --workspace` 123 core / 58 CLI passed（另有 1 ignored）/ 2 FFI；新增 16 个 `candidates::brute` 单测（顺序、批次边界、全索引续跑、1M 生成、radix=1、128 位上限、`u128` 溢出、警告、指纹）与 14 个 `tests/w2_brute.rs` 端到端用例（命中、自定义字符集、估算与 >24h 警告、长度边界续跑、区间/自定义集变化拒绝续跑、参数互斥、超 `usize` 拒绝）。
 - **跨平台**：Windows x64 已验证；Linux/macOS 逻辑为纯 Rust，只保证 CI 编译/单测，未做运行时验证。
 - **未实现（按 §6）**：导出字典、多字符集、`--increment`、`--estimate --json`、运行时 ETA。
 
@@ -188,7 +188,7 @@ total=<u64>
 ```text
 STATUS: done
 CHANGED: core/crates/acx-core/src/candidates/{brute.rs,mask.rs,mod.rs}、core/crates/acx-cli/src/main.rs、core/crates/acx-cli/tests/w2_brute.rs、docs/tasks/W2-003-brute-keyspace.md
-VERIFIED: cargo fmt --all -- --check；cargo clippy --workspace --all-targets -- -D warnings；cargo test --workspace（120 core / 54 CLI +1 ignored / 2 FFI）
+VERIFIED: cargo fmt --all -- --check；cargo clippy --workspace --all-targets -- -D warnings；cargo test --workspace（123 core / 58 CLI +1 ignored / 2 FFI）
 NOT VERIFIED: 未做 1M×1GB 端到端基准（仅 1M 候选生成单测）；7z/RAR 未单独跑暴力端到端（与 ZIP 共用 CandidateSource/CLI 路径）
 NEXT: 合并后更新 PROJECT-GUIDE/README 状态；W2-004 混合复用 schema v2 的 AttackFingerprint
 RISKS: 大键空间水位位图内存；短密码优先的长尾；RAR 外部 oracle 每候选成本高

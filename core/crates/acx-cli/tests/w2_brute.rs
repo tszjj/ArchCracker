@@ -102,10 +102,17 @@ fn acx() -> Command {
     Command::new(env!("CARGO_BIN_EXE_acx"))
 }
 
-fn brute_checkpoint(archive: &Path, charset: &str, min: usize, max: usize) -> Checkpoint {
+fn brute_checkpoint(
+    archive: &Path,
+    charset: &str,
+    custom: [Option<&str>; 4],
+    min: usize,
+    max: usize,
+) -> Checkpoint {
     let source = ArchiveSource::resolve(archive).expect("resolve archive");
     let archive_fp = ArchiveFingerprint::from_source(&source).expect("archive fingerprint");
-    let set = BruteSet::parse(charset, &[None, None, None, None], min, max).expect("brute set");
+    let custom_texts = custom.map(|text| text.map(str::to_string));
+    let set = BruteSet::parse(charset, &custom_texts, min, max).expect("brute set");
     let total = u64::try_from(set.keyspace()).expect("keyspace fits u64");
     let checkpoint = Checkpoint::new(
         archive_fp,
@@ -223,7 +230,7 @@ fn brute_resume_starts_at_a_length_boundary() {
     // "?l" length 1 has 26 candidates; watermark 26 must resume at length 2,
     // candidate 0 ("aa"), not skip into the middle of the first length.
     write_zipcrypto_zip(&zip, "aa");
-    let mut checkpoint = brute_checkpoint(&zip, "?l", 1, 2);
+    let mut checkpoint = brute_checkpoint(&zip, "?l", [None, None, None, None], 1, 2);
     checkpoint.completed_through = 26;
     checkpoint.tried = 30;
     CheckpointStore::new(checkpoint_path.clone())
@@ -268,7 +275,7 @@ fn brute_resume_rejects_a_changed_length_range() {
     let zip = temp.join("encrypted.zip");
     let checkpoint_path = temp.join("run.acx-checkpoint");
     write_zipcrypto_zip(&zip, "aa");
-    let checkpoint = brute_checkpoint(&zip, "?l", 1, 2);
+    let checkpoint = brute_checkpoint(&zip, "?l", [None, None, None, None], 1, 2);
     CheckpointStore::new(checkpoint_path.clone())
         .save(&checkpoint)
         .expect("save checkpoint");
@@ -381,6 +388,122 @@ fn brute_attack_refuses_keyspace_above_usize() {
     assert!(
         stderr.contains("cannot be executed with the current usize index limit"),
         "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn brute_resume_rejects_a_changed_custom_charset() {
+    let temp = TempDir::new("resume-custom");
+    let zip = temp.join("encrypted.zip");
+    let checkpoint_path = temp.join("run.acx-checkpoint");
+    write_zipcrypto_zip(&zip, "ab");
+    let checkpoint = brute_checkpoint(&zip, "?1", [Some("ab"), None, None, None], 1, 2);
+    CheckpointStore::new(checkpoint_path.clone())
+        .save(&checkpoint)
+        .expect("save checkpoint");
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--brute")
+        .arg("?1")
+        .arg("--custom-charset1")
+        .arg("ac")
+        .arg("--min-len")
+        .arg("1")
+        .arg("--max-len")
+        .arg("2")
+        .arg("--checkpoint")
+        .arg(&checkpoint_path)
+        .arg("--resume")
+        .output()
+        .expect("run acx brute resume");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("attack signature changed"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn brute_and_dictionary_are_mutually_exclusive() {
+    let temp = TempDir::new("dict-exclusive");
+    let zip = temp.join("encrypted.zip");
+    write_zipcrypto_zip(&zip, "a1");
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--brute")
+        .arg("?d")
+        .arg("--min-len")
+        .arg("1")
+        .arg("--max-len")
+        .arg("2")
+        .arg("-d")
+        .arg(temp.join("dict.txt"))
+        .output()
+        .expect("run acx brute");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("--dictionary and --brute are mutually exclusive"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn length_flags_require_brute_mode() {
+    let temp = TempDir::new("length-flags");
+    let zip = temp.join("encrypted.zip");
+    write_zipcrypto_zip(&zip, "a1");
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("-d")
+        .arg(temp.join("dict.txt"))
+        .arg("--min-len")
+        .arg("1")
+        .output()
+        .expect("run acx");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(stderr.contains("require --brute"), "stderr: {stderr}");
+}
+
+#[test]
+fn brute_estimate_warns_above_24h() {
+    let temp = TempDir::new("estimate-24h");
+    let zip = temp.join("plain.zip");
+    write_plain_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--brute")
+        .arg("?l?d")
+        .arg("--min-len")
+        .arg("1")
+        .arg("--max-len")
+        .arg("8")
+        .arg("--estimate")
+        .output()
+        .expect("run acx brute estimate");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stderr.contains("exceeds 24h"), "stderr: {stderr}");
+    assert!(
+        !stdout.contains("FOUND:"),
+        "estimate must not run the attack: {stdout}"
     );
 }
 

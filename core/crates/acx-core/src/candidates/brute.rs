@@ -418,6 +418,40 @@ mod tests {
     }
 
     #[test]
+    fn min_length_skips_shorter_candidates() {
+        let set = set("?d", 2, 3);
+        assert_eq!(set.keyspace(), 100 + 1000);
+        let candidates = collect("?d", 2, 3, 500);
+        assert_eq!(candidates.len(), 1100);
+        assert_eq!(candidates[0], b"00");
+        assert_eq!(candidates[99], b"99");
+        assert_eq!(candidates[100], b"000");
+    }
+
+    #[test]
+    fn single_character_charset_works_up_to_the_length_limit() {
+        let spec = BruteSpec::parse("a", &[None, None, None, None], 1, 3).expect("parse");
+        assert_eq!(spec.per_len(), &[1, 1, 1]);
+        assert_eq!(spec.keyspace(), 3);
+        assert_eq!(rendered(&collect("a", 1, 3, 2)), vec!["a", "aa", "aaa"]);
+
+        let mut source = set("a", MAX_BRUTE_LENGTH, MAX_BRUTE_LENGTH)
+            .into_source(0)
+            .expect("source");
+        let batch = source.next_batch(10).expect("batch").expect("some");
+        assert_eq!(batch.candidates.len(), 1);
+        assert_eq!(batch.candidates[0].len(), MAX_BRUTE_LENGTH);
+        assert!(batch.candidates[0].iter().all(|byte| *byte == b'a'));
+    }
+
+    #[test]
+    fn rejects_keyspace_above_u128() {
+        let error = BruteSpec::parse("?a", &[None, None, None, None], 1, 20)
+            .expect_err("95^20 exceeds u128");
+        assert!(error.to_string().contains("u128"), "{error}");
+    }
+
+    #[test]
     fn rejects_invalid_length_ranges_and_charsets() {
         let none = [None, None, None, None];
         assert!(BruteSpec::parse("?d", &none, 0, 1).is_err());
