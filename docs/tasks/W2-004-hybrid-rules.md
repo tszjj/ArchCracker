@@ -60,7 +60,7 @@
 
 **定义**：
 
-- **字典行**：W1-007 `DictionaryStream` 读出的一行，原样保留首尾空格，空行跳过。行号即索引，与 W1-007 完全一致。
+- **字典行**：W1-007 的流式行读取（`LineReader`，与 `DictionaryStream` 共用编码探测/GBK 回退）读出的非空行，原样保留首尾空格；行号即索引，与 W1-007 完全一致。
 - **变体生成器**：一个能"对一行字典词产生零个或多个候选"的函数。有两种：
   1. `RuleChain`：固定的变换链，对每行产生**恰好 1 个**候选（如 `capitalize|append:123`）；
   2. `AffixMask`：前缀/后缀掩码，对每行产生 **prefix_ks × suffix_ks** 个候选；只给一侧时另一侧因子为 1，两侧都不给时该生成器不存在。候选 = `prefix + word + suffix`，后缀变化最快。
@@ -208,8 +208,8 @@ variant_index = global_index % V
 
 恢复时：
 
-- `DictionaryStream::open(path, dict_line)` 顺序跳过到该行（W1-007 已有能力）；
-- `variant_index` 按 `per_generator` 二分定位到具体生成器与局部索引；
+- 用 `scan_dictionary(path)` 得到的行数与编码，`LineReader::open` 顺序跳过 `dict_line` 行；
+- `variant_index < rules.len()` 时选对应规则；否则 `local = variant_index - rules.len()`，按后缀最快分解为 `(prefix_index, suffix_index)`；
 - 落在行边界（`variant_index == 0`）时，从该行的第一个变体开始，不跳过；
 - `next_index == total` 时返回 `None`。
 
