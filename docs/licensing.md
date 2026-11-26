@@ -70,7 +70,7 @@ UnRAR 许可不是 OSI 自由许可，安装包必须在 NOTICE/THIRD_PARTY_NOTI
 - RAR4 不启用该快速路径；`UnRAR.exe t` 是测试/完整性 oracle，不是 `x/e` 解压交付；
 - 只新增 `sha2`（MIT OR Apache-2.0）直接依赖；不引入 `unrar`/`unrar-rs` 或 RAR 解压库。
 
-许可判断：该实现不复制/链接 UnRAR 源码，不重建 RAR 压缩算法，落在 UnRAR License 第 2 条与 WinRAR EULA 的压缩器/反工程禁令之外；这只是工程合规分析，不是法律意见；鉴于 check 细节来自第三方/黑盒资料，**发布前必须由 release-engineer/法务复核**。详见 [ADR-0005](adr/0005-rar5-password-verifier.md)。
+许可判断：该实现不复制/链接 UnRAR 源码，不重建 RAR 压缩算法，落在 UnRAR License 第 2 条与 WinRAR EULA 的压缩器/反工程禁令之外。**按项目负责人确认，2026-11-26 法务复核已完成，结论为有条件接受**；这不是正式法律意见书，发布前 release-engineer 仍按 ADR-0005 的复核条件逐项检查。详见 [ADR-0005](adr/0005-rar5-password-verifier.md)。
 
 ### 3.2 hashcat 与 GPU
 

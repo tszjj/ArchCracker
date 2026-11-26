@@ -18,7 +18,7 @@
 1. Windows Full 版**随包未修改的 `UnRAR.exe`**（仅进程），用户可用 `ACX_UNRAR`/配置覆盖路径；不做内置解码。
 2. 不链接（静态/动态）、不调用 `unrar.dll`、不自动下载；Windows Full 版随包未修改的 `UnRAR.exe`（见 ADR-0004）。
 3. 密码不写命令行：用 stdin/临时安全通道；日志脱敏；超时/取消/错误映射由 `engines::external` 统一处理。
-4. 自研独立 RAR 头/密钥派生验密仅用于快速判错（不复制 unrar 代码；结构依据公开 RAR5 technote，check 细节来自公开第三方资料/黑盒差分，官方 technote 未公开完整细节，不声称正式 clean-room）；命中后交外部 `UnRAR.exe t` 做密码/完整性复核，不做 `x/e` 解压交付。RAR5 的边界见 [ADR-0005](0005-rar5-password-verifier.md)，发布前需 release-engineer/法务复核。
+4. 自研独立 RAR 头/密钥派生验密仅用于快速判错（不复制 unrar 代码；结构依据公开 RAR5 technote，check 细节来自公开第三方资料/黑盒差分，官方 technote 未公开完整细节，不声称正式 clean-room）；命中后交外部 `UnRAR.exe t` 做密码/完整性复核，不做 `x/e` 解压交付。RAR5 的边界见 [ADR-0005](0005-rar5-password-verifier.md)；该 ADR 已于 2026-11-26 完成法务复核（附条件）。
 5. 其他平台（Linux/macOS/Android/HarmonyOS）当前 **Deferred**；未来同样只走外部引擎或独立许可 add-on。
 6. `unrar-rs` 仅本地实验，不是依赖、默认不启用、不随发布物。
 7. UI 在 RAR 引擎不可用时明确提示“未检测到 RAR 引擎”，引导“修复安装/选择 `UnRAR.exe`/安装独立 UnRAR”，而不是报“密码错误”；不要求用户安装 WinRAR。

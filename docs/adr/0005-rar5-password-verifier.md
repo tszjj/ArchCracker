@@ -1,9 +1,10 @@
 # ADR-0005：RAR5 密码校验器边界
 
-- 状态：**Proposed（W1-009 实现；release-engineer/法务许可复核前不标 Accepted）**
+- 状态：**Accepted（2026-11-26 法务复核完成，附边界条件）**
 - 日期：2026-11-26
 - 相关：`docs/licensing.md`、ADR-0003、ADR-0004、`docs/tasks/W1-009-rar5-fast-check.md`
 - 影响：`core/crates/acx-core/src/archive/rar5_verify.rs`、`archive/rar.rs`、`docs/benchmarks/W1-009.md`
+- 复核记录：按项目负责人 2026-11-26 确认，法务复核完成；结论为**有条件接受**。本记录是工程合规记录，不替代正式法律意见；发布前 release-engineer 按 §许可边界逐项复核。
 
 ## 背景
 
@@ -26,9 +27,22 @@ W1-008 实测 RAR5 1M × 1.3 GB 需要 4515 s（约 75 min），瓶颈是每个�
 
 - 这是**独立 Rust 实现**，不是 UnRAR 源码，也不声称正式 clean-room 法律结论；结构依据公开 RAR5 technote，check 细节来自公开第三方格式资料与本地黑盒差分。官方 technote 明确把 check 细节指向 UnRAR 源码，因此**不能声称仅凭官方公开规范完成**。
 - 校验器不压缩、不解压、不实现 RAR coder，只做 KDF + check 比较；不用于创建 RAR 归档。
-- UnRAR License 第 2 条针对 UnRAR 源码/压缩算法重建的限制不直接适用于该独立实现；但这只是工程合规判断，不是法律意见，发布前仍需 release-engineer/法务复核。
+- UnRAR License 第 2 条针对 UnRAR 源码/压缩算法重建的限制不直接适用于该独立实现；本 ADR 已按项目负责人确认完成法务复核（附条件），但仍然是工程合规记录，不是正式法律意见。
 - 外部 `UnRAR.exe t` 只做密码/完整性测试，不是 `x/e` 解压交付；`t` 内部可能临时解密/校验块，但不写用户文件。
 - RAR/WinRAR 是权利人商标；UI 只说明兼容性，不暗示 RARLAB 背书。
+
+## 法务复核记录
+
+- **日期/来源**：2026-11-26，按项目负责人确认记录；不是外部法律意见书。
+- **结论**：**有条件接受**独立 RAR5 check 校验器。
+- **条件**：
+  1. 不复制/链接 UnRAR 源码，不调用 `unrar.dll`，不实现 RAR 解压/压缩；
+  2. 只做 KDF + check，且只用于否决；命中必须由外部 `UnRAR.exe t` 复核；
+  3. 只对 ASCII 候选启用；非 ASCII、无 check、解析失败回退外部；
+  4. 保留来源记录与 ADR，不把“第三方资料/黑盒差分”写成官方规范或 clean-room；
+  5. 发布物仍按 ADR-0004 随包未修改 `UnRAR.exe` + license；不随包 WinRAR；
+  6. release-engineer 在发布前复核本 ADR 条件、`docs/licensing.md` 与 `THIRD_PARTY_NOTICES.md`。
+- **不覆盖**：RAR4 进程内快筛、RAR 解压器/压缩器、非 ASCII 快速路径、GPU/hashcat。
 
 ## 备选
 
@@ -54,7 +68,7 @@ W1-008 实测 RAR5 1M × 1.3 GB 需要 4515 s（约 75 min），瓶颈是每个�
 - 头加密（`-hp`）已用本机 `Rar.exe` fixture 验证；更广泛的第三方 `-hp` 样本仍待补；
 - check 值 64-bit 仍可能极小概率误接受，但外部确认会拒绝；
 - KDF count 上限/恶意归档需要有界；factory 缓存的是创建时的 header/check 快照，运行期间不得修改归档，否则快速否决可能基于旧 check；
-- 许可判断需 release-engineer/法务复核。
+- 法务复核已完成（2026-11-26，附条件）；发布前 release-engineer 按 §法务复核记录检查。
 
 ## 验证
 
