@@ -2,7 +2,7 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 已签核（2026-11-26），W2 启动**。ZIP/7z/RAR4/RAR5、分卷/SFX、字典、流式、暂停/停止/`--resume`、RAR5 check 快筛均已交付；W1 1M×1GB 基准、ZIP 10M 负例、1GB 暂停/停止矩阵完成。W2 按 [docs/W2-PLAN.md](docs/W2-PLAN.md) 从 mask/brute 开始；**W2-001 GPU/hashcat 已 Deferred，不在 W2 启动**。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
+> **状态：W1 已签核（2026-11-26），W2 启动**。ZIP/7z/RAR4/RAR5、分卷/SFX、字典、流式、暂停/停止/`--resume`、RAR5 check 快筛均已交付；W1 1M×1GB 基准、ZIP 10M 负例、1GB 暂停/停止矩阵完成。W2 已启动：W2-002 掩码首版已合入 `main`（`--mask`/`--estimate`/schema v2 checkpoint）；W2-001 GPU/hashcat 仍 Deferred；后续按 [W2-PLAN](docs/W2-PLAN.md) 推进。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
