@@ -54,7 +54,7 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 
 - 快筛：ZIP verifier、7z 头/首块、RAR 头/密钥（clean-room；只做否决）。
 - **GPU/hashcat：W2-001 Deferred，W2 不启动**；W2 先完成 CPU 快筛、掩码/暴力、批量/编码。GPU 在 W2 退出后单独评审。
-- 掩码/暴力：字符集、长度、UInt128 键空间、分区、进度。
+- 掩码/暴力：字符集、长度、`u128` 键空间估算（`usize` 执行索引）、进度。
 - 分卷/SFX 已由 W1-005 提前交付；W2 只做异常布局/性能补强。
 - 批量：多包队列、包间密码复用。
 - 编码变体：UTF-8/GBK 双试（按格式开关）。
