@@ -304,6 +304,6 @@ AttackFingerprint
 - `MaskSpec`/`MaskSet`/`MaskSource`：解析、去重、odometer 批次、多 mask 全局索引、resume。
 - CLI：`--mask`（可重复）、`--custom-charset1..4`、`--estimate`；`--mask` 与 `-d` 互斥。
 - Checkpoint：schema v2，`dictionary: Option<_>` + `attack_mode`/`attack_signature`；schema 1 明确拒绝。
-- 测试：`cargo test --workspace` 105 core / 42 CLI passed（另有 1 ignored）/ 2 FFI；`--estimate` 与 mask 命中/续跑有集成测试。
+- 测试：`cargo test --workspace` 107 core / 44 CLI passed（另有 1 ignored）/ 2 FFI；`--estimate` 与 mask 命中/续跑有集成测试。
 - 1M 掩码回归：[W2-002 基准](../benchmarks/W2-002.md)（40.458 s / 约 24,717/s，ZIP 对照 2.8% 开销）。
 - 未实现：`--mask-file`、`?b`、GUI 字典生成（按 §6/§7 后续）。

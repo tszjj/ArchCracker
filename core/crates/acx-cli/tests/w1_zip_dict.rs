@@ -313,6 +313,34 @@ fn mask_attack_finds_password_without_dictionary() {
 }
 
 #[test]
+fn mask_custom_charset_finds_password() {
+    let temp = TempDir::new("mask-custom");
+    let zip = temp.join("encrypted.zip");
+    write_zipcrypto_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--mask")
+        .arg("P@ssw0rd?1?1?1")
+        .arg("--custom-charset1")
+        .arg("?d")
+        .arg("-t")
+        .arg("4")
+        .output()
+        .expect("run acx custom mask");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("FOUND: P@ssw0rd123"), "stdout: {stdout}");
+}
+
+#[test]
 fn mask_estimate_prints_keyspace_without_attack() {
     let temp = TempDir::new("mask-estimate");
     let zip = temp.join("encrypted.zip");
@@ -337,6 +365,31 @@ fn mask_estimate_prints_keyspace_without_attack() {
     assert!(stdout.contains("Keyspace: 1000"), "stdout: {stdout}");
     assert!(stdout.contains("24h capacity"), "stdout: {stdout}");
     assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
+}
+
+#[test]
+fn mask_estimate_allows_unencrypted_archive() {
+    let temp = TempDir::new("mask-estimate-plain");
+    let zip = temp.join("plain.zip");
+    write_plain_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--mask")
+        .arg("?d")
+        .arg("--estimate")
+        .output()
+        .expect("run acx estimate");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("Keyspace: 10"), "stdout: {stdout}");
 }
 
 #[test]

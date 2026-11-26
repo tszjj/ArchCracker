@@ -159,13 +159,13 @@ fn run(cli: Cli) -> ExitCode {
         }
     }
 
+    if cli.estimate {
+        return estimate_mask(&cli, &info);
+    }
+
     if !info.has_verification_target() {
         eprintln!("acx: archive is not encrypted or has no file entries");
         return ExitCode::from(EXIT_ARCHIVE);
-    }
-
-    if cli.estimate {
-        return estimate_mask(&cli, &info);
     }
 
     let factory: Arc<dyn ArchiveSessionFactory> = match info.format {

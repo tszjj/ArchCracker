@@ -42,6 +42,9 @@ impl MaskSpec {
         if text.is_empty() {
             return Err(AcxError::Attack("mask is empty".to_string()));
         }
+        if text.trim().is_empty() {
+            return Err(AcxError::Attack("mask is whitespace-only".to_string()));
+        }
         if text.len() > MAX_MASK_EXPRESSION_BYTES {
             return Err(AcxError::Attack(format!(
                 "mask is {} bytes; maximum expression length is {MAX_MASK_EXPRESSION_BYTES}",
@@ -566,7 +569,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_masks() {
-        for mask in ["", "abc?", "?x", "?1"] {
+        for mask in ["", "abc?", "?x", "?1", " ", "   "] {
             let result = MaskSpec::parse(mask, &empty_custom());
             assert!(result.is_err(), "mask {mask:?} must fail");
         }
@@ -588,6 +591,50 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&first.candidates[0]), "9");
         assert_eq!(String::from_utf8_lossy(&first.candidates[1]), "a");
         assert_eq!(String::from_utf8_lossy(&first.candidates[2]), "b");
+
+        let set = MaskSet::parse(
+            &["?d".to_string(), "?l".to_string()],
+            &[None, None, None, None],
+        )
+        .expect("set");
+        let mut boundary = set.into_source(10).expect("boundary source");
+        let batch = boundary.next_batch(1).expect("batch").expect("some");
+        assert_eq!(String::from_utf8_lossy(&batch.candidates[0]), "a");
+        let mut end = MaskSet::parse(
+            &["?d".to_string(), "?l".to_string()],
+            &[None, None, None, None],
+        )
+        .expect("set")
+        .into_source(36)
+        .expect("end source");
+        assert!(end.next_batch(1).expect("end batch").is_none());
+        assert!(
+            MaskSet::parse(&["?d".to_string()], &[None, None, None, None],)
+                .expect("set")
+                .into_source(11)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn source_covers_every_candidate_once() {
+        let set = MaskSet::parse(
+            &["?d".to_string(), "?l".to_string()],
+            &[None, None, None, None],
+        )
+        .expect("set");
+        let mut source = set.into_source(0).expect("source");
+        let mut seen = Vec::new();
+        while let Some(batch) = source.next_batch(7).expect("batch") {
+            seen.extend(batch.candidates);
+        }
+        assert_eq!(seen.len(), 36);
+        let unique: std::collections::BTreeSet<_> = seen.iter().cloned().collect();
+        assert_eq!(unique.len(), 36);
+        assert_eq!(seen[0], b"0");
+        assert_eq!(seen[9], b"9");
+        assert_eq!(seen[10], b"a");
+        assert_eq!(seen[35], b"z");
     }
 
     #[test]
@@ -600,5 +647,6 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| matches!(warning, MaskWarning::TooLargeToRun { .. })));
+        assert!(set.into_source(0).is_err());
     }
 }

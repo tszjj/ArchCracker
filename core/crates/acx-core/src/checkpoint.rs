@@ -385,7 +385,7 @@ fn decode(body: &str) -> std::result::Result<Checkpoint, String> {
             continue;
         };
         match key {
-            "schema" => schema = Some(parse_u64(value)? as u32),
+            "schema" => schema = Some(parse_u32(value)?),
             "tool_version" => tool_version = Some(unescape(value)?),
             "archive_format" => archive_format = Some(unescape(value)?),
             "part" => parts.push(decode_file(value)?),
@@ -450,6 +450,12 @@ fn parse_u64(value: &str) -> std::result::Result<u64, String> {
     value
         .parse()
         .map_err(|error| format!("invalid number `{value}`: {error}"))
+}
+
+fn parse_u32(value: &str) -> std::result::Result<u32, String> {
+    value
+        .parse()
+        .map_err(|error| format!("invalid schema number `{value}`: {error}"))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -652,6 +658,16 @@ mod tests {
         let error = store.load().expect_err("schema 1 must be rejected");
         assert!(matches!(error, AcxError::Checkpoint(_)));
         assert!(error.to_string().contains("schema 1"));
+    }
+
+    #[test]
+    fn schema_overflow_is_rejected() {
+        let temp = TempDir::new("schema-overflow");
+        let store = CheckpointStore::new(temp.join("huge.acx-checkpoint"));
+        std::fs::write(store.path(), "schema=4294967298\n").expect("write checkpoint");
+        let error = store.load().expect_err("overflow schema must be rejected");
+        assert!(matches!(error, AcxError::Checkpoint(_)));
+        assert!(error.to_string().contains("invalid schema"));
     }
 
     #[test]
