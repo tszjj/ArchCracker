@@ -278,6 +278,61 @@ fn hybrid_estimate_prints_space_without_attack() {
 }
 
 #[test]
+fn hybrid_estimate_reports_keyspace_above_usize() {
+    let temp = TempDir::new("estimate-too-large");
+    let zip = temp.join("encrypted.zip");
+    let dictionary = temp.join("words.txt");
+    write_zipcrypto_zip(&zip, "a");
+    write_dictionary(&dictionary, &["a"]);
+    // 95^10 > usize::MAX; estimate must still work, attack must refuse.
+    let big_mask = "?a?a?a?a?a?a?a?a?a?a";
+
+    let estimate = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("-d")
+        .arg(&dictionary)
+        .arg("--prefix-mask")
+        .arg(big_mask)
+        .arg("--estimate")
+        .output()
+        .expect("run acx hybrid estimate");
+    let stdout = String::from_utf8_lossy(&estimate.stdout);
+    let stderr = String::from_utf8_lossy(&estimate.stderr);
+    assert_eq!(
+        estimate.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("Fits executable index: false"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("Watermark bitmap:"), "stdout: {stdout}");
+    assert!(
+        stderr.contains("only estimation is possible"),
+        "stderr: {stderr}"
+    );
+    assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
+
+    let attack = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("-d")
+        .arg(&dictionary)
+        .arg("--prefix-mask")
+        .arg(big_mask)
+        .output()
+        .expect("run acx hybrid");
+    let stderr = String::from_utf8_lossy(&attack.stderr);
+    assert_eq!(attack.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("cannot be executed with the current usize index limit"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn hybrid_resume_starts_at_a_line_boundary() {
     let temp = TempDir::new("resume");
     let zip = temp.join("encrypted.zip");

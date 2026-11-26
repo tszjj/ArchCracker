@@ -686,8 +686,14 @@ fn format_bytes(bytes: u128) -> String {
         format!("{:.1} KB", bytes as f64 / 1_000.0)
     } else if bytes < 1_000_000_000 {
         format!("{:.1} MB", bytes as f64 / 1_000_000.0)
-    } else {
+    } else if bytes < 1_000_000_000_000 {
         format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes < 1_000_000_000_000_000 {
+        format!("{:.2} TB", bytes as f64 / 1_000_000_000_000.0)
+    } else if bytes < 1_000_000_000_000_000_000 {
+        format!("{:.2} PB", bytes as f64 / 1_000_000_000_000_000.0)
+    } else {
+        format!("{:.2} EB", bytes as f64 / 1_000_000_000_000_000_000.0)
     }
 }
 

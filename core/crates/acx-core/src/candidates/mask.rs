@@ -136,14 +136,6 @@ impl MaskSpec {
         self.positions.len()
     }
 
-    /// Keyspace as an execution index. Used by hybrid affix masks, whose
-    /// per-line product must fit the `usize` candidate index.
-    pub(crate) fn keyspace_usize(&self) -> Result<usize> {
-        usize::try_from(self.keyspace).map_err(|_| {
-            AcxError::Attack("affix mask keyspace exceeds the executable usize limit".to_string())
-        })
-    }
-
     /// Render the candidate at `index` in odometer order. Used by the hybrid
     /// affix generator; mask mode itself uses [`MaskCursor`].
     pub(crate) fn candidate_at(&self, index: usize) -> Result<Vec<u8>> {

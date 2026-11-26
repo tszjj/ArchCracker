@@ -76,6 +76,7 @@ peak        = watermark + in_flight + source_bytes
 - [x] 位图 >128 MB 产生警告；`--estimate` 打印位图与峰值；
 - [x] mask/brute/hybrid 三个模式输出相同字段；
 - [x] `--estimate` 不启动攻击、不写检查点；
+- [x] 超过 `usize::MAX` 的 mask/brute/hybrid keyspace 只展示估算并拒绝攻击（hybrid 的 affix keyspace、`V`、`total` 全程 `u128`，仅 `into_source` 转 `usize`）；
 - [x] 估算不影响调度行为（`batch_candidates` 原公式不变）；
 - [x] 无新依赖、无许可变化。
 
@@ -85,7 +86,7 @@ peak        = watermark + in_flight + source_bytes
 - `scheduler.rs` 暴露 `batch_candidates()`，`run_with_source` 改为调用它（行为不变）；
 - `MaskEstimate`/`BruteEstimate` 增加 `space: SpaceEstimate`，`estimate()` 改为 `estimate(threads)`；
 - CLI `--estimate` 与攻击启动前都打印 `Watermark bitmap` / `Estimated peak (core) (+ archive sessions)`，空间警告与 ETA 警告并列；
-- 测试：`estimate` 单测 5 个；mask/brute/hybrid 估算与 CLI 空间输出覆盖；`cargo test --workspace` 142 core / 68 CLI passed（1 ignored）/ 2 FFI 全绿。
+- 测试：`estimate` 单测 5 个；mask/brute/hybrid 估算与 CLI 空间输出覆盖；`cargo test --workspace` 144 core / 69 CLI passed（1 ignored）/ 2 FFI 全绿。
 
 ## 7. 交接
 

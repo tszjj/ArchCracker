@@ -32,8 +32,8 @@ pub struct HybridSpec {
     rules: Vec<RuleChain>,
     prefix: Option<MaskSpec>,
     suffix: Option<MaskSpec>,
-    suffix_keyspace: usize,
-    variants_per_line: usize,
+    suffix_keyspace: u128,
+    variants_per_line: u128,
     total: Option<usize>,
     total_u128: u128,
 }
@@ -57,7 +57,7 @@ impl std::fmt::Display for HybridWarning {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HybridEstimate {
     pub dict_lines: usize,
-    pub variants_per_line: usize,
+    pub variants_per_line: u128,
     pub total: u128,
     pub fits_usize: bool,
     pub space: SpaceEstimate,
@@ -94,30 +94,22 @@ impl HybridSet {
             .map(|text| MaskSpec::parse(text, &custom_sets))
             .transpose()?;
 
-        let prefix_keyspace = match &prefix {
-            Some(mask) => mask.keyspace_usize()?,
-            None => 1,
-        };
-        let suffix_keyspace = match &suffix {
-            Some(mask) => mask.keyspace_usize()?,
-            None => 1,
-        };
+        let prefix_keyspace = prefix.as_ref().map_or(1, MaskSpec::keyspace);
+        let suffix_keyspace = suffix.as_ref().map_or(1, MaskSpec::keyspace);
         let affix_keyspace = if prefix.is_none() && suffix.is_none() {
             0
         } else {
             prefix_keyspace
                 .checked_mul(suffix_keyspace)
-                .ok_or_else(|| {
-                    AcxError::Attack(
-                        "affix keyspace exceeds the executable usize limit".to_string(),
-                    )
-                })?
+                .ok_or_else(|| AcxError::Attack("affix keyspace exceeds u128".to_string()))?
         };
-        let variants_per_line = rules.len().checked_add(affix_keyspace).ok_or_else(|| {
-            AcxError::Attack("variants per line exceed the executable usize limit".to_string())
-        })?;
+        let variants_per_line = (rules.len() as u128)
+            .checked_add(affix_keyspace)
+            .ok_or_else(|| AcxError::Attack("variants per line exceed u128".to_string()))?;
         let scan = scan_dictionary(dictionary)?;
-        let total_u128 = (scan.lines as u128) * (variants_per_line as u128);
+        let total_u128 = (scan.lines as u128)
+            .checked_mul(variants_per_line)
+            .ok_or_else(|| AcxError::Attack("hybrid total exceeds u128".to_string()))?;
         let total = usize::try_from(total_u128).ok();
 
         let signature = hybrid_signature(&rules, prefix_text, suffix_text, custom_texts);
@@ -142,7 +134,7 @@ impl HybridSet {
         self.spec.scan.lines
     }
 
-    pub fn variants_per_line(&self) -> usize {
+    pub fn variants_per_line(&self) -> u128 {
         self.spec.variants_per_line
     }
 
@@ -252,9 +244,9 @@ impl HybridSource {
                 rules: spec.rules,
                 prefix: spec.prefix,
                 suffix: spec.suffix,
-                suffix_keyspace: spec.suffix_keyspace,
+                suffix_keyspace: 1,
                 rules_len,
-                variants_per_line: spec.variants_per_line,
+                variants_per_line: 1,
                 reader: None,
                 line: Vec::new(),
                 line_index: 0,
@@ -265,7 +257,18 @@ impl HybridSource {
             });
         }
 
-        let variants_per_line = spec.variants_per_line;
+        let variants_per_line = usize::try_from(spec.variants_per_line).map_err(|_| {
+            AcxError::Attack(format!(
+                "hybrid variants per line {} exceeds the executable usize limit",
+                spec.variants_per_line
+            ))
+        })?;
+        let suffix_keyspace = usize::try_from(spec.suffix_keyspace).map_err(|_| {
+            AcxError::Attack(format!(
+                "hybrid suffix keyspace {} exceeds the executable usize limit",
+                spec.suffix_keyspace
+            ))
+        })?;
         let dict_line = start_index / variants_per_line;
         let variant = start_index % variants_per_line;
         let rules_len = spec.rules.len();
@@ -273,7 +276,7 @@ impl HybridSource {
             rules: spec.rules,
             prefix: spec.prefix,
             suffix: spec.suffix,
-            suffix_keyspace: spec.suffix_keyspace,
+            suffix_keyspace,
             rules_len,
             variants_per_line,
             reader: None,
@@ -565,6 +568,31 @@ mod tests {
             base,
             set(&dictionary.path, &["identity"], None, Some("?d")).signature()
         );
+    }
+
+    #[test]
+    fn estimate_above_usize_is_estimate_only() {
+        let dictionary = TempDictionary::new("a\n");
+        let big_mask = "?a?a?a?a?a?a?a?a?a?a";
+        let set = set(&dictionary.path, &[], Some(big_mask), None);
+        let estimate = set.estimate(1);
+        assert!(!estimate.fits_usize);
+        assert!(estimate.total > usize::MAX as u128);
+        assert!(estimate
+            .warnings
+            .iter()
+            .any(|warning| matches!(warning, HybridWarning::TooLargeToRun { .. })));
+        assert!(set.into_source(0).is_err());
+    }
+
+    #[test]
+    fn prefix_times_suffix_beyond_usize_still_estimates() {
+        let dictionary = TempDictionary::new("a\n");
+        let five = "?a?a?a?a?a";
+        let set = set(&dictionary.path, &[], Some(five), Some(five));
+        let estimate = set.estimate(1);
+        assert_eq!(estimate.variants_per_line, 95u128.pow(10) + 1);
+        assert!(!estimate.fits_usize);
     }
 
     #[test]
