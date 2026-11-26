@@ -162,3 +162,5 @@ W2-001 GPU: Deferred
 ```
 
 角色：core-engineer（候选源/调度）、qa-engineer（语料/差分）、reviewer（正确性/许可）、architect（攻击接口）、release-engineer（CI/许可门禁）。
+
+<!-- docs-only CI filter test -->
