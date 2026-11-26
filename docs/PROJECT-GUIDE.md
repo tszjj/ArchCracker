@@ -154,7 +154,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W1-010 准出硬化](tasks/W1-010-w1-hardening.md) | ZIP 10⁷、暂停/停止矩阵、签核 | 完成（[W1-SIGNOFF](W1-SIGNOFF.md)） |
 | [W1 评估](W1-ASSESSMENT.md) | W1 交付物与 W2 准入意见 | GO（已签核） |
 | [W2 计划](W2-PLAN.md) | W2 工作包/顺序/退出标准 | 已批准启动（W1 signoff 2026-11-26） |
-| [W2-002 掩码需求](tasks/W2-002-mask-requirements.md) | 表达式约定、限值、空间/时间估算、24h 容量 | 需求分析稿 |
+| [W2-002 掩码需求](tasks/W2-002-mask-requirements.md) | 表达式约定、限值、空间/时间估算、24h 容量、checkpoint 指纹 | 需求分析稿（含 schema v2 决策） |
+| [W2-003 暴力/键空间](tasks/W2-003-brute-keyspace.md) | 字符集 + 长度区间、短密码优先、`usize` 决策、schema v2 复用 | 任务定义稿 |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
