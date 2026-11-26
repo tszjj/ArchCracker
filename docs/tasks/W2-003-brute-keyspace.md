@@ -66,6 +66,7 @@ BruteEstimate
   fits_usize: bool
   per_format_eta: ...
   warnings: Vec<BruteWarning>
+  space: SpaceEstimate           // W2-003a 回填：位图 + 在飞批次 + 源缓冲
 ```
 
 字符集来自 `--brute` 表达式和 `--custom-charset1..4`；解析后展开为单一字节集合。`--brute` 表达式按**字符集**解释：其中的字面量进入字符集，不产生固定位置；需要固定位置时用 W2-002 的 `--mask`（本条以此实现口径为准，见 §9）。
@@ -159,7 +160,7 @@ total=<u64>
 
 - 总键空间超过 `usize::MAX` 时拒绝执行，用户需缩小字符集或长度区间；
 - 短密码优先意味着长密码排在后面，超长区间可能实际不可完成；
-- 水位位图为 O(N/8)，与 W1-007 相同；大键空间下仍是主要内存项；
+- 水位位图为 O(N/8)，与 W1-007 相同；大键空间下仍是主要内存项（W2-003a 已在 `--estimate` 中输出位图字节数与警告）；
 - 字符集顺序固定，用户无法指定“常用字符优先”之类的权重；
 - RAR 外部进程每候选成本高，暴力模式在 RAR 上实际可尝试量远小于 ZIP；
 - `sha2` 已是 `acx-core` 既有依赖，无新增许可登记；
@@ -177,6 +178,7 @@ total=<u64>
 - **CLI**：`--brute`、`--min-len`、`--max-len`、`-m brute`；`--estimate` 支持暴力模式并逐长度打印键空间；`--brute` 与 `-d`/`--mask` 互斥，`--min-len`/`--max-len` 只允许与 `--brute` 同用。退出码沿用 0/1/2/3/4。
 - **遍历**：长度从 `min_len` 递增；同一长度内最右位最快（odometer）；全局索引连续。恢复时用长度前缀二分定位，落在边界则从下一长度第 0 个候选开始。
 - **键空间**：逐长度 `checked_mul`、总和 `checked_add`，全部用 `u128`；超过 `u128` 直接报错。`--estimate` 仍展示超过 `usize::MAX` 的键空间与警告，实际攻击拒绝执行。
+- **空间（W2-003a 回填）**：`BruteEstimate.space` 给出水位位图、`(threads+3)` 个在飞批次与峰值；`estimate(threads)` 与 mask/hybrid 共用 `acx_core::estimate`。
 - **指纹**：`attack_mode=brute`，签名输入为原始 `--brute` 文本 + 4 个 `--custom-charset*` 原文 + `min_len` + `max_len`，与 W2-002 掩码同策略（任一文本/区间变化都拒绝 `--resume`）；checkpoint 的 `dictionary` 行缺失（`None`）。
 - **语义**：`--brute` 表达式按字符集展开，字面量进入字符集；固定位置用 `--mask`（§4.1 的早期“字面量位置”表述以此为准）。
 - **测试**：`cargo test --workspace` 123 core / 58 CLI passed（另有 1 ignored）/ 2 FFI；新增 16 个 `candidates::brute` 单测（顺序、批次边界、全索引续跑、1M 生成、radix=1、128 位上限、`u128` 溢出、警告、指纹）与 14 个 `tests/w2_brute.rs` 端到端用例（命中、自定义字符集、估算与 >24h 警告、长度边界续跑、区间/自定义集变化拒绝续跑、参数互斥、超 `usize` 拒绝）。

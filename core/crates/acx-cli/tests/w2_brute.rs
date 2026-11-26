@@ -218,6 +218,11 @@ fn brute_estimate_prints_per_length_keyspace_without_attack() {
     assert!(stdout.contains("Keyspace: 1110"), "stdout: {stdout}");
     assert!(stdout.contains("Length 1: 10"), "stdout: {stdout}");
     assert!(stdout.contains("Length 3: 1000"), "stdout: {stdout}");
+    assert!(stdout.contains("Watermark bitmap:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("Estimated peak (core):"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("24h capacity"), "stdout: {stdout}");
     assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
 }

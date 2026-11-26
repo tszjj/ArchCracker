@@ -37,7 +37,17 @@ const MAX_IN_FLIGHT_CANDIDATES: usize = 4096;
 const PIPELINE_QUEUE_BATCHES: usize = 2;
 
 /// Upper bound for worker threads; extra threads only add open sessions.
-const MAX_THREADS: usize = 256;
+pub(crate) const MAX_THREADS: usize = 256;
+
+/// Candidates the producer requests per batch for a given worker count.
+///
+/// Keeps `(workers + queue + producer's pending batch) * batch_size` at or
+/// below [`MAX_IN_FLIGHT_CANDIDATES`]. Shared with the memory estimate so the
+/// two cannot drift.
+pub(crate) fn batch_candidates(threads: usize) -> usize {
+    let threads = threads.clamp(1, MAX_THREADS);
+    (MAX_IN_FLIGHT_CANDIDATES / (threads + PIPELINE_QUEUE_BATCHES + 1)).max(1)
+}
 
 /// How often workers poll control state while waiting for a batch.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -349,7 +359,7 @@ pub fn run_with_source(
 
     let threads = context.threads;
     // Keep (workers + queue + producer's pending batch) × batch_size <= 4096.
-    let batch_size = (MAX_IN_FLIGHT_CANDIDATES / (threads + PIPELINE_QUEUE_BATCHES + 1)).max(1);
+    let batch_size = batch_candidates(threads);
     let (batch_tx, batch_rx) = bounded::<CandidateBatch>(PIPELINE_QUEUE_BATCHES);
     let hit: Arc<Mutex<Option<Hit>>> = Arc::new(Mutex::new(None));
     let mut first_error: Option<AcxError> = None;

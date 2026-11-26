@@ -74,7 +74,13 @@ W2 前段（W2-002/003/004）有两种做法：
 - 与掩码共用 `CandidateSource`/scheduler，避免两套并发和断点逻辑；
 - 大键空间仍不物化，避免磁盘和明文落盘。
 
+### W2-003a 空间估算回填
+
+> **状态（2026-11-27）**：`acx_core::estimate::SpaceEstimate`、mask/brute 回填、hybrid 复用已实现（与 W2-004 同一 PR，评审中）。位图 >128 MB 时警告；单位十进制 MB。详见 [W2-003a](tasks/W2-003a-space-estimate.md)。
+
 ### W2-004 混合/规则
+
+> **状态（2026-11-27）**：规则链、hybrid 候选源、CLI 与 schema v2 复合指纹首版已实现（与 W2-003a 同一 PR，评审中）；空间估算复用 W2-003a 的 `SpaceEstimate`。任务定义在工作区 `docs/tasks/W2-004-hybrid-rules.md`（暂未提交，待确认后再入库）。
 
 **实现目标（参考）**
 

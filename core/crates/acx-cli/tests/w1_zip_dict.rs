@@ -363,7 +363,39 @@ fn mask_estimate_prints_keyspace_without_attack() {
         "stdout: {stdout}\nstderr: {stderr}"
     );
     assert!(stdout.contains("Keyspace: 1000"), "stdout: {stdout}");
+    assert!(stdout.contains("Watermark bitmap:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("Estimated peak (core):"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("24h capacity"), "stdout: {stdout}");
+    assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
+}
+
+#[test]
+fn mask_estimate_warns_when_the_bitmap_is_large() {
+    let temp = TempDir::new("mask-space-warning");
+    let zip = temp.join("plain.zip");
+    write_plain_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--mask")
+        .arg("?l?l?l?l?l?l?l")
+        .arg("--estimate")
+        .output()
+        .expect("run acx mask estimate");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("Watermark bitmap:"), "stdout: {stdout}");
+    assert!(stderr.contains("completion bitmap"), "stderr: {stderr}");
     assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
 }
 

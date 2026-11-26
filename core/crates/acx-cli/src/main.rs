@@ -7,7 +7,7 @@ use acx_core::archive::{
     self, ArchiveFormat, ArchiveSessionFactory, ArchiveSource, RarFactory, SevenZFactory,
     ZipFactory,
 };
-use acx_core::candidates::{BruteSet, CandidateSource, DictionaryStream, MaskSet};
+use acx_core::candidates::{BruteSet, CandidateSource, DictionaryStream, HybridSet, MaskSet};
 use acx_core::checkpoint::{
     ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
 };
@@ -44,7 +44,7 @@ struct Cli {
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     file: PathBuf,
 
-    /// Attack mode: `dict`, `mask`, or `brute`. `--mask`/`--brute` imply their mode.
+    /// Attack mode: `dict`, `mask`, `brute`, or `hybrid`; the flags imply their mode.
     #[arg(
         short = 'm',
         long = "mode",
@@ -53,13 +53,25 @@ struct Cli {
     )]
     mode: String,
 
-    /// Password dictionary, one candidate per line. Required in dict mode.
+    /// Password dictionary, one candidate per line. Required in dict/hybrid mode.
     #[arg(short = 'd', long = "dictionary", value_name = "PATH")]
     dictionary: Option<PathBuf>,
 
     /// Fixed-length mask expression; repeat for multiple masks.
     #[arg(long = "mask", value_name = "EXPR", action = clap::ArgAction::Append)]
     mask: Vec<String>,
+
+    /// Rule chain for hybrid mode, e.g. `capitalize|append:123`; repeatable.
+    #[arg(long = "rule", value_name = "CHAIN", action = clap::ArgAction::Append)]
+    rules: Vec<String>,
+
+    /// Prefix mask for hybrid mode (same syntax as `--mask`).
+    #[arg(long = "prefix-mask", value_name = "EXPR")]
+    prefix_mask: Option<String>,
+
+    /// Suffix mask for hybrid mode (same syntax as `--mask`).
+    #[arg(long = "suffix-mask", value_name = "EXPR")]
+    suffix_mask: Option<String>,
 
     /// Brute-force charset expression (e.g. `?l?d`); literals join the charset.
     /// Requires `--min-len` and `--max-len`.
@@ -90,7 +102,7 @@ struct Cli {
     #[arg(long = "custom-charset4", value_name = "SET")]
     custom_charset4: Option<String>,
 
-    /// Print mask keyspace/ETA warnings without starting an attack.
+    /// Print keyspace/ETA/space estimates without starting an attack.
     #[arg(long = "estimate")]
     estimate: bool,
 
@@ -115,15 +127,25 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> ExitCode {
     let use_mask = !cli.mask.is_empty() || cli.mode == "mask";
     let use_brute = cli.brute.is_some() || cli.mode == "brute";
-    if !matches!(cli.mode.as_str(), "dict" | "mask" | "brute") {
+    let use_hybrid = !cli.rules.is_empty()
+        || cli.prefix_mask.is_some()
+        || cli.suffix_mask.is_some()
+        || cli.mode == "hybrid";
+    if !matches!(cli.mode.as_str(), "dict" | "mask" | "brute" | "hybrid") {
         eprintln!(
-            "acx: unsupported mode `{}` (expected dict, mask, or brute)",
+            "acx: unsupported mode `{}` (expected dict, mask, brute, or hybrid)",
             cli.mode
         );
         return ExitCode::from(EXIT_USAGE);
     }
-    if use_mask && use_brute {
-        eprintln!("acx: --mask and --brute are mutually exclusive");
+    let modes = [use_mask, use_brute, use_hybrid]
+        .iter()
+        .filter(|active| **active)
+        .count();
+    if modes > 1 {
+        eprintln!(
+            "acx: --mask, --brute, and --rule/--prefix-mask/--suffix-mask are mutually exclusive"
+        );
         return ExitCode::from(EXIT_USAGE);
     }
     if use_brute {
@@ -137,6 +159,17 @@ fn run(cli: Cli) -> ExitCode {
         }
         if cli.min_len.is_none() || cli.max_len.is_none() {
             eprintln!("acx: brute mode requires --min-len and --max-len");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    } else if use_hybrid {
+        if cli.dictionary.is_none() {
+            eprintln!("acx: hybrid mode requires --dictionary");
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if cli.rules.is_empty() && cli.prefix_mask.is_none() && cli.suffix_mask.is_none() {
+            eprintln!(
+                "acx: hybrid mode requires --rule, --prefix-mask, or --suffix-mask; use -m dict for a plain dictionary attack"
+            );
             return ExitCode::from(EXIT_USAGE);
         }
     } else if use_mask {
@@ -156,8 +189,8 @@ fn run(cli: Cli) -> ExitCode {
         eprintln!("acx: --min-len/--max-len require --brute");
         return ExitCode::from(EXIT_USAGE);
     }
-    if cli.estimate && !(use_mask || use_brute) {
-        eprintln!("acx: --estimate requires --mask or --brute");
+    if cli.estimate && !(use_mask || use_brute || use_hybrid) {
+        eprintln!("acx: --estimate requires --mask, --brute, or hybrid mode");
         return ExitCode::from(EXIT_USAGE);
     }
 
@@ -195,7 +228,7 @@ fn run(cli: Cli) -> ExitCode {
     }
 
     if cli.estimate {
-        return estimate_attack(&cli, &info, use_brute);
+        return estimate_attack(&cli, &info, use_brute, use_hybrid);
     }
 
     if !info.has_verification_target() {
@@ -292,7 +325,7 @@ fn run(cli: Cli) -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
         };
-        let estimate = set.estimate();
+        let estimate = set.estimate(cli.threads);
         for warning in &estimate.warnings {
             eprintln!("WARNING: {warning}");
         }
@@ -307,6 +340,7 @@ fn run(cli: Cli) -> ExitCode {
         println!("Brute charset: {charset_text}");
         println!("Lengths: {min_len}..={max_len}");
         println!("Brute keyspace: {}", estimate.keyspace);
+        print_space(&estimate.space);
         if !estimate.fits_usize {
             eprintln!(
                 "acx: brute keyspace {} cannot be executed with the current usize index limit",
@@ -330,6 +364,70 @@ fn run(cli: Cli) -> ExitCode {
             total,
             "Candidates",
         )
+    } else if use_hybrid {
+        let dictionary = cli
+            .dictionary
+            .as_ref()
+            .expect("validated hybrid dictionary");
+        let fingerprint = match FileFingerprint::from_path(dictionary) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let set = match HybridSet::parse(
+            dictionary,
+            &cli.rules,
+            cli.prefix_mask.as_deref(),
+            cli.suffix_mask.as_deref(),
+            &custom_texts,
+        ) {
+            Ok(set) => set,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let estimate = set.estimate(cli.threads);
+        let (rate, rate_label) = rate_for(info.format);
+        let seconds = estimate.total as f64 / rate;
+        if seconds > 86_400.0 {
+            eprintln!(
+                "WARNING: estimated {} exceeds 24h on {rate_label} at the measured rate",
+                format_duration(seconds)
+            );
+        }
+        for warning in &estimate.warnings {
+            eprintln!("WARNING: {warning}");
+        }
+        println!("Dictionary lines: {}", estimate.dict_lines);
+        println!("Variants per line: {}", estimate.variants_per_line);
+        println!("Hybrid keyspace: {}", estimate.total);
+        print_space(&estimate.space);
+        if !estimate.fits_usize {
+            eprintln!(
+                "acx: hybrid total {} cannot be executed with the current usize index limit",
+                estimate.total
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+        let attack = AttackFingerprint::new("hybrid", set.signature());
+        let source = match set.into_source(start_index) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let total = source.total();
+        (
+            Some(fingerprint),
+            attack,
+            Box::new(source) as Box<dyn CandidateSource>,
+            total,
+            "Candidates",
+        )
     } else if use_mask {
         let set = match MaskSet::parse(&cli.mask, &custom_texts) {
             Ok(set) => set,
@@ -338,7 +436,7 @@ fn run(cli: Cli) -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
         };
-        let estimate = set.estimate();
+        let estimate = set.estimate(cli.threads);
         for warning in &estimate.warnings {
             eprintln!("WARNING: {warning}");
         }
@@ -351,6 +449,7 @@ fn run(cli: Cli) -> ExitCode {
             );
         }
         println!("Mask keyspace: {}", estimate.keyspace);
+        print_space(&estimate.space);
         if !estimate.fits_usize {
             eprintln!(
                 "acx: mask keyspace {} cannot be executed with the current usize index limit",
@@ -563,9 +662,51 @@ fn rate_for(format: ArchiveFormat) -> (f64, &'static str) {
     }
 }
 
-fn estimate_attack(cli: &Cli, info: &acx_core::archive::ArchiveInfo, use_brute: bool) -> ExitCode {
+fn print_space(space: &acx_core::estimate::SpaceEstimate) {
+    println!(
+        "Watermark bitmap: {} ({} candidates)",
+        format_bytes(space.watermark_bytes),
+        space.total
+    );
+    println!(
+        "Estimated peak (core): {} (+ archive sessions, {} batches in flight)",
+        format_bytes(space.estimated_peak_bytes),
+        space.in_flight_batches
+    );
+    for warning in &space.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+}
+
+/// Decimal units keep the CLI and the task docs consistent (`182.9 MB`).
+fn format_bytes(bytes: u128) -> String {
+    if bytes < 1_000 {
+        format!("{bytes} B")
+    } else if bytes < 1_000_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else if bytes < 1_000_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes < 1_000_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes < 1_000_000_000_000_000 {
+        format!("{:.2} TB", bytes as f64 / 1_000_000_000_000.0)
+    } else if bytes < 1_000_000_000_000_000_000 {
+        format!("{:.2} PB", bytes as f64 / 1_000_000_000_000_000.0)
+    } else {
+        format!("{:.2} EB", bytes as f64 / 1_000_000_000_000_000_000.0)
+    }
+}
+
+fn estimate_attack(
+    cli: &Cli,
+    info: &acx_core::archive::ArchiveInfo,
+    use_brute: bool,
+    use_hybrid: bool,
+) -> ExitCode {
     if use_brute {
         estimate_brute(cli, info)
+    } else if use_hybrid {
+        estimate_hybrid(cli, info)
     } else {
         estimate_mask(cli, info)
     }
@@ -582,7 +723,7 @@ fn estimate_brute(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode 
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let estimate = set.estimate();
+    let estimate = set.estimate(cli.threads);
     println!("Brute charset: {charset_text}");
     println!("Lengths: {min_len}..={max_len}");
     println!("Keyspace: {}", estimate.keyspace);
@@ -593,6 +734,7 @@ fn estimate_brute(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode 
     for warning in &estimate.warnings {
         eprintln!("WARNING: {warning}");
     }
+    print_space(&estimate.space);
 
     let (rate, label) = rate_for(info.format);
     let seconds = estimate.keyspace as f64 / rate;
@@ -609,6 +751,49 @@ fn estimate_brute(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode 
     ExitCode::SUCCESS
 }
 
+fn estimate_hybrid(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
+    let dictionary = cli
+        .dictionary
+        .as_ref()
+        .expect("validated hybrid dictionary");
+    let set = match HybridSet::parse(
+        dictionary,
+        &cli.rules,
+        cli.prefix_mask.as_deref(),
+        cli.suffix_mask.as_deref(),
+        &custom_texts(cli),
+    ) {
+        Ok(set) => set,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let estimate = set.estimate(cli.threads);
+    println!("Dictionary lines: {}", estimate.dict_lines);
+    println!("Variants per line: {}", estimate.variants_per_line);
+    println!("Total candidates: {}", estimate.total);
+    println!("Fits executable index: {}", estimate.fits_usize);
+    print_space(&estimate.space);
+    for warning in &estimate.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+
+    let (rate, label) = rate_for(info.format);
+    let seconds = estimate.total as f64 / rate;
+    let capacity = rate * 86_400.0;
+    println!("Format: {label} ({rate:.1}/s measured)");
+    println!("ETA: {}", format_duration(seconds));
+    println!("24h capacity: {capacity:.0} candidates");
+    if seconds > 86_400.0 {
+        eprintln!(
+            "WARNING: estimated {} exceeds 24h at the measured rate; reduce the dictionary or variants",
+            format_duration(seconds)
+        );
+    }
+    ExitCode::SUCCESS
+}
+
 fn estimate_mask(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
     let custom = custom_texts(cli);
     let set = match MaskSet::parse(&cli.mask, &custom) {
@@ -618,13 +803,14 @@ fn estimate_mask(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let estimate = set.estimate();
+    let estimate = set.estimate(cli.threads);
     println!("Mask: {}", cli.mask.join(" | "));
     println!("Keyspace: {}", estimate.keyspace);
     println!("Fits executable index: {}", estimate.fits_usize);
     for warning in &estimate.warnings {
         eprintln!("WARNING: {warning}");
     }
+    print_space(&estimate.space);
 
     let (rate, label) = rate_for(info.format);
     let seconds = estimate.keyspace as f64 / rate;

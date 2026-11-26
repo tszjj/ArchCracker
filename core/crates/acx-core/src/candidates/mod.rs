@@ -5,19 +5,28 @@
 
 pub mod brute;
 pub mod dictionary;
+pub mod hybrid;
 pub mod mask;
+pub mod rules;
 
 use crate::error::Result;
+
+/// Hard per-batch byte cap for sources that can emit large candidates
+/// (streaming dictionary and hybrid). Mask/brute candidates are bounded by
+/// their 128-byte length limit and do not need it.
+pub(crate) const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 pub use brute::{
     BruteEstimate, BruteSet, BruteSource, BruteSpec, BruteWarning, MAX_BRUTE_LENGTH,
     RECOMMENDED_BRUTE_LENGTH,
 };
 pub use dictionary::{Dictionary, DictionaryStream};
+pub use hybrid::{HybridEstimate, HybridSet, HybridSource, HybridSpec, HybridWarning};
 pub use mask::{
     MaskEstimate, MaskSet, MaskSource, MaskSpec, MaskWarning, MAX_CUSTOM_CHARSET_BYTES,
     MAX_MASK_EXPRESSION_BYTES, MAX_MASK_POSITIONS, RECOMMENDED_MASK_POSITIONS,
 };
+pub use rules::{RuleChain, Transform, MAX_RULE_CHAIN_LENGTH, MAX_RULE_LITERAL_BYTES};
 
 /// One owned batch of candidates, starting at `start_index` in the source.
 #[derive(Debug)]
