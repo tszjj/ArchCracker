@@ -57,17 +57,17 @@
 - [x] ZIP：ZipCrypto + WinZip AES（W1-001/W1-002）
 - [x] 7z：`sevenz-rust2`；AES/头加密；首块探测（W1-004；7-Zip 26.04 差分）
 - [x] RAR：外部 UnRAR.exe、stdin 密码、整包验证（W1-003；RAR4/RAR5 已验证，W1-003c 补 RAR4 `-ma4`）；预检缓存（W1-003b）
-- [ ] 字典：流式、编码识别、批处理（W1-007；本地实现 reviewer APPROVE，待 500MB/1M 基准；流式默认不做全局去重）
-- [ ] 运行控制 + 断点：暂停/继续、优雅/强制停止、检查点、`--resume`（W1-006 合并 epic；本地实现 reviewer APPROVE，待大语料）
+- [x] 字典：流式、编码识别、批处理（W1-007；reviewer APPROVE，1M 基准完成）
+- [x] 运行控制 + 断点：暂停/继续、优雅/强制停止、检查点、`--resume`（W1-006；reviewer APPROVE，1GB 矩阵完成）
 - [x] 会话复用：每 worker 打开一次、RAR 预检在 factory 缓存；不每候选重开
 - [ ] 错误分类：未加密/空包/损坏/缺卷/不支持/头加密
-- [x] 基准语料与 p/s 报告（W1-008；ZIP 42.247s、7z 1271.049s、RAR 外部 4515.104s；W1-009 RAR5 快筛 424.838s）
+- [x] 基准语料与 p/s 报告（W1-008；ZIP 39.335s、7z 1033.040s、RAR5 快筛 578.958s；W1-010 ZIP 10M 393.569s）
 
 **退出标准**
 
 > 以 [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md) §5.4 为准。核心口径：
 
-- W1-001…W1-008 完成；CLI 字典模式覆盖 ZIP/7z/RAR、分卷、SFX；
+- W1-001…W1-010 完成；PR #10–#15 已合并；W1 signoff 2026-11-26（[W1-SIGNOFF](W1-SIGNOFF.md)）；
 - 1M 字典 × 1GB ZIP/7z/RAR（已知密码）完成，并记录 p/s（格式/线程/硬件）；“可接受”不作为验收措辞；
 - 暂停/停止请求 ≤200 ms 被观察；外部子进程 ≤2 s kill；CPU 候选在调用返回后停止，1GB 候选时延在基准中记录；强杀恢复误差 ≤1 批；
 - 已知密码 100% 命中；ZIP/ZipCrypto 10⁷ 错误候选 0 误报；7z/RAR5 抽样 ≥10⁵ 0 误报 + 差分；
@@ -79,6 +79,8 @@
 ---
 
 ## W2 引擎与攻击（2–3 周）
+
+**状态**：W1 已签核，W2 按 [W2 计划](W2-PLAN.md) 启动；W2-001 GPU Deferred。
 
 **目标**：在 W1 准出后，补齐 CPU 快筛、掩码/暴力/混合、批量/编码变体，Windows CLI 达到 beta。GPU/hashcat 不在 W2 启动。
 
