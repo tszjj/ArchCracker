@@ -67,7 +67,7 @@ peak        = watermark + in_flight + source_bytes
 |---|---:|---:|---|---:|
 | mask | keyspace | 最大 positions（≤128） | 无 | 4 KiB |
 | brute | Σ keyspace(L) | `max_len`（≤128） | 无 | 4 KiB |
-| hybrid | dict_lines × V | 最大行 + 前缀/后缀 positions | 8 MiB | 2 MiB + 2×最大行 |
+| hybrid | dict_lines × V | max(最大行 + 规则增长, 最大行 + 前后缀 positions) | 8 MiB | 2 MiB + 2×最大行 |
 
 ## 5. 验收
 
@@ -85,7 +85,7 @@ peak        = watermark + in_flight + source_bytes
 - `scheduler.rs` 暴露 `batch_candidates()`，`run_with_source` 改为调用它（行为不变）；
 - `MaskEstimate`/`BruteEstimate` 增加 `space: SpaceEstimate`，`estimate()` 改为 `estimate(threads)`；
 - CLI `--estimate` 与攻击启动前都打印 `Watermark bitmap` / `Estimated peak (core) (+ archive sessions)`，空间警告与 ETA 警告并列；
-- 测试：`estimate` 单测 5 个；mask/brute/hybrid 估算与 CLI 空间输出覆盖；`cargo test --workspace` 141 core / 68 CLI passed（1 ignored）/ 2 FFI 全绿。
+- 测试：`estimate` 单测 5 个；mask/brute/hybrid 估算与 CLI 空间输出覆盖；`cargo test --workspace` 142 core / 68 CLI passed（1 ignored）/ 2 FFI 全绿。
 
 ## 7. 交接
 

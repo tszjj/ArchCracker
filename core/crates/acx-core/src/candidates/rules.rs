@@ -114,6 +114,18 @@ impl RuleChain {
         &self.text
     }
 
+    /// Bytes a chain can add to a word (append/prepend literals only). Used by
+    /// the hybrid memory estimate to bound one candidate.
+    pub fn max_added_bytes(&self) -> usize {
+        self.transforms
+            .iter()
+            .map(|transform| match transform {
+                Transform::Append(literal) | Transform::Prepend(literal) => literal.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+
     pub fn apply(&self, word: &[u8]) -> Vec<u8> {
         let mut output = word.to_vec();
         for transform in &self.transforms {
@@ -244,6 +256,22 @@ mod tests {
         }
         let long = format!("append:{}", "a".repeat(MAX_RULE_LITERAL_BYTES + 1));
         assert!(RuleChain::parse(&long).is_err());
+    }
+
+    #[test]
+    fn reports_the_maximum_added_bytes() {
+        assert_eq!(
+            RuleChain::parse("append:123|prepend:x")
+                .expect("chain")
+                .max_added_bytes(),
+            4
+        );
+        assert_eq!(
+            RuleChain::parse("lower|reverse")
+                .expect("chain")
+                .max_added_bytes(),
+            0
+        );
     }
 
     #[test]

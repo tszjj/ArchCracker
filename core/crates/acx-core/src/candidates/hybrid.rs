@@ -156,12 +156,19 @@ impl HybridSet {
 
     pub fn estimate(&self, threads: usize) -> HybridEstimate {
         let max_line = self.spec.scan.max_line_bytes as u128;
+        let max_rule_growth = self
+            .spec
+            .rules
+            .iter()
+            .map(RuleChain::max_added_bytes)
+            .max()
+            .unwrap_or(0) as u128;
         let affix_positions = self.spec.prefix.as_ref().map_or(0, MaskSpec::positions)
             + self.spec.suffix.as_ref().map_or(0, MaskSpec::positions);
         let space = estimate_space(&SpaceInput {
             total: self.spec.total_u128,
             threads,
-            max_candidate_bytes: max_line + affix_positions as u128,
+            max_candidate_bytes: max_line + max_rule_growth.max(affix_positions as u128),
             batch_bytes_cap: Some(MAX_BATCH_BYTES as u128),
             source_bytes: HYBRID_SOURCE_BYTES + 2 * max_line,
         });
