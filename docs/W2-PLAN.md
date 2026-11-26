@@ -60,6 +60,8 @@ W2 前段（W2-002/003/004）有两种做法：
 
 ### W2-003 暴力/键空间
 
+> **状态（2026-11-27）**：内核 `BruteSource`、CLI `--brute`/`--min-len`/`--max-len`/`--estimate`、schema v2 checkpoint（`mode=brute`）首版已实现（评审/合并中）。实现细节、共享字符集解析器和测试见 [W2-003 任务文档](tasks/W2-003-brute-keyspace.md) §9。
+
 **实现目标（参考）**
 
 - CLI 支持字符集 + 长度区间 + 短密码优先；
