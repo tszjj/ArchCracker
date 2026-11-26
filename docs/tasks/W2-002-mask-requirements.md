@@ -38,7 +38,7 @@ W2-002 采用**内核候选源 + CLI 攻击模式**，不把掩码完整展开�
 | 自定义字符集 | `?1..?4`，每个最多 256 字节；由 `--custom-charset1..4` 定义 |
 | `?b` | W2-002 不实现；0x00-0xff 与 CLI/外部 RAR 行输入冲突，后续单独评审 |
 | 转义 | `??` 表示字面 `?`；未知 `?x` 报错 |
-| 长度范围 | 单个 mask 固定长度；用多个 `--mask`/`--mask-file` 表达长度范围，不做隐式 increment |
+| 长度范围 | 单个 mask 固定长度；首版用多条 `--mask` 表达，`--mask-file` 为后续功能（见 §6）；不做隐式 increment |
 | 位置集合 | 每个 token 占一个位置；固定字符是单字节 literal，`?1` 是自定义集合 |
 | 最大键空间 | **`usize::MAX`**（当前 `CandidateBatch.start_index` 是 `usize`）；估算用 `u128`，超出可攻击范围报错 |
 
@@ -191,7 +191,7 @@ MaskEstimate
 
 - `MaskSource` 实现 W1 `CandidateSource`，不修改 scheduler API；
 - `total` 必须准确；批次 `start_index` 连续；
-- 检查点记录 mask 指纹 + `next_index`，不记录密码；
+- 检查点记录 mask 指纹 + `next_index`，不记录密码；指纹方案见 §4.6；
 - 暂停/停止沿用 W1 的 20 ms 轮询和 4096 in-flight 窗口。
 
 ### 4.4 CLI
@@ -200,7 +200,7 @@ MaskEstimate
 
 ```text
 --mask <expr>               可重复；每条固定长度
---mask-file <path>          每行一条 mask；# 注释
+--mask-file <path>          每行一条 mask；# 注释（后续功能，首版不实现）
 --custom-charset1..4 <set>  自定义字符集
 --estimate                  只解析/估算，不攻击
 --max-runtime <duration>    可选；到时停止
@@ -229,6 +229,42 @@ warnings: none
 ```text
 WARNING: estimated 95.1 days at 25,409/s; 24h capacity is 2.20e9
 ```
+
+### 4.6 Checkpoint 指纹与恢复
+
+**决策（2026-11-27）**：把 W1 的 `Checkpoint` 扩展为 schema v2，新增通用攻击指纹；W2-003 暴力、W2-004 混合复用同一结构，不再逐切片改格式。
+
+现状约束：`Checkpoint.dictionary` 是必填 `FileFingerprint`，`validate()` 校验字典指纹；掩码攻击没有字典文件，且 W2-004 需要同时表达“字典 + 规则”，因此不能把掩码指纹塞进 `mode` 字符串。
+
+类型（规划）：
+
+```text
+Checkpoint (schema=2)
+  archive: ArchiveFingerprint
+  dictionary: Option<FileFingerprint>   // 掩码/暴力为 None，混合为 Some
+  attack: AttackFingerprint             // 新增
+  completed_through: u64                // 保持 u64，执行侧维持 usize
+  tried: u64
+  total: u64
+  ...
+
+AttackFingerprint
+  mode: String                          // "dict" | "mask" | "brute" | "hybrid"
+  signature: String                     // 规范化描述的 SHA-256 hex
+```
+
+编码新增两行：`attack_mode=mask`、`attack_signature=<hex>`；`dictionary` 行缺失时解码为 `None`。`sha2` 已是 `acx-core` 既有依赖（0.10），无需新增依赖或许可登记。
+
+多 mask 规范化：把每条 mask 的 `source_text` 按 CLI 出现顺序拼接，附 4 个自定义字符集定义，用固定分隔符连接后取 SHA-256。`total = Σ keyspace_i`，`completed_through` 是全局索引；恢复时按累计划分区间二分定位到 `(mask_i, local_index)`。命令行中多条 `--mask` 的出现顺序即为顺序；`--mask-file` 不在首版（见 §6）。
+
+兼容性：schema=1 的 W1 检查点在 v2 下直接拒绝并提示重新运行；W2 处于 beta 阶段，不做半兼容读取。
+
+验收补充：
+
+- 字典模式写出的 v2 检查点可被 v2 读取并续跑；
+- 掩码表达式、自定义字符集或多条 mask 的顺序任一变化都会拒绝 `--resume`；
+- 全局 watermark 落在 mask 边界时，恢复后从下一条 mask 的第 0 个候选继续，不重不漏；
+- 旧 schema=1 检查点被明确拒绝，错误信息可读。
 
 ## 5. 需求验收
 

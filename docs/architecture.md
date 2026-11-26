@@ -241,6 +241,8 @@ created_unix_ms=...
 - `--resume` 校验归档（含分卷列表）/字典/模式/总数，不匹配明确拒绝；
 - 锁是单进程 advisory lock，硬杀后由 `--resume` 清理。
 
+**规划中（W2-002，schema v2）**：为支持无字典的掩码/暴力攻击以及“字典 + 规则”混合攻击，`dictionary` 改为可选，新增 `attack: { mode, signature }`；签名取规范化攻击描述的 SHA-256（`sha2` 已是既有依赖，无需新增许可登记）。`completed_through/tried/total` 保持 u64，执行侧维持 usize。schema=1 检查点直接拒绝，不做半兼容读取。多 mask 的全局 watermark 按累计划分区间映射到 `(mask_i, local_index)`。详见 [W2-002 任务文档](tasks/W2-002-mask-requirements.md) §4.6。
+
 ## 7. 前端设计
 
 ### 7.1 桌面：Avalonia 12 / .NET 10
