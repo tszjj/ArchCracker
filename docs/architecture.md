@@ -195,8 +195,8 @@ const char* acx_last_error(AcxHandle* h); /* thread-local copy */
 
 - `JobManager`：单包/批量队列；已找到密码的包间复用。
 - `AttackPlanner`：模式选择、成本估算、预检、线程数建议。
-- `Scheduler`：producer → bounded channel → N workers；每 worker 独占会话；原子命中仲裁。
-- `ResumeManager`：字典偏移/键空间索引 + 归档指纹 + 参数哈希；原子写盘。
+- `Scheduler`：producer → bounded channel → N workers；每 worker 独占会话；逐候选完成水位；`RunControl` 暂停/停止；外部引擎取消。
+- `ResumeManager`：`CheckpointStore` 的 key=value 检查点 + 归档/字典指纹 + 连续完成水位；原子写盘。
 - `Stats`：EWMA 速率、ETA、每 worker 计数。
 
 ### 6.2 候选源
@@ -219,17 +219,27 @@ const char* acx_last_error(AcxHandle* h); /* thread-local copy */
 
 ### 6.4 断点
 
-```json
-{
-  "version": 1,
-  "archive": {"path": "...", "size": 0, "head_hash": "...", "tail_hash": "..."},
-  "attack": {"mode": "dict", "dict_hash": "...", "byte_offset": 0, "line": 0},
-  "options": {"threads": 14, "fast_mode": true},
-  "stats": {"tried": 0, "elapsed_sec": 0.0}
-}
+当前实现（W1-006，无 JSON 依赖的 key=value 格式）：
+
+```text
+schema=1
+tool_version=0.0.1
+archive_format=7z
+part=<path>|<size>|<mtime_ms>|<head_crc32>|<tail_crc32>   # 每个分卷一行
+dictionary=<path>|<size>|<mtime_ms>|<head_crc32>|<tail_crc32>
+mode=dict
+threads=4
+completed_through=11
+tried=11
+total=200
+created_unix_ms=...
 ```
 
-每 5 秒/5 万候选原子写；恢复前校验归档/字典/参数；不匹配让用户选择重跑。
+- 每个候选完成后置 bit，只推进**连续完成前缀**；不会用 `tried` 最大值做续跑点；
+- CLI 每 1 秒写一次，停止时写终态；临时文件 + fsync + rename；
+- 硬杀后最多重放 in-flight 候选（≤线程数），不会跳过未测候选；
+- `--resume` 校验归档（含分卷列表）/字典/模式/总数，不匹配明确拒绝；
+- 锁是单进程 advisory lock，硬杀后由 `--resume` 清理。
 
 ## 7. 前端设计
 

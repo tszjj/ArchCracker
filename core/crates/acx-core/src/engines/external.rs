@@ -16,6 +16,8 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,6 +36,27 @@ pub struct ExternalOutput {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub timed_out: bool,
+    pub cancelled: bool,
+}
+
+/// Cooperative cancellation flag shared with long-running external engines.
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken {
+    flag: Arc<AtomicBool>,
+}
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
 }
 
 /// Maximum bytes accepted for one stdin password line. RAR passwords are far
@@ -56,6 +79,30 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    run_cancellable(program, args, stdin, timeout, None)
+}
+
+/// Same as [`run`], but aborts the child when `cancel` is set.
+pub fn run_cancellable<I, S>(
+    program: &Path,
+    args: I,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancel: Option<&CancelToken>,
+) -> Result<ExternalOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    if cancel.is_some_and(CancelToken::is_cancelled) {
+        return Ok(ExternalOutput {
+            code: None,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            timed_out: false,
+            cancelled: true,
+        });
+    }
     if stdin.is_some_and(|input| input.len() > MAX_STDIN_BYTES) {
         return Err(AcxError::Unsupported(format!(
             "stdin password exceeds the {MAX_STDIN_BYTES}-byte external-engine limit"
@@ -117,10 +164,21 @@ where
 
     let deadline = Instant::now().checked_add(timeout);
     let mut timed_out = false;
+    let mut cancelled = false;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
+                if cancel.is_some_and(CancelToken::is_cancelled) {
+                    cancelled = true;
+                    let _ = child.kill();
+                    break child.wait().map_err(|error| {
+                        AcxError::External(format!(
+                            "failed to reap cancelled {}: {error}",
+                            program.display()
+                        ))
+                    })?;
+                }
                 if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     timed_out = true;
                     let _ = child.kill();
@@ -156,6 +214,7 @@ where
         stdout,
         stderr,
         timed_out,
+        cancelled,
     })
 }
 
@@ -342,6 +401,52 @@ mod tests {
             encode_password(b"P@ssw0rd").expect("ASCII").as_ref(),
             b"P@ssw0rd"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancel_kills_a_running_child() {
+        let token = CancelToken::new();
+        let canceller = token.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            canceller.cancel();
+        });
+        let started = Instant::now();
+        let output = run_cancellable(
+            Path::new("powershell.exe"),
+            ["-NoProfile", "-Command", "Start-Sleep -Seconds 10"],
+            None,
+            Duration::from_secs(10),
+            Some(&token),
+        )
+        .expect("start powershell");
+        handle.join().expect("canceller");
+        assert!(output.cancelled);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_kills_a_running_child() {
+        let token = CancelToken::new();
+        let canceller = token.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            canceller.cancel();
+        });
+        let started = Instant::now();
+        let output = run_cancellable(
+            Path::new("sh"),
+            ["-c", "exec sleep 10"],
+            None,
+            Duration::from_secs(10),
+            Some(&token),
+        )
+        .expect("start sh");
+        handle.join().expect("canceller");
+        assert!(output.cancelled);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[cfg(windows)]

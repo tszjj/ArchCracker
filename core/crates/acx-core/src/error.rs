@@ -34,6 +34,12 @@ pub enum AcxError {
     #[error("archive is damaged: {0}")]
     Corrupt(String),
 
+    #[error("operation cancelled")]
+    Cancelled,
+
+    #[error("checkpoint error: {0}")]
+    Checkpoint(String),
+
     #[error("archive has no file entries")]
     EmptyArchive,
 

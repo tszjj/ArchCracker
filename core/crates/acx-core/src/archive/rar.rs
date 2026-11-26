@@ -12,7 +12,7 @@
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, PasswordTest};
 use super::source::ArchiveSource;
 use super::{ArchiveSession, ArchiveSessionFactory};
-use crate::engines::external::{self, ExternalOutput, DEFAULT_TIMEOUT};
+use crate::engines::external::{self, CancelToken, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
 use std::fs::File;
@@ -26,6 +26,7 @@ pub struct RarSession {
     engine: PathBuf,
     info: ArchiveInfo,
     timeout: Duration,
+    cancel: Option<CancelToken>,
 }
 
 impl RarSession {
@@ -56,6 +57,7 @@ impl RarSession {
             engine,
             info,
             timeout: DEFAULT_TIMEOUT,
+            cancel: None,
         }
     }
 
@@ -84,12 +86,16 @@ impl ArchiveSession for RarSession {
         }
 
         let encoded = external::encode_password(password)?;
-        let output = external::run(
+        let output = external::run_cancellable(
             &self.engine,
             test_args(&self.path),
             Some(encoded.as_ref()),
             self.timeout,
+            self.cancel.as_ref(),
         )?;
+        if output.cancelled {
+            return Err(AcxError::Cancelled);
+        }
         if output.timed_out {
             return Err(AcxError::External(format!(
                 "UnRAR timed out after {:?} while testing a candidate",
@@ -104,6 +110,10 @@ impl ArchiveSession for RarSession {
             Some(result) => Ok(result),
             None => Err(engine_failure("test", &output)),
         }
+    }
+
+    fn set_cancel_token(&mut self, token: CancelToken) {
+        self.cancel = Some(token);
     }
 }
 
