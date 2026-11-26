@@ -1,8 +1,7 @@
 # W2 阶段目标划分（计划）
 
-- **状态**：**规划中**；W2 代码尚未开始
-- **准入意见**：W1 有条件 GO（见 [W1 评估](W1-ASSESSMENT.md)）；可在 W1-010 收口/PR 签核期间做接口设计与语料准备，W2 实现合入前需 W1 正式 signoff
-- **前置**：W1 准出评审（见 [W1 评估](W1-ASSESSMENT.md)）
+- **状态**：**已批准启动（W1 signoff 2026-11-26）；从 W2-002/003 开始**
+- **准入意见**：W1 已签核（[W1-SIGNOFF](W1-SIGNOFF.md)），按本计划进入 W2；W2-001 GPU 继续 Deferred
 - **周期**：2–3 周
 - **首发平台**：Windows 10/11 x64 CLI；GUI 仍属 W3
 - **GPU**：W2-001 已 **Deferred**，W2 不启动 hashcat/GPU
