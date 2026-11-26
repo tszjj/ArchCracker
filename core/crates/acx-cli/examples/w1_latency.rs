@@ -12,22 +12,21 @@ use acx_core::archive::{
 };
 use acx_core::candidates::DictionaryStream;
 use acx_core::scheduler::{self, RunContext, RunOutcome};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-fn factory(
-    path: &PathBuf,
-    info: &acx_core::archive::ArchiveInfo,
-) -> Arc<dyn ArchiveSessionFactory> {
+fn factory(path: &Path, info: &acx_core::archive::ArchiveInfo) -> Arc<dyn ArchiveSessionFactory> {
     match info.format {
-        ArchiveFormat::Zip => Arc::new(ZipFactory { path: path.clone() }),
-        ArchiveFormat::SevenZ => {
-            Arc::new(SevenZFactory::from_info(path.clone(), info.clone()).expect("7z factory"))
-        }
+        ArchiveFormat::Zip => Arc::new(ZipFactory {
+            path: path.to_path_buf(),
+        }),
+        ArchiveFormat::SevenZ => Arc::new(
+            SevenZFactory::from_info(path.to_path_buf(), info.clone()).expect("7z factory"),
+        ),
         ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
-            Arc::new(RarFactory::from_info(path.clone(), info.clone()).expect("RAR factory"))
+            Arc::new(RarFactory::from_info(path.to_path_buf(), info.clone()).expect("RAR factory"))
         }
     }
 }
