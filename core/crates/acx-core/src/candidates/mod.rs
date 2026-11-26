@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! Candidate sources (dictionary first; mask/brute land in W2).
+//! Candidate sources: dictionary, mask, and brute-force (W2).
 
 pub mod dictionary;
+pub mod mask;
 
 use crate::error::Result;
 
 pub use dictionary::{Dictionary, DictionaryStream};
+pub use mask::{
+    MaskEstimate, MaskSet, MaskSource, MaskSpec, MaskWarning, MAX_CUSTOM_CHARSET_BYTES,
+    MAX_MASK_EXPRESSION_BYTES, MAX_MASK_POSITIONS, RECOMMENDED_MASK_POSITIONS,
+};
 
 /// One owned batch of candidates, starting at `start_index` in the source.
 #[derive(Debug)]

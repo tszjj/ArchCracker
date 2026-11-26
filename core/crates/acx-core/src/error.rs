@@ -46,6 +46,9 @@ pub enum AcxError {
     #[error("dictionary error: {0}")]
     Dictionary(String),
 
+    #[error("attack error: {0}")]
+    Attack(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

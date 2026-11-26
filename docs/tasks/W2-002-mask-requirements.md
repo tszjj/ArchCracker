@@ -1,10 +1,12 @@
 # W2-002 掩码攻击：需求分析与框架设计
 
-- **状态**：需求分析稿（未实现）
+- **状态**：实现完成（2026-11-27；待 reviewer）
 - **日期**：2026-11-26
 - **范围**：W2-002 掩码表达式、空间/时间估算、警告策略、内核候选源框架
 - **关联**：[W2-PLAN](../W2-PLAN.md)、[W1-010 基准](../benchmarks/W1-010.md)、[W1-009 基准](../benchmarks/W1-009.md)
 - **约束**：只做 CPU 路径；不做 GUI；不启动 GPU/hashcat
+
+> **实现状态（2026-11-27）**：已落地 `MaskSpec`/`MaskSet`/`MaskSource`、`--mask`/`--custom-charset1..4`/`--estimate`、schema v2 checkpoint；`--mask-file`、`?b`、GUI 字典生成仍按本文后续范围处理。实现文件：`core/crates/acx-core/src/candidates/mask.rs`、`checkpoint.rs`、`acx-cli/src/main.rs`。
 
 > “目前性能最高”在本稿中按**本项目当前实测机器**（i5-14600K，14 线程）理解；对更高核心数 CPU 只给线性上界，不作为实测结论。
 
@@ -296,3 +298,12 @@ AttackFingerprint
 3. 是否支持 hashcat 式 `--increment`；W2 先用多条 mask/`--mask-file` 表达长度范围；
 4. GUI 的“规则描述 → 字典文件”放 W3 还是独立 `acx-dictgen` 工具；
 5. 高核心数 CPU 的实测基线（当前 32 线程仅为线性外推，未实测）。
+
+## 8. 实现记录（2026-11-27）
+
+- `MaskSpec`/`MaskSet`/`MaskSource`：解析、去重、odometer 批次、多 mask 全局索引、resume。
+- CLI：`--mask`（可重复）、`--custom-charset1..4`、`--estimate`；`--mask` 与 `-d` 互斥。
+- Checkpoint：schema v2，`dictionary: Option<_>` + `attack_mode`/`attack_signature`；schema 1 明确拒绝。
+- 测试：`cargo test --workspace` 105 core / 42 CLI passed（另有 1 ignored）/ 2 FFI；`--estimate` 与 mask 命中/续跑有集成测试。
+- 1M 掩码回归：[W2-002 基准](../benchmarks/W2-002.md)（40.458 s / 约 24,717/s，ZIP 对照 2.8% 开销）。
+- 未实现：`--mask-file`、`?b`、GUI 字典生成（按 §6/§7 后续）。

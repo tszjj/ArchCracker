@@ -7,8 +7,10 @@ use acx_core::archive::{
     self, ArchiveFormat, ArchiveSessionFactory, ArchiveSource, RarFactory, SevenZFactory,
     ZipFactory,
 };
-use acx_core::candidates::DictionaryStream;
-use acx_core::checkpoint::{ArchiveFingerprint, Checkpoint, CheckpointStore, FileFingerprint};
+use acx_core::candidates::{CandidateSource, DictionaryStream, MaskSet};
+use acx_core::checkpoint::{
+    ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
+};
 use acx_core::error::AcxError;
 use acx_core::scheduler::{self, RunContext, RunControl, RunOutcome};
 use clap::Parser;
@@ -42,7 +44,7 @@ struct Cli {
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     file: PathBuf,
 
-    /// Attack mode; only `dict` is supported in the W1 slice.
+    /// Attack mode: `dict` or `mask`. `--mask` implies mask mode.
     #[arg(
         short = 'm',
         long = "mode",
@@ -51,9 +53,33 @@ struct Cli {
     )]
     mode: String,
 
-    /// Password dictionary, one candidate per line.
+    /// Password dictionary, one candidate per line. Required in dict mode.
     #[arg(short = 'd', long = "dictionary", value_name = "PATH")]
-    dictionary: PathBuf,
+    dictionary: Option<PathBuf>,
+
+    /// Fixed-length mask expression; repeat for multiple masks.
+    #[arg(long = "mask", value_name = "EXPR", action = clap::ArgAction::Append)]
+    mask: Vec<String>,
+
+    /// Custom charset for ?1 (built-in tokens/literals, expanded and deduped).
+    #[arg(long = "custom-charset1", value_name = "SET")]
+    custom_charset1: Option<String>,
+
+    /// Custom charset for ?2.
+    #[arg(long = "custom-charset2", value_name = "SET")]
+    custom_charset2: Option<String>,
+
+    /// Custom charset for ?3.
+    #[arg(long = "custom-charset3", value_name = "SET")]
+    custom_charset3: Option<String>,
+
+    /// Custom charset for ?4.
+    #[arg(long = "custom-charset4", value_name = "SET")]
+    custom_charset4: Option<String>,
+
+    /// Print mask keyspace/ETA warnings without starting an attack.
+    #[arg(long = "estimate")]
+    estimate: bool,
 
     /// Worker threads (clamped to 1..=256 by the scheduler).
     #[arg(short = 't', long = "threads", value_name = "N", default_value_t = 1)]
@@ -74,11 +100,29 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> ExitCode {
-    if cli.mode != "dict" {
+    let use_mask = !cli.mask.is_empty() || cli.mode == "mask";
+    if cli.mode != "dict" && cli.mode != "mask" {
         eprintln!(
-            "acx: unsupported mode `{}`: only `dict` is supported in the W1 slice",
+            "acx: unsupported mode `{}` (expected dict or mask)",
             cli.mode
         );
+        return ExitCode::from(EXIT_USAGE);
+    }
+    if use_mask {
+        if cli.dictionary.is_some() {
+            eprintln!("acx: --dictionary and --mask are mutually exclusive");
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if cli.mask.is_empty() {
+            eprintln!("acx: mask mode requires at least one --mask");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    } else if cli.dictionary.is_none() {
+        eprintln!("acx: dict mode requires --dictionary");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    if cli.estimate && !use_mask {
+        eprintln!("acx: --estimate is only supported with --mask");
         return ExitCode::from(EXIT_USAGE);
     }
 
@@ -120,6 +164,10 @@ fn run(cli: Cli) -> ExitCode {
         return ExitCode::from(EXIT_ARCHIVE);
     }
 
+    if cli.estimate {
+        return estimate_mask(&cli, &info);
+    }
+
     let factory: Arc<dyn ArchiveSessionFactory> = match info.format {
         ArchiveFormat::Zip => Arc::new(ZipFactory {
             path: cli.file.clone(),
@@ -132,8 +180,6 @@ fn run(cli: Cli) -> ExitCode {
             }
         },
         ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
-            // `archive::preflight` already probed this RAR; reuse that result
-            // instead of starting a second preflight in the factory.
             match RarFactory::from_info(cli.file.clone(), info.clone()) {
                 Ok(factory) => Arc::new(factory),
                 Err(error) => {
@@ -159,13 +205,6 @@ fn run(cli: Cli) -> ExitCode {
         Err(error) => {
             eprintln!("acx: {error}");
             return ExitCode::from(EXIT_ARCHIVE);
-        }
-    };
-    let dictionary_fingerprint = match FileFingerprint::from_path(&cli.dictionary) {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
         }
     };
 
@@ -206,25 +245,88 @@ fn run(cli: Cli) -> ExitCode {
         loaded_checkpoint = Some(checkpoint);
     }
 
-    let dictionary = match DictionaryStream::open(&cli.dictionary, start_index) {
-        Ok(dictionary) => dictionary,
-        Err(error) => {
-            eprintln!("acx: {error}");
+    let custom_texts = custom_texts(&cli);
+    let (dictionary_fingerprint, attack, source, total, label) = if use_mask {
+        let set = match MaskSet::parse(&cli.mask, &custom_texts) {
+            Ok(set) => set,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let estimate = set.estimate();
+        for warning in &estimate.warnings {
+            eprintln!("WARNING: {warning}");
+        }
+        let (rate, label) = rate_for(info.format);
+        let seconds = estimate.keyspace as f64 / rate;
+        if seconds > 86_400.0 {
+            eprintln!(
+                "WARNING: estimated {} exceeds 24h on {label} at the measured rate",
+                format_duration(seconds)
+            );
+        }
+        println!("Mask keyspace: {}", estimate.keyspace);
+        if !estimate.fits_usize {
+            eprintln!(
+                "acx: mask keyspace {} cannot be executed with the current usize index limit",
+                estimate.keyspace
+            );
             return ExitCode::from(EXIT_USAGE);
         }
+        let attack = AttackFingerprint::new("mask", set.signature());
+        let source = match set.into_source(start_index) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let total = source.total();
+        (
+            None,
+            attack,
+            Box::new(source) as Box<dyn CandidateSource>,
+            total,
+            "Candidates",
+        )
+    } else {
+        let dictionary = cli.dictionary.as_ref().expect("validated dict path");
+        let fingerprint = match FileFingerprint::from_path(dictionary) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let dictionary = match DictionaryStream::open(dictionary, start_index) {
+            Ok(dictionary) => dictionary,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let total = dictionary.total();
+        (
+            Some(fingerprint),
+            AttackFingerprint::dictionary(),
+            Box::new(dictionary) as Box<dyn CandidateSource>,
+            total,
+            "Passwords",
+        )
     };
-    let total = dictionary.total();
-    println!("Passwords: {total}");
+
+    println!("{label}: {total}");
     if total == 0 {
-        eprintln!("acx: dictionary is empty");
+        eprintln!("acx: attack contains no candidates");
         return ExitCode::from(EXIT_USAGE);
     }
 
     if let Some(checkpoint) = loaded_checkpoint.as_ref() {
         if let Err(error) = checkpoint.validate(
             &archive_fingerprint,
-            &dictionary_fingerprint,
-            "dict",
+            dictionary_fingerprint.as_ref(),
+            &attack,
             total as u64,
         ) {
             eprintln!("acx: {error}");
@@ -246,7 +348,7 @@ fn run(cli: Cli) -> ExitCode {
     let initial = Checkpoint::new(
         archive_fingerprint.clone(),
         dictionary_fingerprint.clone(),
-        "dict",
+        attack.clone(),
         cli.threads.clamp(1, 256),
         start_index as u64,
         tried,
@@ -274,11 +376,12 @@ fn run(cli: Cli) -> ExitCode {
         Arc::clone(&context),
         archive_fingerprint.clone(),
         dictionary_fingerprint.clone(),
+        attack.clone(),
         Arc::clone(&finished),
         Arc::clone(&monitor_error),
     );
 
-    let outcome = scheduler::run_with_source(factory, Box::new(dictionary), Arc::clone(&context));
+    let outcome = scheduler::run_with_source(factory, source, Arc::clone(&context));
     finished.store(true, Ordering::SeqCst);
     let _ = monitor.join();
     if let Some(error) = monitor_error
@@ -313,7 +416,7 @@ fn run(cli: Cli) -> ExitCode {
             let checkpoint = Checkpoint::new(
                 archive_fingerprint,
                 dictionary_fingerprint,
-                "dict",
+                attack,
                 context.threads(),
                 progress.completed_through,
                 progress.tried,
@@ -337,7 +440,7 @@ fn run(cli: Cli) -> ExitCode {
                 let checkpoint = Checkpoint::new(
                     archive_fingerprint,
                     dictionary_fingerprint,
-                    "dict",
+                    attack,
                     context.threads(),
                     progress.completed_through,
                     progress.tried,
@@ -348,13 +451,80 @@ fn run(cli: Cli) -> ExitCode {
                 }
             }
             eprintln!("acx: {error}");
-            let exit = if matches!(&error, AcxError::Dictionary(_)) {
+            let exit = if matches!(&error, AcxError::Dictionary(_) | AcxError::Attack(_)) {
                 EXIT_USAGE
             } else {
                 EXIT_ARCHIVE
             };
             ExitCode::from(exit)
         }
+    }
+}
+
+fn custom_texts(cli: &Cli) -> [Option<String>; 4] {
+    [
+        cli.custom_charset1.clone(),
+        cli.custom_charset2.clone(),
+        cli.custom_charset3.clone(),
+        cli.custom_charset4.clone(),
+    ]
+}
+
+fn rate_for(format: ArchiveFormat) -> (f64, &'static str) {
+    match format {
+        ArchiveFormat::Zip => (25_409.0, "ZIP AES"),
+        ArchiveFormat::SevenZ => (967.9, "7z AES"),
+        ArchiveFormat::Rar4 => (221.5, "RAR4 external"),
+        ArchiveFormat::Rar5 => (1_727.2, "RAR5 check"),
+    }
+}
+
+fn estimate_mask(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
+    let custom = custom_texts(cli);
+    let set = match MaskSet::parse(&cli.mask, &custom) {
+        Ok(set) => set,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let estimate = set.estimate();
+    println!("Mask: {}", cli.mask.join(" | "));
+    println!("Keyspace: {}", estimate.keyspace);
+    println!("Fits executable index: {}", estimate.fits_usize);
+    for warning in &estimate.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+
+    let (rate, label) = rate_for(info.format);
+    let seconds = estimate.keyspace as f64 / rate;
+    let capacity = rate * 86_400.0;
+    println!("Format: {label} ({rate:.1}/s measured)");
+    println!("ETA: {}", format_duration(seconds));
+    println!("24h capacity: {capacity:.0} candidates");
+    if seconds > 86_400.0 {
+        eprintln!(
+            "WARNING: estimated {} exceeds 24h at the measured rate; reduce mask/charset or use multiple masks",
+            format_duration(seconds)
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+fn format_duration(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return "unknown".to_string();
+    }
+    if seconds < 60.0 {
+        format!("{seconds:.1}s")
+    } else if seconds < 3_600.0 {
+        format!("{:.1}min", seconds / 60.0)
+    } else if seconds < 86_400.0 {
+        format!("{:.1}h", seconds / 3_600.0)
+    } else if seconds < 31_557_600.0 {
+        format!("{:.1}days", seconds / 86_400.0)
+    } else {
+        format!("{:.1}years", seconds / 31_557_600.0)
     }
 }
 
@@ -366,7 +536,8 @@ fn start_checkpoint_monitor(
     store: CheckpointStore,
     context: Arc<RunContext>,
     archive: ArchiveFingerprint,
-    dictionary: FileFingerprint,
+    dictionary: Option<FileFingerprint>,
+    attack: AttackFingerprint,
     finished: Arc<AtomicBool>,
     error_slot: Arc<Mutex<Option<String>>>,
 ) -> thread::JoinHandle<()> {
@@ -387,7 +558,7 @@ fn start_checkpoint_monitor(
         let checkpoint = Checkpoint::new(
             archive.clone(),
             dictionary.clone(),
-            "dict",
+            attack.clone(),
             context.threads(),
             progress.completed_through,
             progress.tried,

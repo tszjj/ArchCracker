@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! Durable checkpoint for dictionary runs.
+//! Durable checkpoint for dictionary and mask/brute runs.
 //!
 //! The format is deliberately small and dependency-free (key=value lines).
 //! A checkpoint records a **contiguous completed candidate watermark**, not the
 //! largest attempted index, so resuming can replay at most the in-flight
 //! candidates and never skips one.
 //!
-//! The archive/dictionary fingerprints use size, mtime and head/tail CRC32.
-//! This is fast enough for a 1 GB archive and catches the common "archive or
-//! dictionary changed" cases; it is not a cryptographic integrity guarantee.
+//! Schema v2 makes the dictionary optional and adds an attack fingerprint
+//! (`attack_mode` + SHA-256 `attack_signature`) for mask/brute/hybrid runs.
+//! Schema v1 checkpoints are rejected rather than half-read.
 
 use crate::archive::{ArchiveFormat, ArchiveSource};
 use crate::error::{AcxError, Result};
+use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 const FINGERPRINT_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,13 +82,32 @@ impl ArchiveFingerprint {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttackFingerprint {
+    pub mode: String,
+    pub signature: String,
+}
+
+impl AttackFingerprint {
+    pub fn new(mode: &str, signature: &str) -> Self {
+        Self {
+            mode: mode.to_string(),
+            signature: signature.to_string(),
+        }
+    }
+
+    pub fn dictionary() -> Self {
+        Self::new("dict", &sha256_hex(b"dict"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     pub schema: u32,
     pub tool_version: String,
     pub archive: ArchiveFingerprint,
-    pub dictionary: FileFingerprint,
-    pub mode: String,
+    pub dictionary: Option<FileFingerprint>,
+    pub attack: AttackFingerprint,
     pub threads: usize,
     pub completed_through: u64,
     pub tried: u64,
@@ -99,8 +119,8 @@ impl Checkpoint {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         archive: ArchiveFingerprint,
-        dictionary: FileFingerprint,
-        mode: &str,
+        dictionary: Option<FileFingerprint>,
+        attack: AttackFingerprint,
         threads: usize,
         completed_through: u64,
         tried: u64,
@@ -111,7 +131,7 @@ impl Checkpoint {
             tool_version: crate::VERSION.to_string(),
             archive,
             dictionary,
-            mode: mode.to_string(),
+            attack,
             threads,
             completed_through,
             tried,
@@ -120,17 +140,17 @@ impl Checkpoint {
         }
     }
 
-    /// Validate that a checkpoint belongs to the same archive/dictionary/mode.
+    /// Validate that a checkpoint belongs to the same archive/attack/total.
     pub fn validate(
         &self,
         archive: &ArchiveFingerprint,
-        dictionary: &FileFingerprint,
-        mode: &str,
+        dictionary: Option<&FileFingerprint>,
+        attack: &AttackFingerprint,
         total: u64,
     ) -> Result<()> {
         if self.schema != SCHEMA_VERSION {
             return Err(AcxError::Checkpoint(format!(
-                "unsupported checkpoint schema {} (expected {SCHEMA_VERSION})",
+                "unsupported checkpoint schema {} (expected {SCHEMA_VERSION}; rerun without --resume)",
                 self.schema
             )));
         }
@@ -139,20 +159,19 @@ impl Checkpoint {
                 "archive fingerprint changed since the checkpoint".to_string(),
             ));
         }
-        if self.dictionary != *dictionary {
+        if self.dictionary.as_ref() != dictionary {
             return Err(AcxError::Checkpoint(
                 "dictionary fingerprint changed since the checkpoint".to_string(),
             ));
         }
-        if self.mode != mode {
-            return Err(AcxError::Checkpoint(format!(
-                "checkpoint mode `{}` does not match `{mode}`",
-                self.mode
-            )));
+        if self.attack != *attack {
+            return Err(AcxError::Checkpoint(
+                "attack signature changed since the checkpoint".to_string(),
+            ));
         }
         if self.total != total {
             return Err(AcxError::Checkpoint(format!(
-                "checkpoint total {} does not match dictionary length {total}",
+                "checkpoint total {} does not match attack length {total}",
                 self.total
             )));
         }
@@ -314,11 +333,17 @@ fn encode(checkpoint: &Checkpoint) -> String {
     for part in &checkpoint.archive.parts {
         output.push_str(&format!("part={}\n", encode_file(part)));
     }
+    if let Some(dictionary) = &checkpoint.dictionary {
+        output.push_str(&format!("dictionary={}\n", encode_file(dictionary)));
+    }
     output.push_str(&format!(
-        "dictionary={}\n",
-        encode_file(&checkpoint.dictionary)
+        "attack_mode={}\n",
+        escape(&checkpoint.attack.mode)
     ));
-    output.push_str(&format!("mode={}\n", escape(&checkpoint.mode)));
+    output.push_str(&format!(
+        "attack_signature={}\n",
+        escape(&checkpoint.attack.signature)
+    ));
     output.push_str(&format!("threads={}\n", checkpoint.threads));
     output.push_str(&format!(
         "completed_through={}\n",
@@ -347,7 +372,8 @@ fn decode(body: &str) -> std::result::Result<Checkpoint, String> {
     let mut archive_format = None;
     let mut parts = Vec::new();
     let mut dictionary = None;
-    let mut mode = None;
+    let mut attack_mode = None;
+    let mut attack_signature = None;
     let mut threads = None;
     let mut completed_through = None;
     let mut tried = None;
@@ -364,7 +390,8 @@ fn decode(body: &str) -> std::result::Result<Checkpoint, String> {
             "archive_format" => archive_format = Some(unescape(value)?),
             "part" => parts.push(decode_file(value)?),
             "dictionary" => dictionary = Some(decode_file(value)?),
-            "mode" => mode = Some(unescape(value)?),
+            "attack_mode" => attack_mode = Some(unescape(value)?),
+            "attack_signature" => attack_signature = Some(unescape(value)?),
             "threads" => threads = Some(parse_u64(value)? as usize),
             "completed_through" => completed_through = Some(parse_u64(value)?),
             "tried" => tried = Some(parse_u64(value)?),
@@ -374,15 +401,24 @@ fn decode(body: &str) -> std::result::Result<Checkpoint, String> {
         }
     }
 
+    let schema = schema.ok_or("missing schema")?;
+    if schema != SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported schema {schema} (expected {SCHEMA_VERSION}; rerun without --resume)"
+        ));
+    }
     Ok(Checkpoint {
-        schema: schema.ok_or("missing schema")?,
+        schema,
         tool_version: tool_version.ok_or("missing tool_version")?,
         archive: ArchiveFingerprint {
             format: archive_format.ok_or("missing archive_format")?,
             parts,
         },
-        dictionary: dictionary.ok_or("missing dictionary")?,
-        mode: mode.ok_or("missing mode")?,
+        dictionary,
+        attack: AttackFingerprint {
+            mode: attack_mode.ok_or("missing attack_mode")?,
+            signature: attack_signature.ok_or("missing attack_signature")?,
+        },
         threads: threads.ok_or("missing threads")?,
         completed_through: completed_through.ok_or("missing completed_through")?,
         tried: tried.ok_or("missing tried")?,
@@ -414,6 +450,16 @@ fn parse_u64(value: &str) -> std::result::Result<u64, String> {
     value
         .parse()
         .map_err(|error| format!("invalid number `{value}`: {error}"))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 fn escape(value: &str) -> String {
@@ -509,7 +555,15 @@ mod tests {
             parts: vec![file_fixture(&archive_path)],
         };
         let dictionary = file_fixture(&dictionary_path);
-        let checkpoint = Checkpoint::new(archive, dictionary, "dict", 4, 3, 7, 10);
+        let checkpoint = Checkpoint::new(
+            archive,
+            Some(dictionary),
+            AttackFingerprint::dictionary(),
+            4,
+            3,
+            7,
+            10,
+        );
         let store = CheckpointStore::new(temp.join("run.acx-checkpoint"));
         store.save(&checkpoint).expect("save");
         let loaded = store.load().expect("load");
@@ -519,7 +573,13 @@ mod tests {
             loaded.archive.parts[0].path,
             checkpoint.archive.parts[0].path
         );
-        assert_eq!(loaded.dictionary.path, checkpoint.dictionary.path);
+        assert_eq!(
+            loaded.dictionary.as_ref().map(|file| file.path.as_str()),
+            checkpoint
+                .dictionary
+                .as_ref()
+                .map(|file| file.path.as_str())
+        );
 
         let odd = "a|b\\c\nd";
         assert_eq!(unescape(&escape(odd)).expect("escape"), odd);
@@ -535,14 +595,63 @@ mod tests {
             parts: vec![file_fixture(&archive_path)],
         };
         let dictionary = file_fixture(&dictionary_path);
-        let checkpoint = Checkpoint::new(archive.clone(), dictionary.clone(), "dict", 1, 0, 0, 1);
+        let checkpoint = Checkpoint::new(
+            archive.clone(),
+            Some(dictionary.clone()),
+            AttackFingerprint::dictionary(),
+            1,
+            0,
+            0,
+            1,
+        );
 
         std::fs::write(&dictionary_path, b"changed").expect("change dict");
         let changed = FileFingerprint::from_path(&dictionary_path).expect("fingerprint");
         let error = checkpoint
-            .validate(&archive, &changed, "dict", 1)
+            .validate(
+                &archive,
+                Some(&changed),
+                &AttackFingerprint::dictionary(),
+                1,
+            )
             .expect_err("changed dictionary must fail");
         assert!(matches!(error, AcxError::Checkpoint(_)));
+    }
+
+    #[test]
+    fn round_trips_mask_checkpoint_without_dictionary() {
+        let temp = TempDir::new("mask-roundtrip");
+        let archive_path = temp.join("archive.zip");
+        let archive = ArchiveFingerprint {
+            format: "zip".to_string(),
+            parts: vec![file_fixture(&archive_path)],
+        };
+        let attack = AttackFingerprint::new("mask", "abc123");
+        let checkpoint = Checkpoint::new(archive.clone(), None, attack.clone(), 8, 4, 9, 32);
+        let store = CheckpointStore::new(temp.join("mask.acx-checkpoint"));
+        store.save(&checkpoint).expect("save");
+        let loaded = store.load().expect("load");
+        assert!(loaded.dictionary.is_none());
+        assert_eq!(loaded.attack, attack);
+        loaded
+            .validate(&archive, None, &attack, 32)
+            .expect("mask checkpoint validates");
+    }
+
+    #[test]
+    fn schema_one_checkpoint_is_rejected() {
+        let temp = TempDir::new("schema-one");
+        let store = CheckpointStore::new(temp.join("old.acx-checkpoint"));
+        std::fs::write(
+            store.path(),
+            "schema=1\ntool_version=old\narchive_format=zip\npart=a|1|0|0|0\n\
+             dictionary=a|1|0|0|0\nmode=dict\nthreads=1\ncompleted_through=0\ntried=0\n\
+             total=1\ncreated_unix_ms=0\n",
+        )
+        .expect("write old checkpoint");
+        let error = store.load().expect_err("schema 1 must be rejected");
+        assert!(matches!(error, AcxError::Checkpoint(_)));
+        assert!(error.to_string().contains("schema 1"));
     }
 
     #[test]

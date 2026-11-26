@@ -287,6 +287,59 @@ fn empty_dictionary_exits_two() {
 }
 
 #[test]
+fn mask_attack_finds_password_without_dictionary() {
+    let temp = TempDir::new("mask-hit");
+    let zip = temp.join("encrypted.zip");
+    write_zipcrypto_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--mask")
+        .arg("P@ssw0rd?d?d?d")
+        .arg("-t")
+        .arg("4")
+        .output()
+        .expect("run acx mask");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("FOUND: P@ssw0rd123"), "stdout: {stdout}");
+}
+
+#[test]
+fn mask_estimate_prints_keyspace_without_attack() {
+    let temp = TempDir::new("mask-estimate");
+    let zip = temp.join("encrypted.zip");
+    write_zipcrypto_zip(&zip);
+
+    let output = acx()
+        .arg("-f")
+        .arg(&zip)
+        .arg("--mask")
+        .arg("?d?d?d")
+        .arg("--estimate")
+        .output()
+        .expect("run acx estimate");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("Keyspace: 1000"), "stdout: {stdout}");
+    assert!(stdout.contains("24h capacity"), "stdout: {stdout}");
+    assert!(!stdout.contains("FOUND:"), "stdout: {stdout}");
+}
+
+#[test]
 fn unencrypted_zip_exits_three() {
     let temp = TempDir::new("plain");
     let zip = temp.join("plain.zip");

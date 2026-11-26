@@ -4,7 +4,10 @@
 //! CLI resume/checkpoint integration test.
 
 use acx_core::archive::ArchiveSource;
-use acx_core::checkpoint::{ArchiveFingerprint, Checkpoint, CheckpointStore, FileFingerprint};
+use acx_core::candidates::MaskSet;
+use acx_core::checkpoint::{
+    ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
+};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -94,7 +97,15 @@ fn checkpoint_for(archive: &Path, dictionary: &Path, total: u64) -> Checkpoint {
     let source = ArchiveSource::resolve(archive).expect("resolve archive");
     let archive_fp = ArchiveFingerprint::from_source(&source).expect("archive fingerprint");
     let dictionary_fp = FileFingerprint::from_path(dictionary).expect("dictionary fingerprint");
-    Checkpoint::new(archive_fp, dictionary_fp, "dict", 1, 1, 1, total)
+    Checkpoint::new(
+        archive_fp,
+        Some(dictionary_fp),
+        AttackFingerprint::dictionary(),
+        1,
+        1,
+        1,
+        total,
+    )
 }
 
 #[test]
@@ -190,6 +201,52 @@ fn resume_starts_at_the_watermark_not_at_zero() {
         "stdout: {stdout}"
     );
     assert!(stdout.contains("NOT FOUND"), "stdout: {stdout}");
+}
+
+#[test]
+fn mask_resume_starts_at_checkpoint_index() {
+    let temp = TempDir::new("mask-resume");
+    let archive = temp.join("encrypted.zip");
+    let checkpoint_path = temp.join("run.acx-checkpoint");
+    write_zip(&archive);
+
+    let mask = "P@ssw0rd?d?d?d";
+    let source = ArchiveSource::resolve(&archive).expect("resolve archive");
+    let archive_fp = ArchiveFingerprint::from_source(&source).expect("archive fingerprint");
+    let set = MaskSet::parse(&[mask.to_string()], &[None, None, None, None]).expect("mask set");
+    let signature = set.signature().to_string();
+    let checkpoint = Checkpoint::new(
+        archive_fp,
+        None,
+        AttackFingerprint::new("mask", &signature),
+        1,
+        123,
+        130,
+        1000,
+    );
+    CheckpointStore::new(checkpoint_path.clone())
+        .save(&checkpoint)
+        .expect("save checkpoint");
+
+    let output = acx()
+        .arg("-f")
+        .arg(&archive)
+        .arg("--mask")
+        .arg(mask)
+        .arg("--checkpoint")
+        .arg(&checkpoint_path)
+        .arg("--resume")
+        .output()
+        .expect("run acx mask resume");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("Resume:"), "stdout: {stdout}");
+    assert!(stdout.contains("FOUND: P@ssw0rd123"), "stdout: {stdout}");
 }
 
 #[test]

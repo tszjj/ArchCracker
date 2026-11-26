@@ -41,7 +41,9 @@ W2 前段（W2-002/003/004）有两种做法：
 
 ### W2-002 掩码攻击
 
-> 表达式约定、限值、空间/时间估算和 24h 容量见 [W2-002 需求分析](tasks/W2-002-mask-requirements.md)。
+> **状态（2026-11-27）**：内核 MaskSource、CLI `--mask`/`--estimate`、schema v2 checkpoint 已实现；1M 掩码回归 40.458s；待 reviewer。
+>
+> 表达式约定、限值、空间/时间估算和 24h 容量见 [W2-002 需求分析](tasks/W2-002-mask-requirements.md)；首版基准见 [W2-002 基准](benchmarks/W2-002.md)。
 
 **实现目标（参考）**
 
