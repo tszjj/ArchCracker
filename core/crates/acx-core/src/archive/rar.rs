@@ -10,10 +10,12 @@
 //! later reject most candidates before this process runs.
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, PasswordTest};
+use super::source::ArchiveSource;
 use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::engines::external::{self, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,10 +30,16 @@ pub struct RarSession {
 
 impl RarSession {
     /// Open a RAR archive using a discovered user-installed engine.
+    ///
+    /// Split volumes are resolved first; UnRAR always receives the first volume.
     pub fn open(path: &Path) -> Result<Self> {
-        let format = super::detect_format(path)?;
+        let source = ArchiveSource::resolve(path)?;
+        ensure_rar(source.format)?;
+        ensure_complete_volumes(&source)?;
         let engine = external::find_unrar()?;
-        Self::open_with_engine(path, format, engine)
+        let first = source.first_path().to_path_buf();
+        let info = preflight(&first, source.format, &engine)?;
+        Ok(Self::with_info(&first, engine, info))
     }
 
     /// Open with an explicit engine path (used by tests and diagnostics).
@@ -88,6 +96,9 @@ impl ArchiveSession for RarSession {
                 self.timeout
             )));
         }
+        if let Some(volume) = missing_volume_message(&output) {
+            return Err(AcxError::MissingVolume(volume));
+        }
 
         match classify_test_exit(self.info.format, output.code) {
             Some(result) => Ok(result),
@@ -114,19 +125,23 @@ pub struct RarFactory {
 impl RarFactory {
     /// Discover the user-installed engine and probe the archive once.
     pub fn new(path: PathBuf) -> Result<Self> {
-        let format = super::detect_format(&path)?;
-        ensure_rar(format)?;
+        let source = ArchiveSource::resolve(&path)?;
+        ensure_rar(source.format)?;
+        ensure_complete_volumes(&source)?;
         let engine = external::find_unrar()?;
-        let info = preflight(&path, format, &engine)?;
-        Ok(Self::with_cached_info(path, engine, info))
+        let first = source.first_path().to_path_buf();
+        let info = preflight(&first, source.format, &engine)?;
+        Ok(Self::with_cached_info(first, engine, info))
     }
 
     /// Explicit engine path; still probes the archive once.
     pub fn with_engine(path: PathBuf, engine: PathBuf) -> Result<Self> {
-        let format = super::detect_format(&path)?;
-        ensure_rar(format)?;
-        let info = preflight(&path, format, &engine)?;
-        Ok(Self::with_cached_info(path, engine, info))
+        let source = ArchiveSource::resolve(&path)?;
+        ensure_rar(source.format)?;
+        ensure_complete_volumes(&source)?;
+        let first = source.first_path().to_path_buf();
+        let info = preflight(&first, source.format, &engine)?;
+        Ok(Self::with_cached_info(first, engine, info))
     }
 
     /// Reuse metadata returned by [`super::preflight`] without probing again.
@@ -137,13 +152,25 @@ impl RarFactory {
     /// `whole_archive` flag cannot turn an unencrypted archive into a hit.
     pub fn from_info(path: PathBuf, info: ArchiveInfo) -> Result<Self> {
         ensure_rar(info.format)?;
-        if !same_archive(&path, &info.path) {
+        let source = match ArchiveSource::resolve(&path) {
+            Ok(source) => source,
+            Err(_) if !same_archive(&path, &info.path) => {
+                return Err(AcxError::Unsupported(
+                    "cached RAR metadata belongs to a different archive".to_string(),
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        ensure_rar(source.format)?;
+        ensure_complete_volumes(&source)?;
+        let first = source.first_path().to_path_buf();
+        if !same_archive(&first, &info.path) {
             return Err(AcxError::Unsupported(
                 "cached RAR metadata belongs to a different archive".to_string(),
             ));
         }
         let engine = external::find_unrar()?;
-        Ok(Self::with_cached_info(path, engine, info))
+        Ok(Self::with_cached_info(first, engine, info))
     }
 
     /// Build a factory around already-probed metadata.
@@ -185,6 +212,102 @@ fn same_archive(left: &Path, right: &Path) -> bool {
     }
 }
 
+/// Reject a RAR volume set whose named next part is absent and whose main
+/// header says it is a multi-volume archive. UnRAR would otherwise open the
+/// first volume and only fail while testing a candidate.
+fn ensure_complete_volumes(source: &ArchiveSource) -> Result<()> {
+    // A single `.part1.rar` with a volume flag is the unambiguous case: the
+    // archive says another part exists, but none is present. For multi-part
+    // sets we let UnRAR report the exact missing volume; size heuristics would
+    // misclassify a complete set whose last part happens to be full-size.
+    if source.parts.len() != 1 {
+        return Ok(());
+    }
+    let Some(next) = source.missing_next_part() else {
+        return Ok(());
+    };
+    if rar_volume_flag(source.first_path(), source.format)? {
+        return Err(AcxError::MissingVolume(next.display().to_string()));
+    }
+    Ok(())
+}
+
+fn rar_volume_flag(path: &Path, format: ArchiveFormat) -> Result<bool> {
+    let mut file = File::open(path)?;
+    let mut head = [0u8; 32];
+    let mut filled = 0;
+    while filled < head.len() {
+        match file.read(&mut head[filled..]) {
+            Ok(0) => break,
+            Ok(read) => filled += read,
+            Err(error) => return Err(AcxError::Io(error)),
+        }
+    }
+    let head = &head[..filled];
+
+    match format {
+        ArchiveFormat::Rar4 => {
+            if head.len() < 12 || !head.starts_with(b"Rar!\x1a\x07\x00") || head[9] != 0x73 {
+                return Ok(false);
+            }
+            let flags = u16::from_le_bytes([head[10], head[11]]);
+            Ok(flags & 0x0001 != 0)
+        }
+        ArchiveFormat::Rar5 => {
+            if head.len() < 16 || !head.starts_with(b"Rar!\x1a\x07\x01\x00") {
+                return Ok(false);
+            }
+            let mut offset = 12;
+            let Some(_header_size) = read_vint(head, &mut offset) else {
+                return Ok(false);
+            };
+            let Some(header_type) = read_vint(head, &mut offset) else {
+                return Ok(false);
+            };
+            if header_type != 1 {
+                return Ok(false);
+            }
+            // RAR5 main header: header flags, optional extra/data sizes, then
+            // archive flags (where MHFL_VOLUME lives).
+            let Some(header_flags) = read_vint(head, &mut offset) else {
+                return Ok(false);
+            };
+            if header_flags & 0x0001 != 0 {
+                let Some(_extra_size) = read_vint(head, &mut offset) else {
+                    return Ok(false);
+                };
+            }
+            if header_flags & 0x0002 != 0 {
+                let Some(_data_size) = read_vint(head, &mut offset) else {
+                    return Ok(false);
+                };
+            }
+            let Some(archive_flags) = read_vint(head, &mut offset) else {
+                return Ok(false);
+            };
+            Ok(archive_flags & 0x0001 != 0)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn read_vint(data: &[u8], offset: &mut usize) -> Option<u64> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = *data.get(*offset)?;
+        *offset += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+        if shift > 63 {
+            return None;
+        }
+    }
+}
+
 /// Reject non-RAR formats before starting an external process.
 fn ensure_rar(format: ArchiveFormat) -> Result<()> {
     if matches!(format, ArchiveFormat::Rar4 | ArchiveFormat::Rar5) {
@@ -219,6 +342,9 @@ fn preflight(path: &Path, format: ArchiveFormat, engine: &Path) -> Result<Archiv
             "UnRAR preflight timed out after {:?}",
             DEFAULT_TIMEOUT
         )));
+    }
+    if let Some(volume) = missing_volume_message(&test) {
+        return Err(AcxError::MissingVolume(volume));
     }
 
     match test.code {
@@ -359,6 +485,31 @@ fn command_path(path: &Path) -> PathBuf {
 
 fn password_has_line_break(password: &[u8]) -> bool {
     password.iter().any(|byte| *byte == b'\n' || *byte == b'\r')
+}
+
+/// Extract UnRAR's missing-volume path from its diagnostic output.
+///
+/// UnRAR writes this line in English for the shipped Windows build. The
+/// Chinese literal is kept as a fallback; an unrecognized locale simply falls
+/// back to the generic external error.
+fn missing_volume_message(output: &ExternalOutput) -> Option<String> {
+    for bytes in [&output.stderr, &output.stdout] {
+        let text = String::from_utf8_lossy(bytes);
+        for line in text.lines() {
+            let lower = line.to_ascii_lowercase();
+            if let Some(position) = lower.find("cannot find volume") {
+                let path = line[position + "cannot find volume".len()..].trim();
+                let path = path.trim_start_matches([':', ' ']);
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+            if line.contains("找不到卷") || line.contains("缺少卷") {
+                return Some(line.trim().to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Normalize an unexpected external exit into an actionable error.
@@ -522,6 +673,63 @@ mod tests {
         let error = RarFactory::from_info(PathBuf::from("two.rar"), info)
             .expect_err("metadata for another archive must be rejected");
         assert!(matches!(error, AcxError::Unsupported(_)));
+    }
+
+    #[test]
+    fn rar5_volume_flag_reads_archive_flags_not_header_flags() {
+        // RAR5 main header: size(vint), type=1, header flags=0x05 (extra area),
+        // extra size=7, then archive flags. Only the archive flag 0x0001 means
+        // the archive is part of a multi-volume set.
+        let mut header = [0u8; 32];
+        header[..8].copy_from_slice(b"Rar!\x1a\x07\x01\x00");
+        header[12] = 0x05; // header size (value irrelevant here)
+        header[13] = 0x01; // main header type
+        header[14] = 0x05; // common header flags: extra area + unknown-skip
+        header[15] = 0x07; // extra area size
+        header[16] = 0x00; // archive flags: single volume
+        let path = temp_header("rar5-single", &header);
+        assert!(!rar_volume_flag(&path, ArchiveFormat::Rar5).expect("parse"));
+        std::fs::write(&path, {
+            let mut split = header;
+            split[16] = 0x01; // MHFL_VOLUME in archive flags
+            split
+        })
+        .expect("write split header");
+        assert!(rar_volume_flag(&path, ArchiveFormat::Rar5).expect("parse"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rar4_volume_flag_is_read() {
+        let mut header = [0u8; 12];
+        header[..7].copy_from_slice(b"Rar!\x1a\x07\x00");
+        header[9] = 0x73; // main header
+        header[10] = 0x00;
+        let path = temp_header("rar4-single", &header);
+        assert!(!rar_volume_flag(&path, ArchiveFormat::Rar4).expect("parse"));
+        header[10] = 0x01; // MHD_VOLUME
+        std::fs::write(&path, header).expect("write volume header");
+        assert!(rar_volume_flag(&path, ArchiveFormat::Rar4).expect("parse"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn temp_header(tag: &str, bytes: &[u8]) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let mut dir = std::env::current_exe().unwrap_or_default();
+        if dir.pop() {
+            dir.pop();
+        }
+        dir.push("acx-test-tmp");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(format!(
+            "acx-rar-header-{tag}-{}-{nanos}.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write header fixture");
+        path
     }
 
     #[test]

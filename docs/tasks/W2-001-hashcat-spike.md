@@ -1,8 +1,30 @@
-# W2-001：hashcat GPU 字典后端 spike
+# W2-001：hashcat GPU 字典后端 spike（Deferred）
 
-- 分支：`feat/w2-hashcat-spike`
+- 分支：`feat/w2-hashcat-spike`（暂不创建）
 - 角色：planner、core-engineer、qa、reviewer
-- 状态：待开始（W2）
+- 状态：**Deferred（W2 不启动）**
+- 决定：GPU 加速不是 W1 准出或 W2 准入条件；W2 先完成 CPU 快筛/攻击/批量，W2 退出后重新评审本任务
+
+## 延后决定
+
+本切片保留设计草案，但**不在 W2 启动**。原因：
+
+1. CPU 多线程路径仍是产品基线，必须先完成快筛、掩码/暴力、批量和稳定性；
+2. GPU 依赖用户驱动/OpenCL/CUDA 矩阵，无法在 CI 稳定验证；
+3. hashcat 随包属于 W4 Full 交付，提前实现会增加许可/AV/安装包风险；
+4. W1 还没有 1M/1GB CPU 基准；没有基线就无法判断 GPU 的 ≥5× 是否真实。
+
+因此 W2-001 不阻塞 W2 准入，也不作为 W2 退出条件。
+
+## 解除条件
+
+满足以下条件后，另开评审再决定是否启动：
+
+- W1 准出、W2 CPU 范围完成，且有稳定 p/s 基线；
+- 明确目标格式/模式（ZIP AES 13600、RAR5 13000）和可复现语料；
+- hashcat 二进制来源/版本/SHA-256/许可清单可固定，且确认 W4 随包策略不变；
+- 有可用的 Windows GPU 测试机与驱动矩阵，或明确只做“检测/回退/实验”而不承诺性能；
+- 更新本任务的状态、验收与 ADR-0004 影响说明。
 
 ## 目标
 
@@ -47,4 +69,4 @@ acx -f aes.zip -m dict -d dict.txt --gpu auto
 
 ## 结果
 
-（实现后补充）
+**Deferred（未实现）**。不创建分支、不新增依赖、不随包 hashcat；CPU 路径保持唯一已交付实现。W2 退出后按“解除条件”重新评审。

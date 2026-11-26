@@ -318,6 +318,139 @@ fn local_rar4_external_cli() {
 }
 
 #[test]
+fn local_rar_split_volume_cli() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let temp = TempDir::new("split");
+    let payload = temp.join("payload.bin");
+    let archive = temp.join("split.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&payload, vec![b'x'; 5_000]).expect("write payload");
+    write_dictionary(&dictionary, &["wrong", PASSWORD]);
+
+    assert!(
+        create_rar(
+            &rar,
+            &archive,
+            &payload,
+            Some(PASSWORD.as_bytes()),
+            &["-m0", "-v1k"]
+        ),
+        "Rar.exe must create a split-volume fixture"
+    );
+    let first = temp.join("split.part1.rar");
+    assert!(first.is_file(), "expected {}", first.display());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&first)
+        .args(["-d"])
+        .arg(&dictionary)
+        .args(["-t", "2"])
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "split RAR exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+
+    let part2 = temp.join("split.part2.rar");
+    let part2_bytes = std::fs::read(&part2).expect("read second volume");
+    std::fs::remove_file(&part2).expect("remove second volume");
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&first)
+        .args(["-d"])
+        .arg(&dictionary)
+        .output()
+        .expect("run acx");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "stderr: {stderr}");
+    assert!(
+        stderr.contains("missing archive volume"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("part2.rar"), "stderr: {stderr}");
+
+    // Restore the middle part and remove the last one: multi-part RAR missing
+    // volumes are detected from UnRAR's diagnostic, not a size heuristic.
+    std::fs::write(&part2, part2_bytes).expect("restore second volume");
+    let last = std::fs::read_dir(&temp.path)
+        .expect("list volumes")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("split.part") && name.ends_with(".rar"))
+        })
+        .max()
+        .expect("last volume");
+    std::fs::remove_file(last).expect("remove last volume");
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&first)
+        .args(["-d"])
+        .arg(&dictionary)
+        .output()
+        .expect("run acx");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "stderr: {stderr}");
+    assert!(
+        stderr.contains("missing archive volume"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("part7.rar"), "stderr: {stderr}");
+}
+
+#[test]
+fn single_rar_named_part1_is_not_missing() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let temp = TempDir::new("single-part1");
+    let payload = temp.join("payload.bin");
+    let archive = temp.join("single.rar");
+    let part1 = temp.join("single.part1.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&payload, vec![b'x'; 512]).expect("write payload");
+    write_dictionary(&dictionary, &[PASSWORD]);
+    assert!(
+        create_rar(
+            &rar,
+            &archive,
+            &payload,
+            Some(PASSWORD.as_bytes()),
+            &["-m0"]
+        ),
+        "Rar.exe must create a single-volume fixture"
+    );
+    std::fs::copy(&archive, &part1).expect("copy to .part1.rar");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&part1)
+        .args(["-d"])
+        .arg(&dictionary)
+        .args(["-t", "2"])
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "single .part1.rar exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+}
+
+#[test]
 fn local_rar_unicode_password() {
     let Some(rar) = local_rar() else {
         return;

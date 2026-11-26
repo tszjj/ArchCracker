@@ -62,7 +62,7 @@ git push -u origin main
 
 - 远端：**已创建（私有）**，`origin` 指向 `tszjj/ArchCracker`；默认分支 `main`。
 - 已合并 ZIP、AES、RAR、Full 随包文档、RAR 预检缓存等 PR（详见 `docs/PROJECT-GUIDE.md` §5）。
-- W1-004（7z）当前在本地 `feat/w1-004-7z` 分支完成验证；按用户要求未推送，里程碑确认后统一提 PR 并重跑 6 个 CI job。
+- W1-004（7z）当前在本地 `feat/w1-004-7z` 分支完成验证；W1-005（分卷/SFX）在 `feat/w1-005-volumes-sfx` 分支完成验证。按用户要求未推送，里程碑确认后统一提 PR 并重跑 6 个 CI job。
 - CI：6 个 job（Windows MSVC/GNU、Ubuntu、macOS、MSRV 1.89、cargo-deny），最近一次 main 全绿。
 - **分支保护当前无法启用**：私有免费仓库调用 API 返回 403（需 GitHub Pro 或转公开）。因此 `main` 保护目前只是流程约束；转公开/升级后按 §3 开启。
 - Vulnerability alerts 当前为关闭（API 404）；Dependabot、secret scanning、Private vulnerability reporting 需在 Settings 中逐项核对。

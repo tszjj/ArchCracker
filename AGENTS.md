@@ -27,7 +27,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 | 内核语言 | Rust（workspace + C ABI） | `docs/adr/0001-rust-core.md` |
 | 前端拆分 | Avalonia 12（桌面三平台）/ Compose（Android）/ ArkUI（HarmonyOS） | `docs/adr/0002-frontend-split.md` |
 | RAR 策略 | **单一 Windows Full 版**随包未修改 `UnRAR.exe`（仅进程）；不链接/不调用 `unrar.dll`；WinRAR 不随包；其他平台 Deferred | `docs/adr/0003-rar-licensing.md`、`docs/adr/0004-bundled-engines.md` |
-| GPU/字典加速 | Full 版随包 hashcat 二进制，**仅外部进程**；hashcat 不是 Rust/Cargo 依赖；无 hashcat/GPU 时 CPU 多线程完整可用 | `docs/adr/0004-bundled-engines.md` |
+| GPU/字典加速 | Full 版随包 hashcat 二进制，**仅外部进程**；hashcat 不是 Rust/Cargo 依赖；无 hashcat/GPU 时 CPU 多线程完整可用；实现时点 W2-001 **Deferred** | `docs/adr/0004-bundled-engines.md`、`docs/tasks/W2-001-hashcat-spike.md` |
 | 发布形态 | 不分 Lite/Full，直接开发单一 Full 版本 | `docs/adr/0004-bundled-engines.md` |
 | 首发平台 | Windows 10/11 x64，先 CLI 后 GUI | `docs/roadmap.md` |
 | 开发方式 | 多 Agent 分工 + 分支/PR + 评审门禁 | 本文件第 6 节 |
@@ -45,7 +45,7 @@ ArchCracker 是一个跨平台压缩包密码恢复工具：Rust 内核 + 原生
 - 仓库、许可证、文档、ADR、Agent 协作规范已建立；
 - Windows 用户级工具链（Rust GNU/MinGW、.NET 10、CMake、Ninja、gh）已装好；
 - `core/` 已有可编译的 Rust workspace + C ABI 最小实现，`cargo test` 通过；
-- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（整包 `t`，密码走 stdin/OEM 编码）；W1-003b 已将预检缓存进 `RarFactory`，worker 不再重复探测；W1-003c 已在 WinRAR 6.24 下补验 RAR4 `-ma4` 端到端（RAR4/RAR5 均已验证）；W1-004 已补 7z（AES-256、`-mhe=on` 头加密、首块探测 + 完整 CRC，`sevenz-rust2` 0.20.2），并用 7-Zip 26.04 做差分。下一步分卷/SFX、断点与 p/s 基准。Windows GUI 尚未开始。Full 版的 UnRAR/hashcat 随包按 ADR-0004 在 W4 落地；其他平台 Deferred。
+- W1-001（ZIP + 字典 + 多线程 CLI）已完成并通过评审；W1-002 已补 WinZip AES-128/192/256（AE-1/AE-2）候选验证；W1-003 已接入外部 UnRAR（整包 `t`，密码走 stdin/OEM 编码）；W1-003b 已将预检缓存进 `RarFactory`，worker 不再重复探测；W1-003c 已在 WinRAR 6.24 下补验 RAR4 `-ma4` 端到端（RAR4/RAR5 均已验证）；W1-004 已补 7z（AES-256、`-mhe=on` 头加密、首块探测 + 完整 CRC，`sevenz-rust2` 0.20.2），并用 7-Zip 26.04 做差分；W1-005 已补 ZIP/7z/RAR 分卷与 SFX payload 定位，缺卷/截断/损坏分类在预检阶段给出。下一步 W1-006（运行控制 + 断点续跑合并 epic）、W1-007 字典/调度、W1-008 基准。W2-001 GPU/hashcat 已 Deferred，不在 W1/W2 启动。Windows GUI 尚未开始。Full 版的 UnRAR/hashcat 随包按 ADR-0004 在 W4 落地；其他平台 Deferred。
 
 W1 完成前不要提前铺 GUI；移动端 SDK 一律不引入；不要提交未经证实的性能数字。
 

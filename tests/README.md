@@ -36,3 +36,4 @@ tests/
 
 M0：仅目录说明。P1 加入 ZIP/7z 语料生成器与首个差分用例。
 W1-004 起，7z 单测/CLI 集成测试在测试进程内用 `sevenz-rust2` writer 生成夹具；官方 7-Zip 26.04 `7zr` 仅作为本机差分 oracle（见 `docs/tasks/W1-004-sevenz.md`），二进制不提交。
+W1-005 起，ZIP/7z 分卷与 SFX 夹具在测试进程内生成；RAR 分卷用本机 `Rar.exe -m0 -v1k` 生成，CI 无引擎时跳过（见 `docs/tasks/W1-005-volumes-sfx.md`）。

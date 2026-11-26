@@ -25,6 +25,15 @@ pub enum AcxError {
     #[error("archive is not encrypted")]
     NotEncrypted,
 
+    #[error("missing archive volume: {0}")]
+    MissingVolume(String),
+
+    #[error("archive is truncated: {0}")]
+    Truncated(String),
+
+    #[error("archive is damaged: {0}")]
+    Corrupt(String),
+
     #[error("archive has no file entries")]
     EmptyArchive,
 
