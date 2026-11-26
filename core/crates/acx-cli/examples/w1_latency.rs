@@ -17,12 +17,15 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-fn factory(path: &PathBuf, info: &acx_core::archive::ArchiveInfo) -> Arc<dyn ArchiveSessionFactory> {
+fn factory(
+    path: &PathBuf,
+    info: &acx_core::archive::ArchiveInfo,
+) -> Arc<dyn ArchiveSessionFactory> {
     match info.format {
         ArchiveFormat::Zip => Arc::new(ZipFactory { path: path.clone() }),
-        ArchiveFormat::SevenZ => Arc::new(
-            SevenZFactory::from_info(path.clone(), info.clone()).expect("7z factory"),
-        ),
+        ArchiveFormat::SevenZ => {
+            Arc::new(SevenZFactory::from_info(path.clone(), info.clone()).expect("7z factory"))
+        }
         ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
             Arc::new(RarFactory::from_info(path.clone(), info.clone()).expect("RAR factory"))
         }
@@ -48,9 +51,8 @@ fn main() {
     let context = RunContext::new(total, 0, 0, threads);
     let control = context.control_arc();
     let started = Instant::now();
-    let handle = thread::spawn(move || {
-        scheduler::run_with_source(factory, Box::new(source), context)
-    });
+    let handle =
+        thread::spawn(move || scheduler::run_with_source(factory, Box::new(source), context));
 
     if mode == "pause-stop" {
         thread::sleep(Duration::from_millis(150));
