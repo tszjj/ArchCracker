@@ -294,7 +294,7 @@ AttackFingerprint
 ## 7. 待定问题
 
 1. `?b`（0x00-0xff）与 CLI/外部 RAR 行输入的兼容方案；
-2. 是否把 `CandidateBatch.start_index`/`CandidateSource.total` 从 `usize` 扩到 `u128`（当前限制由 W1 接口决定）；
+2. ~~是否把 `CandidateBatch.start_index`/`CandidateSource.total` 从 `usize` 扩到 `u128`（当前限制由 W1 接口决定）~~ **已决策（2026-11-27）：维持 `usize`，不扩到 `u128`；`u128` 只用于估算/展示。理由与影响见 [W2-003 §4.4](W2-003-brute-keyspace.md)。**
 3. 是否支持 hashcat 式 `--increment`；W2 先用多条 mask/`--mask-file` 表达长度范围；
 4. GUI 的“规则描述 → 字典文件”放 W3 还是独立 `acx-dictgen` 工具；
 5. 高核心数 CPU 的实测基线（当前 32 线程仅为线性外推，未实测）。
