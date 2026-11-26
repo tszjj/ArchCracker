@@ -219,15 +219,16 @@ const char* acx_last_error(AcxHandle* h); /* thread-local copy */
 
 ### 6.4 断点
 
-当前实现（W1-006，无 JSON 依赖的 key=value 格式）：
+当前实现（W2-002 schema v2，无 JSON 依赖的 key=value 格式）：
 
 ```text
-schema=1
+schema=2
 tool_version=0.0.1
 archive_format=7z
 part=<path>|<size>|<mtime_ms>|<head_crc32>|<tail_crc32>   # 每个分卷一行
-dictionary=<path>|<size>|<mtime_ms>|<head_crc32>|<tail_crc32>
-mode=dict
+dictionary=<path>|<size>|<mtime_ms>|<head_crc32>|<tail_crc32>  # 可选；mask/brute 缺失
+attack_mode=mask
+attack_signature=<sha256 hex>
 threads=4
 completed_through=11
 tried=11
@@ -237,11 +238,11 @@ created_unix_ms=...
 
 - 每个候选完成后置 bit，只推进**连续完成前缀**；不会用 `tried` 最大值做续跑点；
 - CLI 每 1 秒写一次，停止时写终态；临时文件 + fsync + rename；
-- 硬杀后最多重放 in-flight 候选（≤线程数），不会跳过未测候选；
+- 硬杀后最多重放 4096 候选窗口，不会跳过未测候选；
 - `--resume` 校验归档（含分卷列表）/字典/模式/总数，不匹配明确拒绝；
 - 锁是单进程 advisory lock，硬杀后由 `--resume` 清理。
 
-**规划中（W2-002，schema v2）**：为支持无字典的掩码/暴力攻击以及“字典 + 规则”混合攻击，`dictionary` 改为可选，新增 `attack: { mode, signature }`；签名取规范化攻击描述的 SHA-256（`sha2` 已是既有依赖，无需新增许可登记）。`completed_through/tried/total` 保持 u64，执行侧维持 usize。schema=1 检查点直接拒绝，不做半兼容读取。多 mask 的全局 watermark 按累计划分区间映射到 `(mask_i, local_index)`。详见 [W2-002 任务文档](tasks/W2-002-mask-requirements.md) §4.6。
+**W2-002 已实现（schema v2）**：`dictionary` 可选，新增 `attack_mode`/`attack_signature`；签名取规范化攻击描述的 SHA-256（`sha2` 已是既有依赖）。`completed_through/tried/total` 保持 u64，执行侧维持 usize。schema=1 检查点直接拒绝，不做半兼容读取。多 mask 的全局 watermark 按累计划分区间映射到 `(mask_i, local_index)`。详见 [W2-002 任务文档](tasks/W2-002-mask-requirements.md) §4.6。
 
 ## 7. 前端设计
 
