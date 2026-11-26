@@ -181,7 +181,7 @@ total=<u64>
 - **空间（W2-003a 回填）**：`BruteEstimate.space` 给出水位位图、`(threads+3)` 个在飞批次与峰值；`estimate(threads)` 与 mask/hybrid 共用 `acx_core::estimate`。
 - **指纹**：`attack_mode=brute`，签名输入为原始 `--brute` 文本 + 4 个 `--custom-charset*` 原文 + `min_len` + `max_len`，与 W2-002 掩码同策略（任一文本/区间变化都拒绝 `--resume`）；checkpoint 的 `dictionary` 行缺失（`None`）。
 - **语义**：`--brute` 表达式按字符集展开，字面量进入字符集；固定位置用 `--mask`（§4.1 的早期“字面量位置”表述以此为准）。
-- **测试**：`cargo test --workspace` 123 core / 58 CLI passed（另有 1 ignored）/ 2 FFI；新增 16 个 `candidates::brute` 单测（顺序、批次边界、全索引续跑、1M 生成、radix=1、128 位上限、`u128` 溢出、警告、指纹）与 14 个 `tests/w2_brute.rs` 端到端用例（命中、自定义字符集、估算与 >24h 警告、长度边界续跑、区间/自定义集变化拒绝续跑、参数互斥、超 `usize` 拒绝）。
+- **测试**：W2-003 合并时 123 core / 58 CLI passed（另有 1 ignored）/ 2 FFI；W2-003a 回填空间估算后全仓为 144 core / 69 CLI（1 ignored）/ 2 FFI（见 [W2-003a](W2-003a-space-estimate.md)）。新增 16 个 `candidates::brute` 单测（顺序、批次边界、全索引续跑、1M 生成、radix=1、128 位上限、`u128` 溢出、警告、指纹）与 14 个 `tests/w2_brute.rs` 端到端用例（命中、自定义字符集、估算与 >24h 警告、长度边界续跑、区间/自定义集变化拒绝续跑、参数互斥、超 `usize` 拒绝）。
 - **跨平台**：Windows x64 已验证；Linux/macOS 逻辑为纯 Rust，只保证 CI 编译/单测，未做运行时验证。
 - **未实现（按 §6）**：导出字典、多字符集、`--increment`、`--estimate --json`、运行时 ETA。
 
@@ -190,7 +190,7 @@ total=<u64>
 ```text
 STATUS: done
 CHANGED: core/crates/acx-core/src/candidates/{brute.rs,mask.rs,mod.rs}、core/crates/acx-cli/src/main.rs、core/crates/acx-cli/tests/w2_brute.rs、docs/tasks/W2-003-brute-keyspace.md
-VERIFIED: cargo fmt --all -- --check；cargo clippy --workspace --all-targets -- -D warnings；cargo test --workspace（123 core / 58 CLI +1 ignored / 2 FFI）
+VERIFIED: cargo fmt --all -- --check；cargo clippy --workspace --all-targets -- -D warnings；cargo test --workspace（W2-003 合并时 123 core / 58 CLI +1 ignored / 2 FFI；W2-003a 后 144 core / 69 CLI）
 NOT VERIFIED: 未做 1M×1GB 端到端基准（仅 1M 候选生成单测）；7z/RAR 未单独跑暴力端到端（与 ZIP 共用 CandidateSource/CLI 路径）
 NEXT: 合并后更新 PROJECT-GUIDE/README 状态；W2-004 混合复用 schema v2 的 AttackFingerprint
 RISKS: 大键空间水位位图内存；短密码优先的长尾；RAR 外部 oracle 每候选成本高

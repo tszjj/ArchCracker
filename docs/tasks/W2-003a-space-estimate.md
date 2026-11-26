@@ -1,6 +1,6 @@
 # W2-003a：空间估算公共函数与回填
 
-- **状态**：首版实现完成（2026-11-27，PR 待合并）
+- **状态**：首版完成（2026-11-27，PR #28 已合并）
 - **日期**：2026-11-27
 - **角色**：core-engineer + reviewer
 - **分支**：与 W2-004 同一 PR（`feat/w2-004-hybrid-rules`）
@@ -95,6 +95,6 @@ STATUS: done
 CHANGED: core/crates/acx-core/src/estimate.rs, scheduler.rs, candidates/{mask,brute,hybrid}.rs, acx-cli/src/main.rs
 VERIFIED: fmt / clippy -D warnings / cargo test --workspace
 NOT VERIFIED: 估算不含归档会话；未做 RSS 实测对比
-NEXT: 合并后更新 PROJECT-GUIDE 测试计数；W2-004 复用同一 SpaceEstimate
+NEXT: 已合并；W2-004 复用同一 SpaceEstimate；后续若需按实际 RSS 校准，另开切片
 RISKS: 位图随 total 线性增长；只警告不拒绝，超大 keyspace 仍可能 OOM
 ```
