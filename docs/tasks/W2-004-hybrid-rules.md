@@ -98,7 +98,7 @@
 
 **边界约定**：
 
-- 大小写/反转只处理 ASCII 字节；不解码 UTF-8、不做 Unicode 大小写映射。密码是字节（项目全局约定），Unicode 变形属于 W2-006 编码变体范畴；
+- 大小写（`lower`/`upper`/`capitalize`/`toggle`）只改 ASCII A–Z/a–z，其余字节原样保留；`reverse` 按**字节**反转（非 ASCII 字节也参与，结果可能不是合法 UTF-8）。不解码 UTF-8、不做 Unicode 大小写映射；Unicode 变形属于 W2-006 编码变体范畴；
 - `<literal>` 只允许 ASCII 可打印字符（0x20–0x7E），`??` 转义一个字面 `?`（与 W2-002 掩码一致）；其他 `?x` 报错；
 - 单个 `<literal>` 展开后 ≤64 字节（防止一行生成超长候选）；
 - 规则链长度 ≤8 个函数（防止一条规则生成超大对象）。
@@ -315,7 +315,7 @@ WARNING: completion bitmap is 182 MB, above the 128 MB warning threshold; reduce
 
 - [ ] 8 个变换函数各有单测，输出与 §4.2 表格一致（`identity/lower/upper/capitalize/toggle/reverse/append/prepend`）；
 - [ ] 规则链按左到右顺序应用（`capitalize|append:123` 得到 `Acme123`，不是 `acme123Cap...`）；
-- [ ] 大小写与反转只作用于 ASCII 字节；含非 ASCII 字节的字典行原样保留该字节，不变形、不报错；
+- [ ] 大小写只作用于 ASCII 字母，非 ASCII 字节原样保留；`reverse` 按字节反转（可能产生非 UTF-8 序列），不报错；
 - [ ] 非法函数、非法 `<literal>`、超长 literal（>64 B）、超长规则链（>8）均报错。
 
 ### 8.2 掩码前后缀功能
@@ -337,12 +337,12 @@ WARNING: completion bitmap is 182 MB, above the 128 MB warning threshold; reduce
 - [ ] 对全部全局索引 `0..=total`（小样本）逐一验证：`into_source(i)` 的输出等于完整序列的第 `i` 项起的后缀；
 - [ ] 字典行边界（`index = k×V`）恢复时从该行变体 0 开始，不跳过；
 - [ ] `--resume` 端到端：先跑出检查点，改 watermark 到某行边界，恢复后命中该行之后的密码；
-- [ ] 改规则顺序、改前后缀掩码、改自定义集、改长度区间任一情况，`--resume` 均因 `attack signature changed` 拒绝；
+- [ ] 改规则顺序、改规则内容、改前后缀掩码、改自定义集任一情况，`--resume` 均因 `attack signature changed` 拒绝；
 - [ ] 字典文件内容变化，`--resume` 因 `dictionary fingerprint changed` 拒绝。
 
 ### 8.5 估算功能（时间 + 空间）
 
-- [ ] `--estimate` 打印字典行数、V、总候选数（`u128`）、逐生成器分解；
+- [ ] `--estimate` 打印字典行数、V、总候选数（`u128`）、空间估算与 ETA/24h 容量；
 - [ ] **时间预估**：ETA 与 24h 容量按归档格式实测速率计算，与 W2-002/003 口径一致；
 - [ ] **空间预估**：打印 `SpaceEstimate` 的水位位图字节数与峰值（十进制 MB，标注不含归档会话）；
 - [ ] 位图超过 128 MB 时打印警告，ETA >24h 时打印警告；
@@ -359,7 +359,7 @@ WARNING: completion bitmap is 182 MB, above the 128 MB warning threshold; reduce
 
 - **水位位图放大**：`total = 字典行数 × V` 可能远大于字典行数。500 万行 × 100 变体 = 5 亿候选 → 位图约 62.5 MB。W1-007 的 O(N/8) 位图在这里被 V 放大，是本切片最大的内存风险。缓解：首版不做优化，但在基准中记录实际 RSS；若成为瓶颈，留给 W2-008 后单独评审（可能改为按字典行水位 + 行内变体位图的两级结构）。
 - **恢复 O(N) 跳过**：与 W1-007 相同，`--resume` 要顺序跳过到目标行；大字典 + 大 watermark 时启动较慢。
-- **规则是字节级**：非 ASCII 字典行不会被大小写/反转变形；用户若需要 Unicode 变形，属于 W2-006 编码变体范畴。
+- **规则是字节级**：大小写只处理 ASCII 字母；`reverse` 按字节反转，非 ASCII 字节不另行解码。用户若需要 Unicode 变形，属于 W2-006 编码变体范畴。
 - **不做通用规则引擎**：用户无法表达"跳过前 3 个字符"等复杂变换；这是首版范围决定，不是缺陷。
 - **掩码前后缀与固定前后缀的重复**：`append:123` 与 `suffix-mask '123'` 功能重叠；前者是规则链（1 个变体），后者是掩码（1 个变体）。文档需说明推荐用 `append`（更直观），掩码用于产生多个候选。
 - **`sha2` 已是既有依赖**，无新增许可登记；无 RAR/hashcat 边界变化。
