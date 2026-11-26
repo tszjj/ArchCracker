@@ -23,14 +23,14 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 当前阶段 | **W1 进行中** | W1-006 本地实现（reviewer APPROVE，待大语料）；W2–W5 未开始 |
-| 已完成切片 | W1-001、W1-002、W1-003、W1-003b、W1-003c、W1-004、W1-005 | 前五已合并；W1-004/005 为本地分支，按里程碑统一推送 |
-| 内核能力 | ZIP、7z、RAR（外部）、分卷、SFX、流式字典、多线程调度、运行控制/检查点 | W1-007 流式字典 reviewer APPROVE，待正式基准；W1-006 reviewer APPROVE，待大语料 |
+| 当前阶段 | **W1 进行中** | W1-006/007 reviewer APPROVE；W1-008 基准完成；W1-009 RAR5 快筛本地实现待 reviewer；W2–W5 未开始 |
+| 已完成切片 | W1-001、W1-002、W1-003、W1-003b、W1-003c、W1-004、W1-005、W1-006、W1-007、W1-008 | 均已在本地/stacked PR 中；W1-009 进行中 |
+| 内核能力 | ZIP、7z、RAR（外部）、RAR5 进程内 check 快筛、分卷、SFX、流式字典、多线程调度、运行控制/检查点 | W1-009 RAR5 快筛 completed（reviewer APPROVE + 法务复核附条件通过）；W1-006/007 reviewer APPROVE；W1-008 三格式 1M×1GB 实测 |
 | CLI | `acx -f <archive> -m dict -d <dict> -t N` | 仅字典模式；退出码 0/1/2/3/4（4=已停止并保存检查点） |
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 94、CLI 4、集成 38（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
+| 测试 | core 98、CLI 4、集成 39（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；W1-004/005 推送后需重跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
@@ -148,6 +148,12 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W1-004 7z AES/头加密/首块](tasks/W1-004-sevenz.md) | `sevenz-rust2`、AES-256、`-mhe=on`、首块探测、CLI | 完成（本地，待推送） |
 | [W1-005 分卷/SFX](tasks/W1-005-volumes-sfx.md) | `.001/.0001`、`.partN.rar`、SFX、缺卷/截断/损坏分类 | 完成（本地，待推送） |
 | [W1-006 运行控制与断点续跑](tasks/W1-006-run-control-resume.md) | 暂停/继续、停止/取消、检查点、`--resume` | 本地实现（reviewer APPROVE，待用户大语料） |
+| [W1-007 流式字典](tasks/W1-007-streaming-dictionary.md) | 有界内存、编码、CandidateSource、resume | 完成（reviewer APPROVE） |
+| [W1-008 正式基准](tasks/W1-008-benchmark.md) | 1M × 1GB ZIP/7z/RAR | 完成（本轮复测见 W1-010） |
+| [W1-009 RAR5 快筛](tasks/W1-009-rar5-fast-check.md) | 进程内 check + 外部确认 | 完成（reviewer + 法务复核） |
+| [W1-010 准出硬化](tasks/W1-010-w1-hardening.md) | ZIP 10⁷、当前窗口复测、签核 | 部分完成（停止继续测试） |
+| [W1 评估](W1-ASSESSMENT.md) | W1 交付物与 W2 准入意见 | 有条件 GO |
+| [W2 计划](W2-PLAN.md) | W2 工作包/顺序/退出标准 | 规划中 |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -164,8 +170,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 阶段 | 状态 | 已完成 | 主要缺口 |
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
-| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、7z（AES/头加密/首块）、RAR4/RAR5（外部 + 预检缓存）、分卷/SFX、流式字典、有界多线程调度、CLI 字典模式 | W1-006/W1-007 reviewer APPROVE；W1-008 三格式 1M×1GB 实测完成；PKZIP `.z01`、W1 正确性长跑待收口 |
-| **W2 引擎/攻击** | 未开始 | RAR 外部引擎/分卷/SFX 已由 W1 提前交付 | 快筛、掩码/暴力/混合、批量/编码变体；**W2-001 GPU 已 Deferred** |
+| **W1 核心 CLI** | **进行中** | ZIP（ZipCrypto/AES）、7z（AES/头加密/首块）、RAR4/RAR5（外部 + 预检缓存 + RAR5 check 快筛）、分卷/SFX、流式字典、有界多线程调度、CLI 字典模式 | W1-006/W1-007 reviewer APPROVE；W1-008 三格式 1M×1GB 实测；W1-009 reviewer APPROVE，待 release/legal；PKZIP `.z01`、W1 正确性长跑待收口 |
+| **W2 引擎/攻击** | **规划中（conditional）** | W1 功能/性能/许可基线 | 快筛、掩码/暴力/混合、批量/编码变体；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
@@ -185,7 +191,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 运行控制 + 断点续跑 | 🚧 W1-006 | 本地实现（reviewer APPROVE）：暂停/继续、优雅/强制停止、检查点、`--resume`；待用户大语料测试 |
 | 字典/调度补全 | 🚧 W1-007 | 流式字典（reviewer APPROVE）：有界候选、编码、批次源、resume；物理核数默认仍待调优 |
 | 错误分类完整化 | ⏳ 部分 | 缺卷/截断/损坏/未加密已有预检分类（W1-005）；RAR 损坏仍走 External，前端错误码未映射 |
-| 1M 字典 / 1GB 归档基准 | ✅ W1-008 | [W1-008](benchmarks/W1-008.md)：ZIP 42.247s/23,670/s、7z 1271.049s/786.8/s、RAR 4515.104s/221.5/s；RSS 3.1MB（父进程） |
+| 1M 字典 / 1GB 归档基准 | ✅ W1-008 | [W1-008](benchmarks/W1-008.md)：ZIP 42.247s/23,670/s、7z 1271.049s/786.8/s、RAR 外部 4515.104s/221.5/s；[W1-009](benchmarks/W1-009.md) RAR5 快筛 578.958s/1727.2/s |
+| RAR5 快速校验 | ✅ W1-009 | 进程内 check 快筛（ASCII-only，只否决；命中仍外部 `UnRAR t`）；reviewer APPROVE + 法务复核附条件通过 |
 
 ### 5.3 当前可交付与不可交付
 
@@ -218,7 +225,7 @@ W1 不能只用“能跑”收口。以下全部满足才算 W1 准出：
 
 **功能**
 
-- W1-001…W1-006 完成；W1-007（流式字典）本地实现并通过 reviewer APPROVE；W1-008（正式基准）三格式 1M×1GB 实测完成；
+- W1-001…W1-009 完成；W1-010（准出硬化）ZIP 10M、当前窗口基准、暂停/停止 1 GB 矩阵完成，剩余 PR 合并/签核；
 - CLI 字典模式覆盖 ZIP（ZipCrypto/AES）、7z（AES/头加密）、RAR4/RAR5（外部）、分卷、SFX；
 - 暂停/继续、优雅/强制停止、`--resume` 可用；暂停/停止后无残留外部进程；
 - `--resume` 能校验归档/字典/参数指纹，不匹配时拒绝而不是静默重跑。
@@ -246,7 +253,7 @@ W1 不能只用“能跑”收口。以下全部满足才算 W1 准出：
 
 ### 5.5 W2 准入标准
 
-W1 准出后，满足以下条件才进入 W2：
+W1 准出后，满足以下条件才进入 W2。当前评估见 [W1 评估](W1-ASSESSMENT.md)，目标划分见 [W2 计划](W2-PLAN.md)：
 
 - W1 准出清单全部勾选，且有一个里程碑评审记录（reviewer/architect）；
 - W2 范围已写入任务文档：快筛、掩码/暴力/混合、批量/编码变体；每项有验收；
@@ -259,7 +266,7 @@ W1 准出后，满足以下条件才进入 W2：
 ## 6. 推荐开发顺序
 
 > 以下 `W1-007` 等编号是**建议切片**，正式开工时在 `docs/tasks/` 新建任务文档并写清验收；
-> 已有正式任务文档的切片（W1-001/002/003/003b/003c/004/005/006/007、W2-001）以任务文档为准。
+> 已有正式任务文档的切片（W1-001/002/003/003b/003c/004/005/006/007/008/009/010、W2-001）以任务文档为准。
 
 按依赖和风险排序：
 
@@ -276,17 +283,17 @@ W1 准出后，满足以下条件才进入 W2：
 3. **W1-006：运行控制与断点续跑（合并 epic）** — ⏳ 待开始（见 [W1-006](tasks/W1-006-run-control-resume.md)）
    - `RunControl`：暂停/继续、优雅/强制停止、外部子进程取消；
    - 连续完成批次水位；检查点原子写；`--resume` 指纹校验；
-   - 归档/字典/参数不一致拒绝续跑；硬杀恢复 ≤1 批。
+   - 归档/字典/参数不一致拒绝续跑；硬杀恢复 ≤4096 候选窗口。
 4. **W1-007：流式字典与候选源**
-   - 有界内存、编码识别、批次源、检查点续跑；reviewer APPROVE，待 500MB/1M 基准。
-   - 物理核数默认、500MB 自动峰值测试与 W1-008 一起收口。
+   - 有界内存、编码识别、批次源、检查点续跑；reviewer APPROVE。
 5. **W1-008：正式基准（已完成）**
    - 1M 字典 × 1GB ZIP/7z/RAR；记录 p/s、CPU、内存、ETA 误差；
    - 结果写入 [W1-008 基准报告](benchmarks/W1-008.md)。
-6. **W2-001：hashcat GPU** — **Deferred（W2 不启动）**
-   - 不阻塞 W2 准入；W2 先完成 CPU 快筛/攻击/批量；
-   - W2 退出后单独重新评审，更新任务/ADR 后再决定。
-7. **W3：C ABI v1 + Avalonia GUI**；之后 W4 Full 安装包、W5 Beta。
+6. **W1-009：RAR5 快速校验（已完成：reviewer + 法务复核）**
+   - 进程内 check 快筛，外部 `UnRAR t` 复核；报告见 [W1-009](benchmarks/W1-009.md)。
+7. **W1-010：准出硬化** — ZIP 10⁷、暂停/停止矩阵、当前窗口复测、PR 签核；见 [W1-010](tasks/W1-010-w1-hardening.md)。
+8. **W2：CPU 攻击面** — 按 [W2-PLAN](W2-PLAN.md) 分为 mask/brute/hybrid/batch/encoding/fast-filter；W2-001 GPU Deferred。
+9. **W3：C ABI v1 + Avalonia GUI**；之后 W4 Full 安装包、W5 Beta。
 
 ## 7. 开发工作流
 

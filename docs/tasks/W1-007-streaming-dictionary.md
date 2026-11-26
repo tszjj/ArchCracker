@@ -40,12 +40,12 @@ W1-001…W1-006 的 `Dictionary::load` 一次性把文件读入 `String`，再�
 ### 4.1 候选源
 
 ```text
-DictionaryStream --next_batch(4096)--> CandidateBatch
+DictionaryStream --next_batch(effective batch)--> CandidateBatch
                                       { start_index, Vec<Vec<u8>> }
 scheduler producer --bounded channel--> workers
 ```
 
-- `CandidateSource` 只暴露 `total()` 和 `next_batch(max)`；
+- `CandidateSource` 只暴露 `total()` 和 `next_batch(max)`；scheduler 按线程数把总 in-flight 候选窗口控制在 4096；
 - 内存路径 `MemorySource` 保留给旧 `run`/`run_with_context` API；
 - worker 不再拿到整个字典 `Arc<Vec<Vec<u8>>>`，只处理当前批次；
 - 批次的 `start_index` 由源维护，scheduler 校验连续性。

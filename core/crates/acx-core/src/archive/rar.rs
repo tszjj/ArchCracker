@@ -10,6 +10,7 @@
 //! later reject most candidates before this process runs.
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, PasswordTest};
+use super::rar5_verify::Rar5Verifier;
 use super::source::ArchiveSource;
 use super::{ArchiveSession, ArchiveSessionFactory};
 use crate::engines::external::{self, CancelToken, ExternalOutput, DEFAULT_TIMEOUT};
@@ -27,6 +28,7 @@ pub struct RarSession {
     info: ArchiveInfo,
     timeout: Duration,
     cancel: Option<CancelToken>,
+    fast: Option<Rar5Verifier>,
 }
 
 impl RarSession {
@@ -40,24 +42,34 @@ impl RarSession {
         let engine = external::find_unrar()?;
         let first = source.first_path().to_path_buf();
         let info = preflight(&first, source.format, &engine)?;
-        Ok(Self::with_info(&first, engine, info))
+        let fast = Rar5Verifier::from_source(&source);
+        Ok(Self::with_info(&first, engine, info, fast))
     }
 
     /// Open with an explicit engine path (used by tests and diagnostics).
     pub fn open_with_engine(path: &Path, format: ArchiveFormat, engine: PathBuf) -> Result<Self> {
         ensure_rar(format)?;
         let info = preflight(path, format, &engine)?;
-        Ok(Self::with_info(path, engine, info))
+        let fast = ArchiveSource::resolve(path)
+            .ok()
+            .and_then(|source| Rar5Verifier::from_source(&source));
+        Ok(Self::with_info(path, engine, info, fast))
     }
 
     /// Build a session around metadata that is already known.
-    fn with_info(path: &Path, engine: PathBuf, info: ArchiveInfo) -> Self {
+    fn with_info(
+        path: &Path,
+        engine: PathBuf,
+        info: ArchiveInfo,
+        fast: Option<Rar5Verifier>,
+    ) -> Self {
         Self {
             path: path.to_path_buf(),
             engine,
             info,
             timeout: DEFAULT_TIMEOUT,
             cancel: None,
+            fast,
         }
     }
 
@@ -83,6 +95,18 @@ impl ArchiveSession for RarSession {
         // testing a truncated password.
         if password_has_line_break(password) {
             return Ok(PasswordTest::Miss);
+        }
+
+        // RAR5 only: a check-value mismatch is a safe fast reject. A possible
+        // hit is still confirmed by the external UnRAR oracle below. RAR4,
+        // non-ASCII passwords, missing check values and parse failures fall
+        // through to the oracle.
+        if let Some(fast) = &self.fast {
+            if let Some(matches) = fast.verify(password) {
+                if !matches {
+                    return Ok(PasswordTest::Miss);
+                }
+            }
         }
 
         let encoded = external::encode_password(password)?;
@@ -130,6 +154,7 @@ pub struct RarFactory {
     pub path: PathBuf,
     engine: PathBuf,
     info: ArchiveInfo,
+    fast: Option<Rar5Verifier>,
 }
 
 impl RarFactory {
@@ -190,7 +215,15 @@ impl RarFactory {
     /// must not modify the archive while this factory is in use: the metadata
     /// is a snapshot, not a live view.
     fn with_cached_info(path: PathBuf, engine: PathBuf, info: ArchiveInfo) -> Self {
-        Self { path, engine, info }
+        let fast = ArchiveSource::resolve(&path)
+            .ok()
+            .and_then(|source| Rar5Verifier::from_source(&source));
+        Self {
+            path,
+            engine,
+            info,
+            fast,
+        }
     }
 
     /// Metadata probed when this factory was created.
@@ -206,6 +239,7 @@ impl ArchiveSessionFactory for RarFactory {
             &self.path,
             self.engine.clone(),
             self.info.clone(),
+            self.fast.clone(),
         )))
     }
 }

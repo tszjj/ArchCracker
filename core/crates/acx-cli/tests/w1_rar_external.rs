@@ -7,6 +7,7 @@
 //! test is skipped when WinRAR/UnRAR or `Rar.exe` is unavailable. No sample
 //! archive is committed. CI intentionally has no RAR engine dependency.
 
+use acx_core::archive::{ArchiveSource, Rar5Verifier};
 use acx_core::engines::external::{encode_password, find_unrar, run};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -114,6 +115,79 @@ fn write_dictionary(path: &Path, lines: &[&str]) {
     contents.push('\n');
     std::fs::write(path, contents)
         .unwrap_or_else(|error| panic!("create {}: {error}", path.display()));
+}
+
+#[test]
+fn local_rar5_fast_check_matches_unrar() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+
+    let temp = TempDir::new("rar5-fast-check");
+    let hello = temp.join("hello.txt");
+    let encrypted = temp.join("encrypted.rar");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    assert!(
+        create_rar(&rar, &encrypted, &hello, Some(PASSWORD.as_bytes()), &[]),
+        "Rar.exe must create a RAR5 fixture"
+    );
+
+    let source = ArchiveSource::resolve(&encrypted).expect("resolve RAR5");
+    let verifier = Rar5Verifier::from_source(&source).expect("RAR5 check value");
+    assert_eq!(verifier.verify(PASSWORD.as_bytes()), Some(true));
+    assert_eq!(verifier.verify(b"definitely-wrong"), Some(false));
+}
+
+#[test]
+fn local_rar5_header_fast_check_matches_unrar() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+
+    let temp = TempDir::new("rar5-header-fast");
+    let hello = temp.join("hello.txt");
+    let archive = temp.join("header.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+
+    let args: Vec<OsString> = vec![
+        "a".into(),
+        "-ep1".into(),
+        "-hp".into(),
+        "-ma5".into(),
+        archive.as_os_str().to_os_string(),
+        hello.as_os_str().to_os_string(),
+    ];
+    let created = run(
+        &rar,
+        args,
+        Some(PASSWORD.as_bytes()),
+        std::time::Duration::from_secs(60),
+    )
+    .expect("run Rar.exe -hp");
+    assert_eq!(created.code, Some(0), "Rar.exe must create a -hp fixture");
+
+    let source = ArchiveSource::resolve(&archive).expect("resolve RAR5 header encryption");
+    let verifier = Rar5Verifier::from_source(&source).expect("header check value");
+    assert_eq!(verifier.verify(PASSWORD.as_bytes()), Some(true));
+    assert_eq!(verifier.verify(b"definitely-wrong"), Some(false));
+
+    write_dictionary(&dictionary, &["wrong", PASSWORD]);
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .arg("-f")
+        .arg(&archive)
+        .arg("-d")
+        .arg(&dictionary)
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
 }
 
 #[test]

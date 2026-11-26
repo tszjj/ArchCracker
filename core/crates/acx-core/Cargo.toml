@@ -16,6 +16,7 @@ crc32fast = "1.5"
 thiserror = "2"
 encoding_rs = "0.8"
 crossbeam-channel = "0.5"
+sha2 = "0.10"
 
 [dev-dependencies]
 # Tests generate 7z fixtures in-process, so they need the writer/compressor

@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | `sevenz-rust2` | 7z 读写 | Apache-2.0 | 是 | 源码依赖 |
 | `lzma-rust2` | 7z LZMA/LZMA2 解密 | Apache-2.0 | 是 | 源码依赖 |
-| `aes` 0.8 / `cbc` / `sha2` / `getrandom` / `futures-*` / `version_check` | 7z AES/哈希/异步传递依赖 | MIT OR Apache-2.0 | 是 | 源码依赖 |
+| `aes` 0.8 / `cbc` / `sha2` / `getrandom` / `futures-*` / `version_check` | 7z AES/哈希/异步传递依赖；`sha2` 同时由 W1-009 RAR5 check 直接使用 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `generic-array` | 7z AES 传递依赖 | MIT | 是 | 源码依赖 |
 | `bzip2` / `libbz2-rs-sys` | 7z BZip2 解密 | MIT OR Apache-2.0；`libbz2-rs-sys` 为 bzip2-1.0.6 | 是 | 源码依赖 |
 | `ppmd-rust` | 7z PPMd 解密 | CC0-1.0 OR MIT-0 | 是 | 源码依赖 |
@@ -31,7 +31,7 @@
 | `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `crc32fast` / `thiserror` / `clap` | 校验/错误/CLI | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `windows-sys`（仅 Windows） | OEM 代码页转换 | MIT OR Apache-2.0 | 是 | 源码依赖 |
-| `UnRAR.exe`（未修改） | RAR4/RAR5 测试/解压 | UnRAR License（非 OSI） | 是（独立组件，不改变主项目许可） | Full 安装包随包，仅进程 |
+| `UnRAR.exe`（未修改） | RAR4/RAR5 密码/完整性测试 oracle | UnRAR License（非 OSI） | 是（独立组件，不改变主项目许可） | Full 安装包随包，仅进程 |
 | hashcat（固定版本） | GPU 字典后端 | MIT + 第三方声明 | 是 | Full 安装包随包，仅进程 |
 | Avalonia | 桌面 UI | MIT | 是 | NuGet |
 | .NET Runtime | 桌面运行时 | MIT | 是 | 自包含发布 |
@@ -56,7 +56,23 @@ Windows 只发布**单一 Full 版本**，不分层。按 [ADR-0004](adr/0004-bu
 
 UnRAR 许可不是 OSI 自由许可，安装包必须在 NOTICE/THIRD_PARTY_NOTICES 中明确它是独立组件，不能暗示整包都是 Apache-2.0。
 
-### 3.1 hashcat 与 GPU
+### 3.1 RAR5 进程内密码校验器（W1-009）
+
+`archive::rar5_verify` 是**独立 Rust 实现**，不是 UnRAR 源码，也不声称正式 clean-room 法律结论：
+
+- 结构依据公开 RAR5 technote；官方 technote 明确把 check 值的完整派生细节指向 UnRAR 源码，因此**不能声称仅凭官方公开规范实现**；
+- check 派生（`iterations+32`、XOR 折叠、4-byte SHA-256 校验）来自公开第三方格式资料/实现与本地 `Rar.exe` 黑盒差分；未复制或链接 UnRAR 源码；
+- 只解析 RAR5 头/文件加密记录中的 KDF 参数和 12-byte password check；
+- 只用 PBKDF2-HMAC-SHA256 计算 check，并用于**否决**明显错误的候选；
+- 不压缩、不解压、不实现 RAR coder、不创建 RAR 归档；
+- `check` 匹配仍必须由外部 `UnRAR.exe t` 做密码/完整性复核，不直接输出 `FOUND`；
+- 解析失败、缺 check、check 自身 SHA-256 校验失败、KDF count 超限、非 ASCII 候选：全部回退外部 oracle；
+- RAR4 不启用该快速路径；`UnRAR.exe t` 是测试/完整性 oracle，不是 `x/e` 解压交付；
+- 只新增 `sha2`（MIT OR Apache-2.0）直接依赖；不引入 `unrar`/`unrar-rs` 或 RAR 解压库。
+
+许可判断：该实现不复制/链接 UnRAR 源码，不重建 RAR 压缩算法，落在 UnRAR License 第 2 条与 WinRAR EULA 的压缩器/反工程禁令之外。**按项目负责人确认，2026-11-26 法务复核已完成，结论为有条件接受**；这不是正式法律意见书，发布前 release-engineer 仍按 ADR-0005 的复核条件逐项检查。详见 [ADR-0005](adr/0005-rar5-password-verifier.md)。
+
+### 3.2 hashcat 与 GPU
 
 - 实现时点：W2-001 GPU/hashcat 后端已 **Deferred**，W2 不启动；CPU 路径是 W1/W2 的基线。W4 的 Full 随包策略不变，GPU 是否在 W4 前落地由后续评审决定。
 - Full 版随包固定版本 hashcat 二进制，附 MIT 许可与第三方声明；hashcat 只通过外部进程调用。

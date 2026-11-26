@@ -3,7 +3,7 @@
 > 状态：Accepted（M0 基线） · 更新：2026-11-24
 >
 > **排期：Windows 全栈优先（W0–W5）。** 其他平台的接口保留，但 D1–D3 为 Deferred；本文的跨平台设计不等于当前迭代范围。
-> 相关：[ADR-0001 Rust 内核](adr/0001-rust-core.md) · [ADR-0002 前端拆分](adr/0002-frontend-split.md) · [ADR-0003 RAR 许可](adr/0003-rar-licensing.md) · [ADR-0004 Full 随包](adr/0004-bundled-engines.md)
+> 相关：[ADR-0001 Rust 内核](adr/0001-rust-core.md) · [ADR-0002 前端拆分](adr/0002-frontend-split.md) · [ADR-0003 RAR 许可](adr/0003-rar-licensing.md) · [ADR-0004 Full 随包](adr/0004-bundled-engines.md) · [ADR-0005 RAR5 校验器](adr/0005-rar5-password-verifier.md)
 
 ## 1. 目标与约束
 
@@ -73,7 +73,7 @@
 | 7z | AES-256、可选头加密 | `sevenz-rust2`（W1-004 已实现 AES/`-mhe=on`/首块 + 完整 CRC；7-Zip 26.04 差分） | W1-005 自建 `VolumeReader`（`.7z.001`/`.0001`） | SFX 扫描 PE overlay（W1-005） |
 | ZIP | ZipCrypto、WinZip AES-128/192/256 | `zip` + 自写容器层 | W1-005 `VolumeReader`（`.zip.001`）；PKZIP `.z01` 明确不支持 | AES 候选验证已实现（AE-1/AE-2）；7-Zip 差分待补；SFX 已支持简单 stub |
 | RAR4 | AES-128、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003/W1-003c 已端到端验证） | 外部引擎处理；W1-005 校验 `.partN`/`.r00` 并传第一分卷 | 仅进程，不链接；SFX 交外部引擎 |
-| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证） | 外部引擎处理；W1-005 校验 `.partN` 并传第一分卷 | 仅进程，不链接；SFX 交外部引擎 |
+| RAR5 | AES-256、PBKDF2、头加密 | 外部 `UnRAR.exe`（Full 随包；W1-003 已端到端验证）+ 进程内 check 快筛（W1-009，仅否决） | 外部引擎处理；W1-005 校验 `.partN` 并传第一分卷；W1-009 快速拒绝错误候选 | 仅进程，不链接；快筛不实现解压/压缩 |
 | SFX | 继承底层 | W1-005 定位 PE overlay 后交引擎 | 同底层；PKZIP spanned 不支持 | 7z/ZIP 用偏移 Reader，RAR 交 UnRAR |
 
 W1-005 的 `ArchiveSource` 把“物理路径”解析为“格式 + 连续分卷 + 起始偏移”：ZIP/7z 通过 `VolumeReader` 看到单一逻辑流，RAR 只把第一分卷交给外部 UnRAR。缺卷在进入字典前返回 `MissingVolume`（源解析或预检阶段）；截断/损坏分别返回 `Truncated`/`Corrupt`。
@@ -103,10 +103,10 @@ W1-005 的 `ArchiveSource` 把“物理路径”解析为“格式 + 连续分�
 2. 只通过 `engines::external` 进程调用；**不链接（静态/动态）**、不调用 `unrar.dll`、不复制 unRAR/7-Zip RAR 源码；
 3. 不随包 `WinRAR.exe`/`Rar.exe`；WinRAR 的 trial bundling 由独立 EULA 限制；
 4. 不自动下载/静默更新；版本/SHA-256/来源固定在 `third_party/manifest.json`；
-5. 自研 RAR 头/密钥派生验密（clean-room，仅用于快筛）可与外部引擎配合；
+5. 独立 RAR5 check 验证器（W1-009，仅 ASCII 候选；只做 KDF + check，不实现解压/压缩）可与外部引擎配合；check 细节来自公开第三方资料/黑盒差分，非官方 technote 全公开，详见 ADR-0005，发布前需许可复核；
 6. 其他平台（含 Android/HarmonyOS）当前 Deferred；未来同样只走外部引擎或独立许可 add-on。
 
-W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W1-003b 在 `RarFactory` 创建时预检一次并缓存 `ArchiveInfo`，worker 的 `open()` 不再启动 UnRAR；CLI 复用 `archive::preflight` 结果，整个运行只有一次预检。W1-003c 在 WinRAR 6.24 下补验 RAR4 `-ma4`：其预检/错误候选使用 exit 3；预检用 `l -p-` 的 `*` 标记判断文件加密，用 RAR4 主头 `0x0080` 标志判断头加密，其余按损坏报错；候选 3 映射为 Miss。W2 的 clean-room 头/KDF 快筛再接在它前面。
+W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` → PATH → `%ProgramFiles%\WinRAR` 发现引擎；**W4 才加入随包路径优先**。密码走 stdin，超时/退出码统一映射；当前用整包 `unrar t` 验证（不解析本地化列表，也不伪造“最小条目”）。W1-003b 在 `RarFactory` 创建时预检一次并缓存 `ArchiveInfo`，worker 的 `open()` 不再启动 UnRAR；CLI 复用 `archive::preflight` 结果，整个运行只有一次预检。W1-003c 在 WinRAR 6.24 下补验 RAR4 `-ma4`：其预检/错误候选使用 exit 3；预检用 `l -p-` 的 `*` 标记判断文件加密，用 RAR4 主头 `0x0080` 标志判断头加密，其余按损坏报错；候选 3 映射为 Miss。W1-009 在 `RarSession::test_password` 前增加 RAR5 check 快速否决（ASCII-only；不匹配直接 Miss；匹配仍交 `UnRAR t`），RAR4/非 ASCII/无 check 回退外部。
 
 ### 4.4 hashcat GPU 后端（可选，外部进程）
 

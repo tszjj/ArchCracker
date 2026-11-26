@@ -26,19 +26,21 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Number of candidate indices handed to a worker in one batch.
-const BATCH_SIZE: usize = 4096;
+/// Maximum candidates allowed in the scheduler pipeline at once.
+///
+/// The producer, queue and workers together must not hold more than this many
+/// candidates; otherwise a hard kill can replay several 4096-candidate batches.
+const MAX_IN_FLIGHT_CANDIDATES: usize = 4096;
+
+/// Small queue; the per-batch size is derived from the worker count so the
+/// total in-flight candidate window stays at `MAX_IN_FLIGHT_CANDIDATES`.
+const PIPELINE_QUEUE_BATCHES: usize = 2;
 
 /// Upper bound for worker threads; extra threads only add open sessions.
 const MAX_THREADS: usize = 256;
 
 /// How often workers poll control state while waiting for a batch.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
-
-/// Hard cap on queued batches so a large `-t` cannot multiply batch memory by
-/// 2×threads without bound. 32 × 4096 candidates is still ample to feed 256
-/// workers.
-const MAX_IN_FLIGHT_BATCHES: usize = 32;
 
 /// A verified password found by the scheduler.
 #[derive(Debug, Clone)]
@@ -346,7 +348,9 @@ pub fn run_with_source(
     }
 
     let threads = context.threads;
-    let (batch_tx, batch_rx) = bounded::<CandidateBatch>((threads * 2).min(MAX_IN_FLIGHT_BATCHES));
+    // Keep (workers + queue + producer's pending batch) × batch_size <= 4096.
+    let batch_size = (MAX_IN_FLIGHT_CANDIDATES / (threads + PIPELINE_QUEUE_BATCHES + 1)).max(1);
+    let (batch_tx, batch_rx) = bounded::<CandidateBatch>(PIPELINE_QUEUE_BATCHES);
     let hit: Arc<Mutex<Option<Hit>>> = Arc::new(Mutex::new(None));
     let mut first_error: Option<AcxError> = None;
 
@@ -385,7 +389,7 @@ pub fn run_with_source(
 
             let batch = match pending.take() {
                 Some(batch) => batch,
-                None => match source.next_batch(BATCH_SIZE) {
+                None => match source.next_batch(batch_size) {
                     Ok(Some(batch)) => batch,
                     Ok(None) => break,
                     Err(error) => {
@@ -851,5 +855,32 @@ mod tests {
         };
         assert!(progress.completed_through < progress.total);
         assert!(progress.tried >= progress.completed_through);
+    }
+
+    #[test]
+    fn stop_watermark_stays_inside_the_4096_candidate_window() {
+        let factory = Arc::new(FakeFactory::with_delay(SECRET, Duration::from_millis(1)));
+        let passwords: Vec<Vec<u8>> = (0..50_000)
+            .map(|index| format!("wrong-{index}").into_bytes())
+            .collect();
+        let context = RunContext::new(passwords.len(), 0, 0, 8);
+        let control = context.control_arc();
+        let factory_dyn: Arc<dyn ArchiveSessionFactory> = factory;
+        let handle =
+            thread::spawn(move || run_with_context(factory_dyn, Arc::new(passwords), context));
+
+        thread::sleep(Duration::from_millis(60));
+        control.stop();
+        let outcome = handle.join().expect("join").expect("run");
+        let progress = match outcome {
+            RunOutcome::Stopped(progress) => progress,
+            other => panic!("expected stopped, got {other:?}"),
+        };
+        assert!(
+            progress.tried - progress.completed_through <= 4096,
+            "hard-kill replay window exceeded: tried {} completed {}",
+            progress.tried,
+            progress.completed_through
+        );
     }
 }

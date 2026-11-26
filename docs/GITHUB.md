@@ -62,8 +62,8 @@ git push -u origin main
 
 - 远端：**已创建（私有）**，`origin` 指向 `tszjj/ArchCracker`；默认分支 `main`。
 - 已合并 ZIP、AES、RAR、Full 随包文档、RAR 预检缓存等 PR（详见 `docs/PROJECT-GUIDE.md` §5）。
-- W1-004（7z）`feat/w1-004-7z` → PR #10；W1-005（分卷/SFX）`feat/w1-005-volumes-sfx` → PR #11；W1-006（运行控制/断点）`feat/w1-006-run-control` → PR #12；W1-007（流式字典）`feat/w1-007-streaming-dictionary` → PR #13；W1-008（1M×1GB 基准）`feat/w1-008-benchmark` → PR #14。已推送为 stacked PR；6 个 CI job 全绿。
-- 合并顺序：#10 → #11 → #12 → #13 → #14；每层都保持 base 为前一层分支，避免大 diff。
+- W1-004（7z）`feat/w1-004-7z` → PR #10；W1-005（分卷/SFX）`feat/w1-005-volumes-sfx` → PR #11；W1-006（运行控制/断点）`feat/w1-006-run-control` → PR #12；W1-007（流式字典）`feat/w1-007-streaming-dictionary` → PR #13；W1-008（1M×1GB 基准）`feat/w1-008-benchmark` → PR #14；W1-009（RAR5 快筛）`feat/w1-009-rar5-fast-check` → PR #15。已推送为 stacked PR；6 个 CI job 全绿。
+- 合并顺序：#10 → #11 → #12 → #13 → #14 → #15；每层都保持 base 为前一层分支，避免大 diff。
 - CI：6 个 job（Windows MSVC/GNU、Ubuntu、macOS、MSRV 1.89、cargo-deny），最近一次 main 全绿。
 - **分支保护当前无法启用**：私有免费仓库调用 API 返回 403（需 GitHub Pro 或转公开）。因此 `main` 保护目前只是流程约束；转公开/升级后按 §3 开启。
 - Vulnerability alerts 当前为关闭（API 404）；Dependabot、secret scanning、Private vulnerability reporting 需在 Settings 中逐项核对。
