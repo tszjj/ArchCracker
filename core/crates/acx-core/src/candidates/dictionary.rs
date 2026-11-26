@@ -20,7 +20,7 @@
 //! skipped, but leading and trailing spaces are preserved because they may be
 //! part of a password.
 
-use super::{CandidateBatch, CandidateSource};
+use super::{CandidateBatch, CandidateSource, MAX_BATCH_BYTES};
 use crate::error::{AcxError, Result};
 use encoding_rs::{Decoder, Encoding, GBK, UTF_16BE, UTF_16LE, UTF_8};
 use std::collections::HashSet;
@@ -33,7 +33,6 @@ const UTF16_LE_BOM: &[u8] = &[0xFF, 0xFE];
 const UTF16_BE_BOM: &[u8] = &[0xFE, 0xFF];
 const STREAM_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
-const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct Dictionary {
     entries: Vec<Vec<u8>>,
@@ -102,28 +101,15 @@ pub struct DictionaryStream {
 
 impl DictionaryStream {
     pub fn open(path: &Path, skip: usize) -> Result<Self> {
-        match Self::open_inner(path, skip, None) {
-            Ok(stream) => Ok(stream),
-            Err(error) if is_invalid_utf8(&error) => {
-                // BOM-less files can look like ASCII at the start and contain
-                // legacy GBK/GB18030 bytes later. The old whole-file loader
-                // fell back in that case; do the same by rescanning with the
-                // lossy GBK decoder.
-                Self::open_inner(path, skip, Some(GBK))
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    fn open_inner(path: &Path, skip: usize, force: Option<&'static Encoding>) -> Result<Self> {
-        let total = count_lines(path, force)?;
-        if skip > total {
+        let scan = scan_dictionary(path)?;
+        if skip > scan.lines {
             return Err(AcxError::Dictionary(format!(
-                "checkpoint candidate {skip} exceeds dictionary length {total}"
+                "checkpoint candidate {skip} exceeds dictionary length {}",
+                scan.lines
             )));
         }
 
-        let mut reader = LineReader::open(path, force)?;
+        let mut reader = LineReader::open(path, scan.force)?;
         for _ in 0..skip {
             if reader.next_line()?.is_none() {
                 return Err(AcxError::Dictionary(format!(
@@ -133,7 +119,7 @@ impl DictionaryStream {
         }
         Ok(Self {
             reader,
-            total,
+            total: scan.lines,
             next_index: skip,
             held_line: None,
         })
@@ -194,14 +180,41 @@ impl CandidateSource for DictionaryStream {
     }
 }
 
-/// Count non-empty lines without retaining them.
-fn count_lines(path: &Path, force: Option<&'static Encoding>) -> Result<usize> {
-    let mut reader = LineReader::open(path, force)?;
-    let mut total = 0usize;
-    while reader.next_line()?.is_some() {
-        total += 1;
+/// Result of one line-counting scan. `force` records the decoder that succeeded
+/// so callers can reopen the file without another full scan and without
+/// re-guessing the encoding.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DictionaryScan {
+    pub lines: usize,
+    pub max_line_bytes: usize,
+    pub force: Option<&'static Encoding>,
+}
+
+/// Count non-empty lines and record the longest decoded line.
+///
+/// BOM-less files can look like ASCII at the start and contain legacy
+/// GBK/GB18030 bytes later; retry with the lossy GBK decoder in that case.
+pub(crate) fn scan_dictionary(path: &Path) -> Result<DictionaryScan> {
+    match scan_dictionary_inner(path, None) {
+        Ok(scan) => Ok(scan),
+        Err(error) if is_invalid_utf8(&error) => scan_dictionary_inner(path, Some(GBK)),
+        Err(error) => Err(error),
     }
-    Ok(total)
+}
+
+fn scan_dictionary_inner(path: &Path, force: Option<&'static Encoding>) -> Result<DictionaryScan> {
+    let mut reader = LineReader::open(path, force)?;
+    let mut lines = 0usize;
+    let mut max_line_bytes = 0usize;
+    while let Some(line) = reader.next_line()? {
+        lines += 1;
+        max_line_bytes = max_line_bytes.max(line.len());
+    }
+    Ok(DictionaryScan {
+        lines,
+        max_line_bytes,
+        force,
+    })
 }
 
 fn is_invalid_utf8(error: &AcxError) -> bool {
@@ -209,7 +222,7 @@ fn is_invalid_utf8(error: &AcxError) -> bool {
 }
 
 /// A chunked decoder that yields newline/CR-delimited UTF-8 lines.
-struct LineReader {
+pub(crate) struct LineReader {
     input: BufReader<File>,
     decoder: Decoder,
     pending: String,
@@ -220,7 +233,7 @@ struct LineReader {
 }
 
 impl LineReader {
-    fn open(path: &Path, force: Option<&'static Encoding>) -> Result<Self> {
+    pub(crate) fn open(path: &Path, force: Option<&'static Encoding>) -> Result<Self> {
         let mut file = File::open(path)?;
         // Read up to three bytes for BOM detection, then rewind. A single
         // `BufReader::fill_buf` is not guaranteed to return three bytes.
@@ -263,7 +276,7 @@ impl LineReader {
         })
     }
 
-    fn next_line(&mut self) -> Result<Option<String>> {
+    pub(crate) fn next_line(&mut self) -> Result<Option<String>> {
         loop {
             if let Some(relative) = self.pending[self.cursor..].find(['\n', '\r']) {
                 let end = self.cursor + relative;

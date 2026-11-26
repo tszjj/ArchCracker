@@ -9,6 +9,7 @@
 
 use crate::candidates::{CandidateBatch, CandidateSource};
 use crate::error::{AcxError, Result};
+use crate::estimate::{estimate_space, SpaceEstimate, SpaceInput};
 use sha2::{Digest, Sha256};
 
 pub const MAX_MASK_POSITIONS: usize = 128;
@@ -134,6 +135,43 @@ impl MaskSpec {
     pub fn positions(&self) -> usize {
         self.positions.len()
     }
+
+    /// Keyspace as an execution index. Used by hybrid affix masks, whose
+    /// per-line product must fit the `usize` candidate index.
+    pub(crate) fn keyspace_usize(&self) -> Result<usize> {
+        usize::try_from(self.keyspace).map_err(|_| {
+            AcxError::Attack("affix mask keyspace exceeds the executable usize limit".to_string())
+        })
+    }
+
+    /// Render the candidate at `index` in odometer order. Used by the hybrid
+    /// affix generator; mask mode itself uses [`MaskCursor`].
+    pub(crate) fn candidate_at(&self, index: usize) -> Result<Vec<u8>> {
+        if index as u128 >= self.keyspace {
+            return Err(AcxError::Attack(format!(
+                "affix index {index} exceeds mask keyspace {}",
+                self.keyspace
+            )));
+        }
+        let mut digits = vec![0usize; self.positions.len()];
+        let mut value = index;
+        for (offset, position) in self.positions.iter().enumerate().rev() {
+            let radix = match position {
+                MaskPosition::Literal(_) => 1,
+                MaskPosition::Charset(set) => set.len(),
+            };
+            digits[offset] = value % radix;
+            value /= radix;
+        }
+        let mut output = Vec::with_capacity(self.positions.len());
+        for (position, digit) in self.positions.iter().zip(digits) {
+            match position {
+                MaskPosition::Literal(byte) => output.push(*byte),
+                MaskPosition::Charset(set) => output.push(set[digit]),
+            }
+        }
+        Ok(output)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +224,8 @@ pub struct MaskEstimate {
     pub fits_usize: bool,
     pub warnings: Vec<MaskWarning>,
     pub per_mask: Vec<u128>,
+    /// Core-side memory estimate for `--estimate` and the pre-attack summary.
+    pub space: SpaceEstimate,
 }
 
 #[derive(Debug, Clone)]
@@ -229,7 +269,7 @@ impl MaskSet {
         &self.signature
     }
 
-    pub fn estimate(&self) -> MaskEstimate {
+    pub fn estimate(&self, threads: usize) -> MaskEstimate {
         let fits_usize = self.keyspace <= usize::MAX as u128;
         let mut warnings = Vec::new();
         for mask in &self.masks {
@@ -252,11 +292,25 @@ impl MaskSet {
                 max: usize::MAX as u128,
             });
         }
+        let max_positions = self
+            .masks
+            .iter()
+            .map(MaskSpec::positions)
+            .max()
+            .unwrap_or(0);
+        let space = estimate_space(&SpaceInput {
+            total: self.keyspace,
+            threads,
+            max_candidate_bytes: max_positions as u128,
+            batch_bytes_cap: None,
+            source_bytes: 4096,
+        });
         MaskEstimate {
             keyspace: self.keyspace,
             fits_usize,
             warnings,
             per_mask: self.masks.iter().map(MaskSpec::keyspace).collect(),
+            space,
         }
     }
 
@@ -614,7 +668,7 @@ mod tests {
             &[None, None, None, None],
         )
         .expect("set");
-        assert_eq!(set.estimate().keyspace, 36);
+        assert_eq!(set.estimate(1).keyspace, 36);
         let mut source = set.into_source(9).expect("source");
         let first = source.next_batch(3).expect("batch").expect("some");
         assert_eq!(first.start_index, 9);
@@ -672,7 +726,7 @@ mod tests {
     fn estimate_warns_for_long_and_large_masks() {
         let mask = "?a".repeat(10);
         let set = MaskSet::parse(&[mask], &[None, None, None, None]).expect("set");
-        let estimate = set.estimate();
+        let estimate = set.estimate(1);
         assert!(!estimate.fits_usize);
         assert!(estimate
             .warnings

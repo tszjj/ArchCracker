@@ -15,6 +15,7 @@ use crate::candidates::mask::{
 };
 use crate::candidates::{CandidateBatch, CandidateSource};
 use crate::error::{AcxError, Result};
+use crate::estimate::{estimate_space, SpaceEstimate, SpaceInput};
 
 /// Hard upper bound for `--max-len`; matches the W2-002 mask position limit.
 pub const MAX_BRUTE_LENGTH: usize = MAX_MASK_POSITIONS;
@@ -153,6 +154,8 @@ pub struct BruteEstimate {
     /// Keyspace per length, starting at `min_len`.
     pub per_len: Vec<u128>,
     pub warnings: Vec<BruteWarning>,
+    /// Core-side memory estimate for `--estimate` and the pre-attack summary.
+    pub space: SpaceEstimate,
 }
 
 #[derive(Debug, Clone)]
@@ -192,7 +195,7 @@ impl BruteSet {
         &self.signature
     }
 
-    pub fn estimate(&self) -> BruteEstimate {
+    pub fn estimate(&self, threads: usize) -> BruteEstimate {
         let keyspace = self.spec.keyspace;
         let fits_usize = keyspace <= usize::MAX as u128;
         let mut warnings = Vec::new();
@@ -214,11 +217,19 @@ impl BruteSet {
                 max: usize::MAX as u128,
             });
         }
+        let space = estimate_space(&SpaceInput {
+            total: keyspace,
+            threads,
+            max_candidate_bytes: self.spec.max_len as u128,
+            batch_bytes_cap: None,
+            source_bytes: 4096,
+        });
         BruteEstimate {
             keyspace,
             fits_usize,
             per_len: self.spec.per_len.clone(),
             warnings,
+            space,
         }
     }
 
@@ -548,7 +559,7 @@ mod tests {
 
     #[test]
     fn estimate_warns_and_refuses_keyspaces_above_usize() {
-        let estimate = set("?a", 1, 10).estimate();
+        let estimate = set("?a", 1, 10).estimate(1);
         assert!(estimate.keyspace > usize::MAX as u128);
         assert!(!estimate.fits_usize);
         assert!(estimate
@@ -560,14 +571,14 @@ mod tests {
 
     #[test]
     fn estimate_warns_for_large_keyspace_and_long_lengths() {
-        let estimate = set("?d?l", 1, 8).estimate();
+        let estimate = set("?d?l", 1, 8).estimate(1);
         assert!(estimate.fits_usize);
         assert!(estimate
             .warnings
             .iter()
             .any(|warning| matches!(warning, BruteWarning::LargeKeyspace { .. })));
 
-        let long = set("ab", 17, 17).estimate();
+        let long = set("ab", 17, 17).estimate(1);
         assert!(long
             .warnings
             .iter()

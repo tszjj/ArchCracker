@@ -10,6 +10,7 @@ pub mod candidates;
 pub mod checkpoint;
 pub mod engines;
 pub mod error;
+pub mod estimate;
 pub mod scheduler;
 
 pub use error::{AcxError, Result};
