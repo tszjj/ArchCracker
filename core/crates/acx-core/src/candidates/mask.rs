@@ -201,12 +201,7 @@ impl MaskSet {
             return Err(AcxError::Attack("no --mask provided".to_string()));
         }
 
-        let mut custom_sets: [Option<Vec<u8>>; 4] = Default::default();
-        for (index, text) in custom_texts.iter().enumerate() {
-            if let Some(text) = text {
-                custom_sets[index] = Some(parse_charset_expression(text)?);
-            }
-        }
+        let custom_sets = parse_custom_sets(custom_texts)?;
 
         let mut parsed = Vec::with_capacity(masks.len());
         let mut keyspace = 0u128;
@@ -317,9 +312,35 @@ impl MaskSet {
     }
 }
 
-fn parse_charset_expression(text: &str) -> Result<Vec<u8>> {
+/// Parse the four `--custom-charsetN` definitions. Definitions may contain
+/// built-in tokens and literals but cannot reference `?1..?4` (no recursion).
+pub(crate) fn parse_custom_sets(
+    custom_texts: &[Option<String>; 4],
+) -> Result<[Option<Vec<u8>>; 4]> {
+    let mut sets: [Option<Vec<u8>>; 4] = Default::default();
+    for (index, text) in custom_texts.iter().enumerate() {
+        if let Some(text) = text {
+            sets[index] = Some(parse_charset_expression(text)?);
+        }
+    }
+    Ok(sets)
+}
+
+/// Expand one charset expression; `?1..?4` are rejected because no custom sets
+/// are supplied (used for the `--custom-charsetN` definitions themselves).
+pub(crate) fn parse_charset_expression(text: &str) -> Result<Vec<u8>> {
+    expand_charset(text, None)
+}
+
+/// Expand one charset expression, resolving `?1..?4` against `custom`. Used by
+/// the W2-003 brute source; order is preserved and duplicates are removed.
+pub(crate) fn expand_charset_with(text: &str, custom: &[Option<Vec<u8>>; 4]) -> Result<Vec<u8>> {
+    expand_charset(text, Some(custom))
+}
+
+fn expand_charset(text: &str, custom: Option<&[Option<Vec<u8>>; 4]>) -> Result<Vec<u8>> {
     if text.is_empty() {
-        return Err(AcxError::Attack("custom charset is empty".to_string()));
+        return Err(AcxError::Attack("charset expression is empty".to_string()));
     }
     let mut output = Vec::new();
     let mut chars = text.chars();
@@ -327,7 +348,7 @@ fn parse_charset_expression(text: &str) -> Result<Vec<u8>> {
         if ch != '?' {
             if !ch.is_ascii() || !(0x20..=0x7e).contains(&(ch as u32)) {
                 return Err(AcxError::Attack(format!(
-                    "custom charset literal {ch:?} is not printable ASCII"
+                    "charset literal {ch:?} is not printable ASCII"
                 )));
             }
             push_unique(&mut output, ch as u8);
@@ -335,57 +356,67 @@ fn parse_charset_expression(text: &str) -> Result<Vec<u8>> {
         }
         let Some(token) = chars.next() else {
             return Err(AcxError::Attack(
-                "custom charset ends with an unescaped `?`".to_string(),
+                "charset expression ends with an unescaped `?`".to_string(),
             ));
         };
-        let set: &[u8] = match token {
-            '?' => b"?",
-            'd' => DIGITS,
-            'l' => LOWER,
-            'u' => UPPER,
-            's' => SYMBOLS,
+        match token {
+            '?' => push_unique(&mut output, b'?'),
+            'd' => extend_unique(&mut output, DIGITS),
+            'l' => extend_unique(&mut output, LOWER),
+            'u' => extend_unique(&mut output, UPPER),
+            's' => extend_unique(&mut output, SYMBOLS),
             'a' => {
-                let mut all = Vec::with_capacity(95);
-                all.extend_from_slice(LOWER);
-                all.extend_from_slice(UPPER);
-                all.extend_from_slice(DIGITS);
-                all.extend_from_slice(SYMBOLS);
-                for byte in all {
-                    push_unique(&mut output, byte);
+                extend_unique(&mut output, LOWER);
+                extend_unique(&mut output, UPPER);
+                extend_unique(&mut output, DIGITS);
+                extend_unique(&mut output, SYMBOLS);
+            }
+            '1'..='4' => {
+                let index = (token as u8 - b'1') as usize;
+                match custom.and_then(|sets| sets[index].as_ref()) {
+                    Some(set) => extend_unique(&mut output, set),
+                    None if custom.is_some() => {
+                        return Err(AcxError::Attack(format!(
+                            "custom charset ?{token} is not defined"
+                        )))
+                    }
+                    None => {
+                        return Err(AcxError::Attack(format!(
+                            "custom charset cannot reference `?{token}`"
+                        )))
+                    }
                 }
-                if output.len() > MAX_CUSTOM_CHARSET_BYTES {
-                    return Err(AcxError::Attack(format!(
-                        "custom charset exceeds {MAX_CUSTOM_CHARSET_BYTES} bytes"
-                    )));
-                }
-                continue;
             }
             other => {
                 return Err(AcxError::Attack(format!(
-                    "custom charset cannot reference `?{other}`"
+                    "unknown charset token `?{other}`"
                 )))
             }
-        };
-        for byte in set {
-            push_unique(&mut output, *byte);
         }
-        if output.len() > MAX_CUSTOM_CHARSET_BYTES {
-            return Err(AcxError::Attack(format!(
-                "custom charset exceeds {MAX_CUSTOM_CHARSET_BYTES} bytes"
-            )));
-        }
+        check_charset_len(&output)?;
     }
     if output.is_empty() {
         return Err(AcxError::Attack(
-            "custom charset is empty after expansion".to_string(),
+            "charset is empty after expansion".to_string(),
         ));
     }
+    check_charset_len(&output)?;
+    Ok(output)
+}
+
+fn check_charset_len(output: &[u8]) -> Result<()> {
     if output.len() > MAX_CUSTOM_CHARSET_BYTES {
         return Err(AcxError::Attack(format!(
-            "custom charset exceeds {MAX_CUSTOM_CHARSET_BYTES} bytes"
+            "charset exceeds {MAX_CUSTOM_CHARSET_BYTES} bytes"
         )));
     }
-    Ok(output)
+    Ok(())
+}
+
+fn extend_unique(output: &mut Vec<u8>, bytes: &[u8]) {
+    for byte in bytes {
+        push_unique(output, *byte);
+    }
 }
 
 fn push_unique(output: &mut Vec<u8>, byte: u8) {
@@ -408,7 +439,7 @@ fn mask_signature(masks: &[String], custom: &[Option<String>; 4]) -> String {
     hex_sha256(material.as_bytes())
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut output = String::with_capacity(digest.len() * 2);
     for byte in digest {

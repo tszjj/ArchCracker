@@ -7,7 +7,7 @@ use acx_core::archive::{
     self, ArchiveFormat, ArchiveSessionFactory, ArchiveSource, RarFactory, SevenZFactory,
     ZipFactory,
 };
-use acx_core::candidates::{CandidateSource, DictionaryStream, MaskSet};
+use acx_core::candidates::{BruteSet, CandidateSource, DictionaryStream, MaskSet};
 use acx_core::checkpoint::{
     ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
 };
@@ -44,7 +44,7 @@ struct Cli {
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     file: PathBuf,
 
-    /// Attack mode: `dict` or `mask`. `--mask` implies mask mode.
+    /// Attack mode: `dict`, `mask`, or `brute`. `--mask`/`--brute` imply their mode.
     #[arg(
         short = 'm',
         long = "mode",
@@ -60,6 +60,19 @@ struct Cli {
     /// Fixed-length mask expression; repeat for multiple masks.
     #[arg(long = "mask", value_name = "EXPR", action = clap::ArgAction::Append)]
     mask: Vec<String>,
+
+    /// Brute-force charset expression (e.g. `?l?d`); literals join the charset.
+    /// Requires `--min-len` and `--max-len`.
+    #[arg(long = "brute", value_name = "CHARSET")]
+    brute: Option<String>,
+
+    /// Minimum brute-force length (>= 1).
+    #[arg(long = "min-len", value_name = "N")]
+    min_len: Option<usize>,
+
+    /// Maximum brute-force length (<= 128).
+    #[arg(long = "max-len", value_name = "N")]
+    max_len: Option<usize>,
 
     /// Custom charset for ?1 (built-in tokens/literals, expanded and deduped).
     #[arg(long = "custom-charset1", value_name = "SET")]
@@ -101,14 +114,32 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> ExitCode {
     let use_mask = !cli.mask.is_empty() || cli.mode == "mask";
-    if cli.mode != "dict" && cli.mode != "mask" {
+    let use_brute = cli.brute.is_some() || cli.mode == "brute";
+    if !matches!(cli.mode.as_str(), "dict" | "mask" | "brute") {
         eprintln!(
-            "acx: unsupported mode `{}` (expected dict or mask)",
+            "acx: unsupported mode `{}` (expected dict, mask, or brute)",
             cli.mode
         );
         return ExitCode::from(EXIT_USAGE);
     }
-    if use_mask {
+    if use_mask && use_brute {
+        eprintln!("acx: --mask and --brute are mutually exclusive");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    if use_brute {
+        if cli.dictionary.is_some() {
+            eprintln!("acx: --dictionary and --brute are mutually exclusive");
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if cli.brute.is_none() {
+            eprintln!("acx: brute mode requires --brute");
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if cli.min_len.is_none() || cli.max_len.is_none() {
+            eprintln!("acx: brute mode requires --min-len and --max-len");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    } else if use_mask {
         if cli.dictionary.is_some() {
             eprintln!("acx: --dictionary and --mask are mutually exclusive");
             return ExitCode::from(EXIT_USAGE);
@@ -121,8 +152,12 @@ fn run(cli: Cli) -> ExitCode {
         eprintln!("acx: dict mode requires --dictionary");
         return ExitCode::from(EXIT_USAGE);
     }
-    if cli.estimate && !use_mask {
-        eprintln!("acx: --estimate is only supported with --mask");
+    if (cli.min_len.is_some() || cli.max_len.is_some()) && !use_brute {
+        eprintln!("acx: --min-len/--max-len require --brute");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    if cli.estimate && !(use_mask || use_brute) {
+        eprintln!("acx: --estimate requires --mask or --brute");
         return ExitCode::from(EXIT_USAGE);
     }
 
@@ -160,7 +195,7 @@ fn run(cli: Cli) -> ExitCode {
     }
 
     if cli.estimate {
-        return estimate_mask(&cli, &info);
+        return estimate_attack(&cli, &info, use_brute);
     }
 
     if !info.has_verification_target() {
@@ -246,7 +281,56 @@ fn run(cli: Cli) -> ExitCode {
     }
 
     let custom_texts = custom_texts(&cli);
-    let (dictionary_fingerprint, attack, source, total, label) = if use_mask {
+    let (dictionary_fingerprint, attack, source, total, label) = if use_brute {
+        let charset_text = cli.brute.as_deref().expect("validated --brute");
+        let min_len = cli.min_len.expect("validated --min-len");
+        let max_len = cli.max_len.expect("validated --max-len");
+        let set = match BruteSet::parse(charset_text, &custom_texts, min_len, max_len) {
+            Ok(set) => set,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let estimate = set.estimate();
+        for warning in &estimate.warnings {
+            eprintln!("WARNING: {warning}");
+        }
+        let (rate, rate_label) = rate_for(info.format);
+        let seconds = estimate.keyspace as f64 / rate;
+        if seconds > 86_400.0 {
+            eprintln!(
+                "WARNING: estimated {} exceeds 24h on {rate_label} at the measured rate",
+                format_duration(seconds)
+            );
+        }
+        println!("Brute charset: {charset_text}");
+        println!("Lengths: {min_len}..={max_len}");
+        println!("Brute keyspace: {}", estimate.keyspace);
+        if !estimate.fits_usize {
+            eprintln!(
+                "acx: brute keyspace {} cannot be executed with the current usize index limit",
+                estimate.keyspace
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+        let attack = AttackFingerprint::new("brute", set.signature());
+        let source = match set.into_source(start_index) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        let total = source.total();
+        (
+            None,
+            attack,
+            Box::new(source) as Box<dyn CandidateSource>,
+            total,
+            "Candidates",
+        )
+    } else if use_mask {
         let set = match MaskSet::parse(&cli.mask, &custom_texts) {
             Ok(set) => set,
             Err(error) => {
@@ -477,6 +561,52 @@ fn rate_for(format: ArchiveFormat) -> (f64, &'static str) {
         ArchiveFormat::Rar4 => (221.5, "RAR4 external"),
         ArchiveFormat::Rar5 => (1_727.2, "RAR5 check"),
     }
+}
+
+fn estimate_attack(cli: &Cli, info: &acx_core::archive::ArchiveInfo, use_brute: bool) -> ExitCode {
+    if use_brute {
+        estimate_brute(cli, info)
+    } else {
+        estimate_mask(cli, info)
+    }
+}
+
+fn estimate_brute(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
+    let charset_text = cli.brute.as_deref().expect("validated --brute");
+    let min_len = cli.min_len.expect("validated --min-len");
+    let max_len = cli.max_len.expect("validated --max-len");
+    let set = match BruteSet::parse(charset_text, &custom_texts(cli), min_len, max_len) {
+        Ok(set) => set,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let estimate = set.estimate();
+    println!("Brute charset: {charset_text}");
+    println!("Lengths: {min_len}..={max_len}");
+    println!("Keyspace: {}", estimate.keyspace);
+    println!("Fits executable index: {}", estimate.fits_usize);
+    for (offset, keyspace) in estimate.per_len.iter().enumerate() {
+        println!("Length {}: {keyspace}", min_len + offset);
+    }
+    for warning in &estimate.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+
+    let (rate, label) = rate_for(info.format);
+    let seconds = estimate.keyspace as f64 / rate;
+    let capacity = rate * 86_400.0;
+    println!("Format: {label} ({rate:.1}/s measured)");
+    println!("ETA: {}", format_duration(seconds));
+    println!("24h capacity: {capacity:.0} candidates");
+    if seconds > 86_400.0 {
+        eprintln!(
+            "WARNING: estimated {} exceeds 24h at the measured rate; reduce the charset or --max-len",
+            format_duration(seconds)
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 fn estimate_mask(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {

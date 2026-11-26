@@ -3,11 +3,16 @@
 
 //! Candidate sources: dictionary, mask, and brute-force (W2).
 
+pub mod brute;
 pub mod dictionary;
 pub mod mask;
 
 use crate::error::Result;
 
+pub use brute::{
+    BruteEstimate, BruteSet, BruteSource, BruteSpec, BruteWarning, MAX_BRUTE_LENGTH,
+    RECOMMENDED_BRUTE_LENGTH,
+};
 pub use dictionary::{Dictionary, DictionaryStream};
 pub use mask::{
     MaskEstimate, MaskSet, MaskSource, MaskSpec, MaskWarning, MAX_CUSTOM_CHARSET_BYTES,
