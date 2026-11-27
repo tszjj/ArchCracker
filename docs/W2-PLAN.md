@@ -128,23 +128,28 @@ W2 前段（W2-002/003/004）有两种做法：
 
 ### W2-007 CPU 快筛补全
 
+> **状态（2026-11-27）**：设计目标已定稿，范围已按 W2-006（已完成，PR #33）后的接口收敛；W2-008 的全量差分/1M 基准在本切片之后，不作为 W2-007 关闭前置。
+
 **实现目标（参考）**
 
-- ZIP：评估/实现 verifier/结构判据，只用于否决；
-- RAR4：评估头加密首头校验可行性；不越过“不解压 RAR”边界，否则继续外部；
-- 7z：复用 W1 头 CRC/首块，补严格模式/计数/错误分类；
+- ZIP：只实现可证明安全的密码 verifier 判据（ZipCrypto header check / AES verifier），先确认 `zip` crate 是否已在完整验证内部做同样检查；
+- 7z：保留 W1 头 CRC/首块探测，补 `full_attempted` 计数与归档级错误分类（结构/I/O/不支持）；候选级 CRC/首块失败统一按 Miss，**不承诺**逐候选区分密码错与 payload 损坏；
+- RAR4：仅评估 `-hp` 头加密首头校验；普通 RAR4 继续外部；不越过“不解压 RAR”边界，否则 no-go；
+- 快筛适配器/计数契约：保留 RAR5/7z 内部判据，不重写引擎；新增 `full_attempted`、`external_attempts`；
 - 命中仍由内置引擎或 `UnRAR t` 完整复核。
 
 **设计目的**
 
-- 批量任务下减少外部进程/完整解压调用；
-- 快筛只否决、不产生命中；RAR 许可边界优先于性能。
+- 批量任务下减少 ZIP 完整解压；RAR4 `-hp` 若 go 则减少外部进程调用；
+- 快筛只否决、不产生命中；RAR 许可边界优先于性能；
+- 小型差分证明 0 误杀/0 漏报，全量语料与 1M 基准由 W2-008 补齐。
 
 ### W2-008 语料/差分/基准
 
 **实现目标（参考）**
 
 - 生成/索引 ZIP/7z/RAR 负例、分卷/SFX、非 ASCII、1GB 条目；
+- 覆盖 W2-007 判据：负例差分证明 0 误杀、strict/default 0 漏报、ZIP/RAR4 before/after 与外部调用计数；
 - ZIP/7z 用内置完整验证，RAR 用外部 `UnRAR t` 做 oracle；
 - 记录各攻击模式 p/s、CPU、RSS、ETA；报告写入 `docs/benchmarks/W2-*.md`；
 - 样本/字典不入库，只记录生成方式和哈希。
@@ -160,7 +165,7 @@ W2 前段（W2-002/003/004）有两种做法：
 
 - 掩码/暴力/混合/规则可用，已知密码 100%；
 - 批量/包间复用/编码变体/严格模式通过语料；
-- CPU 快筛 0 误报、严格模式 0 漏报；
+- CPU 快筛 0 误杀（不拒绝正确密码）、严格模式 0 漏报；完整复核保证 0 误报；全量差分/1M 基准由 W2-008 补齐；
 - 1M 级基准、p/s/CPU/内存/ETA 记录；无 P0/P1；
 - `cargo fmt/clippy/test`、MSRV 1.89、release、cargo-deny、CI 全绿；
 - 许可边界不变：RAR 只外部/独立 check，hashcat 不是 Cargo 依赖，GUI 不引入。
@@ -172,8 +177,8 @@ W1 signoff
    │
    ├─ W2-002 mask ──► W2-004 hybrid/rules
    ├─ W2-003 brute ─┘
-   ├─ W2-006 encoding/strict ──► W2-007 fast filters
-   └─ W2-005 batch/jobs ──► W2-008 evidence
+   ├─ W2-006 encoding/strict ──► W2-007 fast filters ──► W2-008 evidence
+   ├─ W2-005 batch/jobs ────────────────────────────────► W2-008 evidence
 W2-001 GPU: Deferred
 ```
 
