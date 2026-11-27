@@ -404,7 +404,16 @@ impl ArchiveSession for EncodingSession {
         }
         for variant in variants {
             self.counters.attempts.fetch_add(1, Ordering::Relaxed);
-            if self.inner.test_password(&variant)? == PasswordTest::Hit {
+            let result = self.inner.test_password(&variant)?;
+            if self.inner.was_variant_skipped() {
+                // An engine-level encoding skip is a skipped variant, not an
+                // attempt. `job_stats` folds `ArchiveStats::encoding_skipped`
+                // into variants_skipped, so undo the attempt here to keep
+                // attempts = fast_rejected + full_attempted (W2-007 §4.4).
+                self.counters.attempts.fetch_sub(1, Ordering::Relaxed);
+                continue;
+            }
+            if result == PasswordTest::Hit {
                 return Ok(PasswordTest::Hit);
             }
         }
@@ -504,5 +513,75 @@ mod tests {
                 .max_variants(),
             1
         );
+    }
+
+    struct SkipSession {
+        info: ArchiveInfo,
+        skipped: bool,
+    }
+
+    impl ArchiveSession for SkipSession {
+        fn info(&self) -> &ArchiveInfo {
+            &self.info
+        }
+
+        fn test_password(&mut self, _password: &[u8]) -> Result<PasswordTest> {
+            self.skipped = true;
+            Ok(PasswordTest::Miss)
+        }
+
+        fn was_variant_skipped(&self) -> bool {
+            self.skipped
+        }
+    }
+
+    struct SkipFactory;
+
+    impl ArchiveSessionFactory for SkipFactory {
+        fn open(&self) -> Result<Box<dyn ArchiveSession>> {
+            Ok(Box::new(SkipSession {
+                info: ArchiveInfo {
+                    path: std::path::PathBuf::from("stub.rar"),
+                    format: ArchiveFormat::Rar5,
+                    encryption: crate::archive::Encryption::Rar,
+                    selected: None,
+                    whole_archive: true,
+                    header_encrypted: false,
+                    entries: Vec::new(),
+                },
+                skipped: false,
+            }))
+        }
+
+        fn stats(&self) -> ArchiveStats {
+            ArchiveStats {
+                encoding_skipped: 1,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn engine_level_encoding_skip_is_not_an_attempt() {
+        let counters = Arc::new(EncodingCounters::default());
+        let plan = EncodingPlan {
+            format: ArchiveFormat::Rar5,
+            variants: vec![EncodingVariant::Utf8],
+            explicit: false,
+        };
+        let factory = EncodingFactory::new(Arc::new(SkipFactory), plan, Arc::clone(&counters));
+        let mut session = factory.open().expect("session");
+
+        assert_eq!(
+            session.test_password(b"candidate").expect("miss"),
+            PasswordTest::Miss
+        );
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.candidates, 1);
+        assert_eq!(
+            snapshot.attempts, 0,
+            "an engine-level encoding skip must not enter attempts"
+        );
+        assert_eq!(factory.stats().encoding_skipped, 1);
     }
 }

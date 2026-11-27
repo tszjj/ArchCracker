@@ -258,7 +258,11 @@ fn zip_report_stats_counts_variants() {
         stdout.contains("Stats: encoding attempts=2"),
         "stdout: {stdout}"
     );
-    assert!(stdout.contains("fast rejects=0"), "stdout: {stdout}");
+    // W2-007: ZIP now reports its verifier rejects and full attempts instead
+    // of an always-zero placeholder. The exact split depends on the ZipCrypto
+    // 1/256 check-header collision, so verify the contract, not a fixed value.
+    assert!(stdout.contains("zip_verifier="), "stdout: {stdout}");
+    assert!(stdout.contains("full attempted="), "stdout: {stdout}");
 }
 
 #[test]

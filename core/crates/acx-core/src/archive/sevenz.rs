@@ -24,7 +24,7 @@
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 use super::source::ArchiveSource;
-use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats};
+use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats, FilterCounts};
 use crate::error::{AcxError, Result};
 use sevenz_rust2::{Archive, BlockDecoder, EncoderMethod, Error as SevenZError, Password};
 use std::io::{Read, Seek};
@@ -39,6 +39,8 @@ const PROBE_BYTES: u64 = 64 * 1024;
 #[derive(Debug, Default)]
 struct SevenZCounters {
     fast_rejected: AtomicU64,
+    full_attempted: AtomicU64,
+    encoding_skipped: AtomicU64,
 }
 
 /// One open 7z archive, owned by a scheduler worker.
@@ -53,6 +55,8 @@ pub struct SevenZSession {
     /// verification, so a probe false-negative cannot drop a password.
     strict: bool,
     counters: Arc<SevenZCounters>,
+    /// Set when the current variant cannot be encoded as a 7z password.
+    last_variant_skipped: bool,
 }
 
 impl SevenZSession {
@@ -89,6 +93,7 @@ impl SevenZSession {
                 archive: None,
                 strict: false,
                 counters: Arc::new(SevenZCounters::default()),
+                last_variant_skipped: false,
             });
         }
 
@@ -129,6 +134,7 @@ impl SevenZSession {
             archive: Some(archive),
             strict: false,
             counters: Arc::new(SevenZCounters::default()),
+            last_variant_skipped: false,
         })
     }
 
@@ -148,7 +154,12 @@ impl SevenZSession {
 
         let Some(password) = encode_password(password) else {
             // A dictionary entry that is not valid UTF-8 cannot be represented
-            // as a 7z UTF-16 password; it is a miss, not an archive error.
+            // as a 7z UTF-16 password; it is a skipped variant, not a miss to
+            // be counted as an attempt (W2-007 §4.4).
+            self.last_variant_skipped = true;
+            self.counters
+                .encoding_skipped
+                .fetch_add(1, Ordering::Relaxed);
             return Ok(PasswordTest::Miss);
         };
         let block = archive.stream_map.file_block_index[target]
@@ -175,7 +186,9 @@ impl SevenZSession {
         }
 
         // Tier 2: consume the selected entry to EOF so the crate verifies its
-        // CRC32 (and, for the last entry of a block, the block CRC).
+        // CRC32 (and, for the last entry of a block, the block CRC). Entering
+        // this tier is a full verification attempt (W2-007).
+        self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
         let mut verify_file = self.source.reader()?;
         match verify_target(&mut verify_file, archive, target, &password) {
             Ok(()) => Ok(PasswordTest::Hit),
@@ -184,10 +197,17 @@ impl SevenZSession {
         }
     }
 
-    fn test_header_encrypted(&self, password: &[u8]) -> Result<PasswordTest> {
+    fn test_header_encrypted(&mut self, password: &[u8]) -> Result<PasswordTest> {
         let Some(password) = encode_password(password) else {
+            self.last_variant_skipped = true;
+            self.counters
+                .encoding_skipped
+                .fetch_add(1, Ordering::Relaxed);
             return Ok(PasswordTest::Miss);
         };
+        // Header-encrypted archives have no probe tier: `Archive::read` itself
+        // performs the header KDF/CRC check and is the full verification entry.
+        self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
         let mut file = self.source.reader()?;
         let archive = match Archive::read(&mut file, &password) {
             Ok(archive) => archive,
@@ -217,6 +237,7 @@ impl ArchiveSession for SevenZSession {
     }
 
     fn test_password(&mut self, password: &[u8]) -> Result<PasswordTest> {
+        self.last_variant_skipped = false;
         let result = if self.info.header_encrypted {
             self.test_header_encrypted(password)
         } else if self.info.encryption == Encryption::Aes {
@@ -225,6 +246,10 @@ impl ArchiveSession for SevenZSession {
             Err(AcxError::NotEncrypted)
         };
         result.map_err(|error| self.source.classify_incomplete(error))
+    }
+
+    fn was_variant_skipped(&self) -> bool {
+        self.last_variant_skipped
     }
 }
 
@@ -320,14 +345,21 @@ impl ArchiveSessionFactory for SevenZFactory {
             archive: self.archive.clone(),
             strict: self.strict,
             counters: Arc::clone(&self.counters),
+            last_variant_skipped: false,
         }))
     }
 
     fn stats(&self) -> ArchiveStats {
+        let fast_rejected = self.counters.fast_rejected.load(Ordering::Relaxed);
         ArchiveStats {
-            fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
-            external_confirmed: 0,
-            encoding_skipped: 0,
+            fast_rejected,
+            full_attempted: self.counters.full_attempted.load(Ordering::Relaxed),
+            encoding_skipped: self.counters.encoding_skipped.load(Ordering::Relaxed),
+            by_filter: FilterCounts {
+                sevenz_first_block: fast_rejected,
+                ..Default::default()
+            },
+            ..Default::default()
         }
     }
 }
@@ -592,6 +624,7 @@ fn same_archive(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive::FastFilterKind;
     use sevenz_rust2::encoder_options::AesEncoderOptions;
     use sevenz_rust2::{
         ArchiveEntry, ArchiveWriter, EncoderConfiguration, EncoderMethod, SourceReader,
@@ -1049,5 +1082,76 @@ mod tests {
         let error = SevenZFactory::from_info(PathBuf::from("other.7z"), info)
             .expect_err("metadata for another archive must be rejected");
         assert!(matches!(error, AcxError::Unsupported(_)));
+    }
+
+    #[test]
+    fn first_block_probe_counts_fast_rejects_and_full_attempts() {
+        let temp = TempArchive::new("filters");
+        write_7z(
+            temp.path(),
+            &[("hello.txt", HELLO)],
+            true,
+            false,
+            false,
+            false,
+        );
+        let info = SevenZSession::open(temp.path())
+            .expect("open")
+            .info()
+            .clone();
+        let factory =
+            SevenZFactory::from_info(temp.path().to_path_buf(), info).expect("7z factory");
+        let mut session = factory.open().expect("session");
+
+        assert_eq!(
+            session.test_password(b"wrong-password").expect("miss"),
+            PasswordTest::Miss
+        );
+        assert_eq!(
+            session.test_password(PASSWORD.as_bytes()).expect("hit"),
+            PasswordTest::Hit
+        );
+
+        let stats = factory.stats();
+        assert_eq!(stats.fast_rejected, stats.by_filter.total());
+        assert_eq!(stats.by_filter.sevenz_first_block, stats.fast_rejected);
+        assert_eq!(
+            FastFilterKind::SevenZFirstBlock.as_str(),
+            "sevenz_first_block"
+        );
+        assert!(
+            stats.full_attempted >= 1,
+            "hit must enter full CRC: {stats:?}"
+        );
+    }
+
+    #[test]
+    fn strict_mode_disables_first_block_probe_counter() {
+        let temp = TempArchive::new("filters-strict");
+        write_7z(
+            temp.path(),
+            &[("hello.txt", HELLO)],
+            true,
+            false,
+            false,
+            false,
+        );
+        let info = SevenZSession::open(temp.path())
+            .expect("open")
+            .info()
+            .clone();
+        let factory = SevenZFactory::from_info(temp.path().to_path_buf(), info)
+            .expect("7z factory")
+            .with_strict(true);
+        let mut session = factory.open().expect("session");
+
+        assert_eq!(
+            session.test_password(b"wrong-password").expect("miss"),
+            PasswordTest::Miss
+        );
+        let stats = factory.stats();
+        assert_eq!(stats.fast_rejected, 0);
+        assert_eq!(stats.by_filter.sevenz_first_block, 0);
+        assert_eq!(stats.full_attempted, 1);
     }
 }

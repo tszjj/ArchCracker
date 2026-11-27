@@ -645,3 +645,76 @@ fn local_rar4_unicode_password_uses_oem_path() {
     assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
     assert!(stdout.contains(password), "stdout: {stdout}");
 }
+
+/// Read a numeric counter from a W2-007 `Stats:` line.
+fn stat_value(stdout: &str, key: &str) -> u64 {
+    let marker = format!("{key}=");
+    let rest = stdout
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("missing `{key}`: {stdout}"))
+        .1;
+    rest.chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or_else(|_| panic!("bad `{key}`: {stdout}"))
+}
+
+#[test]
+fn local_rar5_fast_filter_counts_external_calls() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let temp = TempDir::new("filter-counts");
+    let hello = temp.join("hello.txt");
+    let archive = temp.join("counts.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    write_dictionary(&dictionary, &["wrong", PASSWORD]);
+    assert!(
+        create_rar(&rar, &archive, &hello, Some(PASSWORD.as_bytes()), &[]),
+        "Rar.exe must create a RAR5 fixture"
+    );
+
+    for (flag, expected_fast, expected_external) in [("", 1, 1), ("--rar-no-fast-reject", 0, 2)] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_acx"));
+        command
+            .args(["-f"])
+            .arg(&archive)
+            .args(["-d"])
+            .arg(&dictionary)
+            .args(["--report-stats"]);
+        if !flag.is_empty() {
+            command.arg(flag);
+        }
+        let output = command.output().expect("run acx");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{flag} exit {:?}\nstdout: {stdout}",
+            output.status.code()
+        );
+        assert_eq!(
+            stat_value(&stdout, "fast rejects"),
+            expected_fast,
+            "{stdout}"
+        );
+        assert_eq!(
+            stat_value(&stdout, "rar5_check_value"),
+            expected_fast,
+            "{stdout}"
+        );
+        assert_eq!(
+            stat_value(&stdout, "external attempts"),
+            expected_external,
+            "{stdout}"
+        );
+        let full = stat_value(&stdout, "full attempted");
+        assert!(full >= expected_external, "{stdout}");
+        assert_eq!(
+            stat_value(&stdout, "encoding attempts"),
+            stat_value(&stdout, "fast rejects") + full,
+            "{stdout}"
+        );
+    }
+}

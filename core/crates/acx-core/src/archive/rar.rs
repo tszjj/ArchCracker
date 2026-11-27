@@ -12,7 +12,7 @@
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, PasswordTest};
 use super::rar5_verify::Rar5Verifier;
 use super::source::ArchiveSource;
-use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats};
+use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats, FilterCounts};
 use crate::engines::external::{self, CancelToken, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
@@ -26,6 +26,8 @@ use std::time::Duration;
 #[derive(Debug, Default)]
 struct RarCounters {
     fast_rejected: AtomicU64,
+    full_attempted: AtomicU64,
+    external_attempts: AtomicU64,
     external_confirmed: AtomicU64,
     encoding_skipped: AtomicU64,
 }
@@ -40,6 +42,8 @@ pub struct RarSession {
     fast: Option<Rar5Verifier>,
     fast_filter: bool,
     counters: Arc<RarCounters>,
+    /// Set when the OEM code page cannot represent the current variant.
+    last_variant_skipped: bool,
 }
 
 impl RarSession {
@@ -99,6 +103,7 @@ impl RarSession {
             fast,
             fast_filter,
             counters,
+            last_variant_skipped: false,
         }
     }
 
@@ -115,6 +120,7 @@ impl ArchiveSession for RarSession {
     }
 
     fn test_password(&mut self, password: &[u8]) -> Result<PasswordTest> {
+        self.last_variant_skipped = false;
         if !self.info.whole_archive {
             return Err(AcxError::NotEncrypted);
         }
@@ -123,6 +129,9 @@ impl ArchiveSession for RarSession {
         // represented through stdin; report it as a miss rather than silently
         // testing a truncated password.
         if password_has_line_break(password) {
+            // Entered the full path but cannot be passed through stdin; keep
+            // the attempts equation balanced (never a fast-filter rejection).
+            self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
             return Ok(PasswordTest::Miss);
         }
 
@@ -144,11 +153,18 @@ impl ArchiveSession for RarSession {
         // A candidate that the OEM code page cannot represent (or a raw
         // non-UTF-8 variant) is a miss for this variant, not a job failure.
         let Ok(encoded) = external::encode_password(password) else {
+            self.last_variant_skipped = true;
             self.counters
                 .encoding_skipped
                 .fetch_add(1, Ordering::Relaxed);
             return Ok(PasswordTest::Miss);
         };
+        // Every external invocation is a full verification attempt. Count it
+        // before the call so cancelled/timed-out attempts are still visible.
+        self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
+        self.counters
+            .external_attempts
+            .fetch_add(1, Ordering::Relaxed);
         let output = external::run_cancellable(
             &self.engine,
             test_args(&self.path),
@@ -183,6 +199,10 @@ impl ArchiveSession for RarSession {
 
     fn set_cancel_token(&mut self, token: CancelToken) {
         self.cancel = Some(token);
+    }
+
+    fn was_variant_skipped(&self) -> bool {
+        self.last_variant_skipped
     }
 }
 
@@ -302,10 +322,17 @@ impl ArchiveSessionFactory for RarFactory {
     }
 
     fn stats(&self) -> ArchiveStats {
+        let fast_rejected = self.counters.fast_rejected.load(Ordering::Relaxed);
         ArchiveStats {
-            fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
+            fast_rejected,
+            full_attempted: self.counters.full_attempted.load(Ordering::Relaxed),
+            external_attempts: self.counters.external_attempts.load(Ordering::Relaxed),
             external_confirmed: self.counters.external_confirmed.load(Ordering::Relaxed),
             encoding_skipped: self.counters.encoding_skipped.load(Ordering::Relaxed),
+            by_filter: FilterCounts {
+                rar5_check_value: fast_rejected,
+                ..Default::default()
+            },
         }
     }
 }
@@ -642,6 +669,7 @@ fn engine_failure(action: &str, output: &ExternalOutput) -> AcxError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive::FastFilterKind;
 
     #[test]
     fn preflight_arguments_never_contain_a_password() {
@@ -853,5 +881,14 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, AcxError::External(_)));
+    }
+
+    #[test]
+    fn rar5_filter_has_stable_label_and_bucket() {
+        let mut counts = FilterCounts::default();
+        counts.bump(FastFilterKind::Rar5CheckValue);
+        assert_eq!(counts.rar5_check_value, 1);
+        assert_eq!(counts.total(), 1);
+        assert_eq!(FastFilterKind::Rar5CheckValue.as_str(), "rar5_check_value");
     }
 }

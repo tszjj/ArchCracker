@@ -586,11 +586,16 @@ fn exit_for_report(report: &JobReport, report_stats: bool) -> ExitCode {
 
 fn format_stats(stats: &acx_core::job::JobStats) -> String {
     format!(
-        "encoding attempts={} (candidates={}, skipped variants={}), fast rejects={}, external confirms={}",
+        "encoding attempts={} (candidates={}, skipped variants={}), fast rejects={} [zip_verifier={}, sevenz_first_block={}, rar5_check_value={}], full attempted={}, external attempts={}, external confirms={}",
         stats.encoding.attempts,
         stats.encoding.candidates,
         stats.encoding.variants_skipped,
         stats.fast_rejected,
+        stats.by_filter.zip_verifier,
+        stats.by_filter.sevenz_first_block,
+        stats.by_filter.rar5_check_value,
+        stats.full_attempted,
+        stats.external_attempts,
         stats.external_confirmed
     )
 }

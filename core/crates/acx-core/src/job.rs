@@ -10,8 +10,8 @@
 //! [`JobReport`] themselves.
 
 use crate::archive::{
-    self, ArchiveFormat, ArchiveInfo, ArchiveSessionFactory, ArchiveSource, PasswordTest,
-    RarFactory, SevenZFactory, ZipFactory,
+    self, ArchiveFormat, ArchiveInfo, ArchiveSessionFactory, ArchiveSource, FilterCounts,
+    PasswordTest, RarFactory, SevenZFactory, ZipFactory,
 };
 use crate::candidates::{
     BruteSet, CandidateSource, DictionaryStream, HybridSet, MaskSet, MAX_BATCH_BYTES,
@@ -139,7 +139,10 @@ pub enum JobStatus {
 pub struct JobStats {
     pub encoding: EncodingStats,
     pub fast_rejected: u64,
+    pub full_attempted: u64,
+    pub external_attempts: u64,
     pub external_confirmed: u64,
+    pub by_filter: FilterCounts,
 }
 
 #[derive(Debug)]
@@ -678,9 +681,29 @@ fn job_stats(
     JobStats {
         encoding,
         fast_rejected: archive.fast_rejected.saturating_sub(baseline.fast_rejected),
+        full_attempted: archive
+            .full_attempted
+            .saturating_sub(baseline.full_attempted),
+        external_attempts: archive
+            .external_attempts
+            .saturating_sub(baseline.external_attempts),
         external_confirmed: archive
             .external_confirmed
             .saturating_sub(baseline.external_confirmed),
+        by_filter: FilterCounts {
+            zip_verifier: archive
+                .by_filter
+                .zip_verifier
+                .saturating_sub(baseline.by_filter.zip_verifier),
+            sevenz_first_block: archive
+                .by_filter
+                .sevenz_first_block
+                .saturating_sub(baseline.by_filter.sevenz_first_block),
+            rar5_check_value: archive
+                .by_filter
+                .rar5_check_value
+                .saturating_sub(baseline.by_filter.rar5_check_value),
+        },
     }
 }
 
@@ -690,9 +713,7 @@ fn build_factory(
     spec: &JobSpec,
 ) -> Result<Arc<dyn ArchiveSessionFactory>> {
     match info.format {
-        ArchiveFormat::Zip => Ok(Arc::new(ZipFactory {
-            path: archive.to_path_buf(),
-        })),
+        ArchiveFormat::Zip => Ok(Arc::new(ZipFactory::new(archive.to_path_buf()))),
         ArchiveFormat::SevenZ => {
             let factory = SevenZFactory::from_info(archive.to_path_buf(), info.clone())?
                 .with_strict(spec.strict);

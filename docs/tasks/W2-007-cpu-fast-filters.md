@@ -1,6 +1,6 @@
 # W2-007：CPU 快筛补全 — 设计目标
 
-- 状态：设计目标已定稿（2026-11-27，范围已按 W2-006 合并后的接口收敛），尚未实现
+- 状态：实现完成（2026-11-27，分支 `feat/w2-007-cpu-fast-filters`）；设计目标已按 W2-006 合并后的接口收敛
 - 日期：2026-11-27
 - 门禁：属于 W2 准出项；界面之前完成
 - 角色：core-engineer、reviewer；architect 复核判据边界与断点签名；release 复核 RAR 许可不变
@@ -43,6 +43,9 @@
 
 每个判据必须:
   - 受 --strict 统一关闭（含仅关 RAR5 的精细开关语义）
+    例外：可证明精确、不存在漏报的判据不关闭，但必须在本任务文档中显式登记；
+    当前唯一例外是 ZIP verifier（zip crate 的 check header / AES verifier），
+    F5 的「否决计数为 0」只针对有漏报风险的判据
   - 写入快筛计数（按格式、按判据分别计数）
   - 若判据有可配置参数，纳入断点指纹签名；无可配置参数时不改变默认签名
 ```
@@ -52,10 +55,10 @@
 | # | 功能目标 | 衡量方式 |
 |---|---|---|
 | F1 | 统一快筛计数/严格模式适配层，ZIP（新增）/7z/RAR5（现有）判据接入 | 三种格式的否决都进入同一统计契约，按格式/判据可区分；现有 RAR5/7z 内部判据保留，不强制重写 |
-| F2 | ZIP：仅实现可证明安全的密码 verifier 判据 | 负例上被否决的候选经完整验证确认无正确密码；给出误放行率与适用格式；不把未认证头字段/签名启发式当可靠否决 |
+| F2 | ZIP：仅接入可证明安全的密码 verifier 判据 | 实现记录确认 `zip` crate 已在完整验证内部做同样检查，故不新增重复判据，只把其否决计入 `zip_verifier`；负例上被否决的候选经完整验证确认无正确密码；不把未认证头字段/签名启发式当可靠否决 |
 | F3 | 7z：保留头 CRC/首块探测，补计数与**归档级**错误分类 | 只区分归档级「结构/损坏、I/O、不支持」；候选级 CRC/首块失败统一按 Miss/候选被拒，**不承诺**逐候选区分密码错与 payload 损坏 |
 | F4 | RAR4：评估 `-hp` 头加密首头校验可行性 | 产出 go/no-go 与证据；普通 RAR4（非 `-hp`）继续外部 `UnRAR t`；若 go，不越过「不解压 RAR」边界 |
-| F5 | 严格模式覆盖本切片新增判据 | `--strict` 下新增判据全部不执行，快筛否决计数为 0 |
+| F5 | 严格模式覆盖本切片新增判据 | `--strict` 下所有**有漏报风险**的新增判据不执行、其否决计数为 0；ZIP verifier 作为已登记的精确判据例外继续工作（见 §2） |
 | F6 | 计数接入单任务与批量报告 | 报告含各判据否决数、`full_attempted`、`external_attempts`；公式见 §4.4 |
 
 ## 4. 非功能性目标
@@ -149,15 +152,31 @@ external_attempts ⊆ full_attempted（RAR 外部路径；不要与 full_attempt
 
 RAR 仍只通过外部未修改的 UnRAR 进程，不解压、不链接、不复制源码；hashcat 不作为 Cargo 依赖；命中复核路径不变；许可边界相对 W1/W2 不变。`--strict` 关闭范围与 RAR4 `-hp` 可行性结论需 architect 复核，发布前由 release 复核 RAR 许可不变。无新增依赖预期；若 RAR4 评估需要新组件（如 AES 解密）须登记 `docs/licensing.md` 并单独评审。
 
+## 实现记录（2026-11-27）
+
+1. **统一契约**：新增 `acx_core::archive::filters`，以 `FastFilterKind`（`zip_verifier` / `sevenz_first_block` / `rar5_check_value`）与 `FilterCounts` 标识和计数判据；`ArchiveStats` / `JobStats` 增加 `full_attempted`、`external_attempts` 与 `by_filter`，并在 `job_stats()` 中按 baseline 差分汇总。所有值按编码变体计数，满足 `attempts = fast_rejected + full_attempted`、`external_attempts ⊆ full_attempted`。审阅后新增 `ArchiveSession::was_variant_skipped()`：7z 非 UTF-8 与 RAR OEM 不可表示变体由引擎标记跳过，包装层撤销其 `attempts`，避免与 `skipped` 双重计数。
+2. **ZIP**：确认 `zip` crate 的 `by_index_decrypt` 已在完整解压前完成 ZipCrypto 12 字节 check header 与 AES 2 字节 verifier 检查（`archive/zip.rs:4-12`）。因此**没有新增重复判据**（无重复 KDF/解压收益，P1 收益前提不成立），改为把 `InvalidPassword` 的否决计入 `zip_verifier` 快筛桶、把通过 verifier 后进入完整读取的尝试计入 `full_attempted`。`ZipFactory` 现在共享计数器并实现 `stats()`；此前 ZIP 计数恒 0 的问题消除。该 verifier 对错误密码是精确的（不会误杀），因此 `--strict` 不关闭它——本切片未新增任何有漏报风险的 ZIP 判据。
+3. **7z**：保留首块探测与完整 CRC 两级结构不变；探测否决继续计入 `sevenz_first_block`，进入完整 CRC（含头加密路径的 `Archive::read`）计 `full_attempted`。`--strict` 仍跳过探测（单测验证 `fast_rejected=0`）。候选级错误仍统一按 Miss，归档级错误分类保持原实现，未承诺逐候选区分密码错/损坏。
+4. **RAR5**：现有 ASCII-only check 快筛保持不变，以 `rar5_check_value` 桶接入统一契约；外部进程每次调用前计 `external_attempts` 与 `full_attempted`，命中才计 `external_confirmed`。`--strict` / `--rar-no-fast-reject` 语义不变。
+5. **RAR4**：产出 no-go 结论与证据，见 [`docs/analysis/rar4-hp-header-feasibility.md`](../analysis/rar4-hp-header-feasibility.md)；RAR4 含 `-hp` 继续走外部 `UnRAR t`，无新依赖。
+6. **断点签名**：没有引入可配置判据参数，只复用 W2-006 已有的 encoding/strict/rar_no_fast_reject 规范化签名，schema v2 未升版，默认签名不变。
+7. **CLI / 批量**：`--report-stats` 与批量每任务报告新增按判据否决数、`full attempted`、`external attempts`；旧字段文本保持兼容。
+8. **测试**：新增 `archive/filters.rs` 2 个单测、ZIP 2 个、7z 2 个、RAR 1 个、`encoding.rs` 编码跳过 1 个；E2E `tests/w2_007_filters.rs` 5 个（ZIP 否决/命中、7z 默认/严格、批量字段）与 `w1_rar_external.rs` RAR 计数 1 个（本机 UnRAR 6.24 实跑通过）；调整 `w2_006_encoding.rs` 中旧的「ZIP fast rejects 恒 0」断言为契约检查。全量 `cargo test --workspace --locked` 通过（core 165）。
+9. **验证记录**：质量门禁、计数公式、小型差分与实测输出见 [`docs/benchmarks/W2-007.md`](../benchmarks/W2-007.md)。ZIP before/after 前提不成立（crate 已做同样检查），不宣称吞吐收益；全量差分语料与 1M 基准留 W2-008；非 Windows 平台运行时未验证。
+
 ## 9. 交接
 
 ```text
-STATUS: planned
+STATUS: done（实现完成；PR 与评审记录见 PR 描述）
 BRANCH: feat/w2-007-cpu-fast-filters
-CHANGED（预期）: core/crates/acx-core/src/archive/{zip,sevenz,rar,mod}.rs、
-                 job.rs、acx-cli/src/main.rs、acx-cli/tests/w2_007_filters.rs、
-                 docs/tasks/W2-007-cpu-fast-filters.md、docs/PROJECT-GUIDE.md
+CHANGED: core/crates/acx-core/src/archive/{filters,mod,zip,sevenz,rar}.rs、
+         core/crates/acx-core/src/job.rs、core/crates/acx-cli/src/main.rs、
+         core/crates/acx-cli/examples/w1_latency.rs、
+         core/crates/acx-cli/tests/w2_007_filters.rs、
+         core/crates/acx-cli/tests/w2_006_encoding.rs、
+         docs/tasks/W2-007-cpu-fast-filters.md、docs/PROJECT-GUIDE.md、
+         docs/analysis/rar4-hp-header-feasibility.md
 ROLE: core-engineer + reviewer；architect 复核判据边界；release 复核许可
-NEXT: M1 契约与 ZIP 判据清单定稿；W2-008 全量语料留到本切片之后
-RISKS: ZIP 快筛收益未证实、7z 错误分类越界、RAR4 越界/新依赖、计数口径漂移
+NEXT: W2-008 补齐全量差分语料、1M 基准与 ZIP/RAR4 前后对照（若届时新增判据）
+RISKS: 计数口径漂移、ZIP verifier 1/256 头碰撞导致 fast/full 分配波动、7z 头加密路径未做 probe、RAR4 始终外部调用
 ```
