@@ -35,7 +35,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 | W3-003 垂直切片 | 待启动 | Setup/Run/Result、ZIP 字典攻击、暂停/停止/命中复制 |
 | W3-004 攻击模式扩展 | 待启动 | 掩码/暴力/混合、编码变体、strict/resume、估算 |
 | W3-005 报告与体验 | 待启动 | 统计/报告导出、错误分类、键盘/高 DPI/脱敏日志 |
-| W3-006 稳定与签核 | 待启动 | sidecar 接口/崩溃隔离、性能与 UI 冒烟、W3-SIGNOFF |
+| W3-006 稳定与签核 | 待启动 | sidecar 开关预留、性能与 UI 冒烟、W3-SIGNOFF |
 
 ---
 
@@ -51,7 +51,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
   - `acx.h` 带 `ACX_ABI_VERSION`、结构体 `struct_size/version`、不透明句柄；
   - `acx_create/acx_destroy/acx_start/acx_pause/acx_resume/acx_stop/acx_status/acx_version/acx_last_error` 可用；
   - `AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`；
-  - `AcxInput` 预留 `path/fd/uri` 形状与 `reserved`，v1 只实现 `path`，其他 kind 返回 `ACX_ERR_UNSUPPORTED`；
+  - `AcxInput` 在 v1 冻结完整 `path/fd/uri` 抽象：判别式、字段、生命周期、错误语义与 `reserved` 全部定义；Windows 桌面先使用 `path`，Android/HarmonyOS 后续接入不破坏 ABI；
   - `on_progress/on_hit/on_log` 回调在 `stop` 返回后不再触发；Rust panic 转 `ACX_ERR_PANIC`；
   - C/C++ header smoke 与 C# P/Invoke smoke 通过；不引入 hashcat/UI 依赖。
 - Out of scope: GUI 界面、Android JNI、HarmonyOS NAPI、安装包、W4 随包二进制。
@@ -65,8 +65,8 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 - Acceptance:
   - .NET 10 + Avalonia 12 工程可在 Windows x64 构建启动；
   - MVVM 分层：Views / ViewModels / Models / Services / NativeBridge，NativeBridge 不引用 Avalonia 控件类型；
-  - `[LibraryImport]` 从程序目录加载 `acx.dll`，校验版本/ABI；句柄与 delegate 生命周期有单测；
-  - native 回调封送到 UI 线程并限流 ~10 Hz；错误码映射与 `frontends/shared/` 词条统一；
+  - `[LibraryImport]` 从程序目录加载 `acx.dll`，校验版本/ABI；句柄生命周期有单测；
+  - `UnmanagedCallersOnly` 与 `Marshal.GetFunctionPointerForDelegate` 在 C# smoke 中实测生命周期、稳定性与性能后择一，文档阶段不预设；native 回调封送到 UI 线程并限流 ~10 Hz；错误码映射与 `frontends/shared/` 词条统一；
   - zh/en 与浅色/深色基础可切换；日志默认无完整密码。
 - Out of scope: 完整 Setup/Run/Result 业务流程、攻击模式扩展、sidecar 实装、安装包。
 
@@ -83,7 +83,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
   - Result 屏显示并复制密码，展示命中复核方式；错误归档给出明确分类；
   - ZIP 已知密码命中、错误密码未命中、未加密/损坏/缺卷提示三类 E2E 用例通过；
   - GUI 与 CLI 对同一归档/字典结果一致。
-- Out of scope: 掩码/暴力/混合、strict/encoding/resume、统计报告导出、自动解压、RAR。
+- Out of scope: 掩码/暴力/混合、strict/encoding/resume、统计报告导出、自动解压（项目整体不做）、RAR。
 
 ### W3-004：攻击模式与恢复选项
 
@@ -110,7 +110,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
   - 错误区分归档级分类与候选级 Miss，不承诺逐候选"密码错/损坏"二分；
   - `Ctrl+O`/`F5`/`Esc`、Tab 焦点、可访问名称可用；高 DPI 与深色/zh-en 冒烟通过；
   - 运行中不弹模态；日志/报告/崩溃转储默认不含完整密码；
-  - 自动解压策略给出结论：ZIP/7z 是否启用、RAR 是否因许可边界继续禁用，写进任务文档。
+  - 结果页明确"不提供自动解压"；只提供打开归档目录与导出报告，RAR 仅保留 `UnRAR t` 复核语义。
 - Out of scope: W4 安装包与签名、随包 UnRAR/hashcat、跨前端 i18n 全量迁移。
 
 ### W3-006：稳定性、崩溃隔离与 W3 签核
@@ -120,7 +120,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 - Scope: sidecar 开关、崩溃诊断、性能/UI 冒烟、CI、W3-SIGNOFF、状态同步
 - Inputs: W3-001…005 全部产物、`docs/W2-EXIT-PLAN.md` 的签核模板
 - Acceptance:
-  - 进程内 DLL 为主路径；sidecar 至少完成接口/配置与崩溃隔离验证，若未实装则明确标注；
+  - 进程内 DLL 为主路径；sidecar 只预留开关与配置，W3 不实现真实进程，P2 再实现；
   - 长任务 UI 不卡，取消请求观察 ≤200 ms，进度刷新 ~10 Hz；连续运行/大归档冒烟有记录；
   - Windows CI 增加 .NET 构建/测试（或明确记录未加入原因），Rust 6 job 不回归；
   - 许可复核：RAR 外部边界、hashcat 非依赖、无新增不兼容依赖；
@@ -169,6 +169,6 @@ W3-003 垂直切片 ──► W3-004 攻击模式 ──► W3-005 报告体验 
 1. C ABI v1 若 Q3 之前未冻结，W3-002/003 会被接口变更反复返工；
 2. Avalonia 12 / .NET 10 版本需锁定，CI 机器需验证 SDK；
 3. 回调生命周期与 delegate 存活是 P0 风险，必须在 W3-001/002 单测覆盖；
-4. RAR 自动解压与 `UnRAR t` 许可边界冲突，W3 首版不启用 RAR 自动解压；
+4. 项目不实现自动解压；`windows-plan.md` 中 `UnRAR.exe x` 的历史描述仅作旧资料，与 W3/W4 交付无关；
 5. W3 本地验证先于 CI 扩展，但正式签核必须有 CI 证据；
 6. `windows-gui` 分支是隔离分支；不得从 `main` 直接提交 GUI 文件，PR 目标在 W3 签核前不得指向 `main`。

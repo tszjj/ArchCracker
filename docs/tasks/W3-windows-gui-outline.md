@@ -12,7 +12,7 @@
 
 ### 1.1 目标
 
-在 Windows x64 上提供可安装的 Avalonia 12（.NET 10）桌面壳：用户拖放归档 → 选择攻击模式与参数 → 后台恢复 → 实时进度/运行控制 → 查看并复制命中密码 →（条件满足时）自动解压。GUI 只通过稳定 C ABI 调用 `acx-core`，不复制核心算法、错误码或攻击参数定义。
+在 Windows x64 上提供可安装的 Avalonia 12（.NET 10）桌面壳：用户拖放归档 → 选择攻击模式与参数 → 后台恢复 → 实时进度/运行控制 → 查看并复制命中密码、导出报告。GUI 只通过稳定 C ABI 调用 `acx-core`，不复制核心算法、错误码或攻击参数定义。
 
 ### 1.2 非目标
 
@@ -20,6 +20,7 @@
 - 不在本分支做 W4 安装包、签名、随包 UnRAR/hashcat（但设计需预留接口与路径）；
 - 不在本分支引入 Linux/macOS/Android/HarmonyOS SDK；同一套 Avalonia 代码后续复用即可；
 - 不做在线查询、遥测、自动更新、共享密码库；
+- **不实现自动解压**；命中后只展示/复制密码、导出报告，用户可自行解压；
 - 不在 UI 线程执行解密，不把完整密码写入日志或普通诊断输出。
 
 ## 2. 整体架构
@@ -43,7 +44,7 @@
 ### 2.1 进程模型
 
 - **默认进程内**：GUI 通过 `[LibraryImport]` 加载随程序目录的 `acx.dll`；DLL 从程序目录加载并校验哈希。
-- **可选 sidecar**：保留开关，把内核放到独立进程以隔离崩溃；首版可只定义接口与配置，不强制实现。
+- **可选 sidecar**：只预留开关与配置，W3 不启动真实进程；实现推迟到 P2。
 - 所有原生长任务在后台线程；UI 线程只接收限流后的进度（约 10 Hz）。
 - `acx.dll` 回调不得直接操作 UI 控件；经 `Dispatcher.UIThread.Post`/`InvokeAsync` 封送。
 - C# 回调委托/函数指针生命周期由 `NativeBridge` 持有，直到 `stop`/`destroy` 完成且回调不再触发。
@@ -60,7 +61,7 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 | Views | `Views/` | 主界面、运行、结果三屏；对话框与错误提示 |
 | ViewModels | `ViewModels/` | 表单状态、命令、状态机、进度/报告映射；不持有原生线程逻辑 |
 | Domain Models | `Models/` | `ArchiveInfo`、`AttackConfig`、`JobReport`、`ErrorInfo`；与 C ABI schema 对齐 |
-| Services | `Services/` | 归档预检、任务启动/暂停/停止/续跑、设置、报告导出、自动解压策略 |
+| Services | `Services/` | 归档预检、任务启动/暂停/停止/续跑、设置、报告导出 |
 | NativeBridge | `Native/` | P/Invoke 声明、回调封送、句柄生命周期、错误码转换、版本/能力探测 |
 | Diagnostics | `Diagnostics/` | 脱敏日志、崩溃转储开关、性能计数；默认不记录完整密码 |
 | Shared UI | `frontends/shared/` | 设计 token、错误码映射、i18n 词条、测试向量（跨前端复用） |
@@ -74,7 +75,8 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 - 结构体带 `struct_size`/`version`；未知字段忽略；破坏性布局变更才提升 ABI 版本。
 - 句柄不透明，`create`/`destroy` 成对；一个 handle 同时只允许一个 `start`；`pause`/`resume`/`stop` 可跨线程调用。
 - 回调：`on_progress`、`on_hit`、`on_log`；`stop` 返回后不再触发回调。
-- 字符串：v1 桌面路径用 UTF-8 NUL 结尾；二进制密码用 `ptr + len`；C# 侧不做隐式截断。
+- **C ABI v1 必须冻结完整 `AcxInput{path|fd|uri}` 抽象**（项目支持多平台）：Windows 桌面主用 `path`，Android 走 `fd`，HarmonyOS 走 `uri`；v1 即定义判别式、字段、生命周期与错误语义，避免后续平台接入时破坏 ABI。
+- 字符串：v1 路径/URI 用 UTF-8 NUL 结尾；二进制密码用 `ptr + len`；fd 用平台原生整数句柄；C# 侧不做隐式截断。
 - Rust panic 必须 `catch_unwind` 转为 `ACX_ERR_PANIC`，不得跨 FFI。
 - 错误码登记表与前端映射统一放 `docs/architecture.md`/`frontends/shared/`，GUI 不得自定义一套数值。
 - 需暴露 W2 已实现的：`--encoding-variants`、`strict`、`rar_no_fast_reject`、`report_stats`、checkpoint/resume、攻击模式（字典/掩码/暴力/混合）、估算（keyspace/ETA/空间）、统计字段（按判据桶、`full_attempted`、`external_attempts`）。
@@ -86,7 +88,8 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 ### 5.1 NativeBridge
 
 - 用 `LibraryImport`/`DllImport` 加载程序目录 `acx.dll`；启动时校验 `acx_version()` 与 ABI v1 兼容，不满足则进入不可用状态并提示。
-- 持有 `GCHandle`/delegate 生命周期；封送 `AcxAttackSpec` 与回调；把 native `uint8_t*` 密码复制为 `byte[]` 后交 ViewModel。
+- 回调模型（`UnmanagedCallersOnly` 或 `Marshal.GetFunctionPointerForDelegate`）在 W3-001/002 smoke 中按 .NET 10 生命周期、稳定性与性能实测选择，不在设计阶段预先锁定。
+- 持有选定回调模型的生命周期；封送 `AcxAttackSpec` 与回调；把 native `uint8_t*` 密码复制为 `byte[]` 后交 ViewModel。
 - 所有 native 调用返回统一 `Result<T, ErrorInfo>`；`AcxStatus` → `ErrorInfo` 映射集中在 `frontends/shared/`。
 - 回调线程与 UI 线程解耦；日志默认脱敏，密码只在结果对象中存在。
 
@@ -108,7 +111,7 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 
 - 大字展示密码、复制按钮、编码(bytes → 显示文本)说明；命中来源与完整复核方式（内置解压 / `UnRAR t`）。
 - 报告：耗时、尝试数、统计字段、归档/攻击指纹、checkpoint 状态；导出文本报告不含明文密码日志之外的额外敏感信息。
-- 打开输出目录；自动解压为独立动作，需在许可/边界复核后启用（见 §7）。
+- 提供“打开归档所在目录”和“导出报告”；不提供自动解压。
 
 ### 5.5 设置与持久化
 
@@ -134,7 +137,7 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 ## 7. 许可与安全边界
 
 - RAR 仍只通过外部未修改 `UnRAR.exe` 进程命中复核；不链接/复制 unRAR 源码，不做自研 RAR 解压。
-- `windows-plan.md:83` 曾写 `UnRAR.exe x` 用于"命中后解压"，而 `ADR-0005`/`docs/licensing.md` 明确 `t` 只做测试。W3 首版**不启用 RAR 自动解压**；如需启用，必须单独评审许可边界并更新 ADR/许可文档。
+- 项目决策：**不实现自动解压**。`windows-plan.md:83` 中 `UnRAR.exe x` 的历史描述仅作旧资料，不是 W3/W4 交付内容；RAR 继续只用 `UnRAR.exe t` 做完整复核，不解压。
 - hashcat 仅外部进程、不是 Cargo 依赖；W2-001 Deferred 状态下 GUI 不暴露 GPU 后端开关。
 - 默认零网络；不自动下载 UnRAR/hashcat 或更新。
 - DLL/so 从程序目录加载并校验哈希；sidecar 进程只接受本地受控参数。
@@ -148,7 +151,7 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 | P0 | Setup：归档选择/预检 + 字典攻击 + 运行控制 + Result 命中 | 拖放 ZIP/7z，字典已知密码命中，暂停/停止/复制可用 |
 | P1 | 掩码/暴力/混合/编码变体/strict/resume/checkpoint | 四种模式可运行；续跑拒绝不匹配配置 |
 | P1 | 统计/估算/报告导出与日志脱敏 | 计数与 CLI 一致；报告可复核；日志无完整密码 |
-| P2 | 批量队列、sidecar 崩溃隔离、自动解压（许可复核后） | 独立验收；不阻塞 W3 首版 |
+| P2 | 批量队列、sidecar 真实进程隔离 | 独立验收；不阻塞 W3 首版；自动解压不在项目范围内 |
 | W4 交接 | 安装包、签名、随包 UnRAR/hashcat、崩溃转储、AV | W4 任务文档验收 |
 
 建议切片顺序：ABI v1 → 工程骨架 → Setup/预检 → Run/字典 → Result → 控制/断点 → 攻击模式扩展 → 统计/报告 → P2 项。每个切片必须可独立构建与验证。
@@ -170,9 +173,9 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 - 本仓库未启用服务端分支保护，但本地 `pre-push` 钩子禁止直接 push `main`；所有合并通过 PR。
 - 与核心/ABI 相关的改动需在 PR 中说明跨语言影响，并由 architect/release 复核许可与接口稳定性。
 
-## 11. 待确认问题
+## 11. 已确认决策（2026-11-28）
 
-1. C ABI v1 是否需要 `AcxInput{path|fd|uri}` 的完整抽象？W3 桌面版可先只冻结 path 形式，但结构需预留扩展字段。
-2. sidecar 首版是真实进程还是仅接口预留？建议先预留开关，P2 实现。
-3. 自动解压何时启用？需先解决 `UnRAR.exe x` 与"t 只做测试"的许可文档冲突。
-4. NativeBridge 的回调模型选择 `UnmanagedCallersOnly` 还是 `Marshal.GetFunctionPointerForDelegate`：需在 ABI v1 smoke 中验证 .NET 10 下的生命周期与性能。
+1. **C ABI v1 需要完整 `AcxInput{path|fd|uri}` 抽象**。项目支持多平台，v1 必须一次性冻结判别式、字段、生命周期与错误语义；Windows 桌面先使用 `path`，Android/HarmonyOS 后续接入不再破坏 ABI。
+2. **sidecar 首版仅预留开关**，W3 不实现真实进程；真实进程隔离推迟到 P2。
+3. **项目不实现自动解压**。命中后只展示/复制密码与导出报告；RAR 继续只用 `UnRAR.exe t` 做复核。
+4. **NativeBridge 回调模型由实测决定**。在 W3-001/002 的 C# smoke 中按 .NET 10 下的生命周期、稳定性与性能选择 `UnmanagedCallersOnly` 或 `Marshal.GetFunctionPointerForDelegate`，不在文档阶段预设。

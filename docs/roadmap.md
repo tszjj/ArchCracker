@@ -1,6 +1,6 @@
 # ArchCracker 开发路线图
 
-> 目标：**先完成 Windows 全栈**（内核 + CLI + GUI + 安装包 + 自动解压），再把同一 Rust 内核扩展到 Linux/macOS/Android/HarmonyOS。
+> 目标：**先完成 Windows 全栈**（内核 + CLI + GUI + 安装包），再把同一 Rust 内核扩展到 Linux/macOS/Android/HarmonyOS。项目不实现自动解压。
 > 时间以“1 名人类维护者 + 多个 AI Agent 并行”估算；Agent 吞吐高但评审/集成仍是瓶颈。
 >
 > Windows 的具体任务/验收见 [`docs/windows-plan.md`](windows-plan.md)。
@@ -13,7 +13,7 @@
 | W1 核心 CLI | 2–3 周 | CLI：ZIP/7z/RAR（外部）+ 字典 + 多线程 + 断点 | Windows |
 | W2 引擎/攻击 | 2–3 周 | 快筛/掩码/暴力/批量/编码 + hashcat GPU spike（分卷/SFX 已由 W1-005 提前交付） | Windows |
 | W3 桌面 GUI | 3–4 周 | Avalonia 12 主界面 + C ABI v1 | Windows |
-| W4 全栈交付 | 2–3 周 | 单一 Full 安装包（随包 UnRAR/hashcat）/签名/自动解压/崩溃转储/zh-en | Windows |
+| W4 全栈交付 | 2–3 周 | 单一 Full 安装包（随包 UnRAR/hashcat）/签名/崩溃转储/zh-en | Windows |
 | W5 Windows Beta | 2–4 周 | 性能/模糊测试/文档/兼容性/AV | Windows |
 | D1–D3 其他平台 | — | Linux/macOS、Android、HarmonyOS | **Deferred** |
 | P7 持续 | 持续 | 许可审计、性能、发布 | Windows 优先 |
@@ -120,7 +120,7 @@
 
 - [ ] `acx-ffi`：句柄/错误码/回调/JSON 配置；panic 隔离；C 头稳定
 - [ ] Avalonia 12 工程：MVVM、拖放、模式页、进度/ETA、暂停/停止
-- [ ] 结果：密码展示/复制、报告、自动解压
+- [ ] 结果：密码展示/复制、报告导出；不自动解压
 - [ ] 预检/错误提示：缺卷/损坏/未加密/不支持
 - [ ] 进度回调限流 10 Hz；UI 不卡
 - [ ] 崩溃隔离：进程内 DLL + sidecar 开关
@@ -140,13 +140,12 @@
 
 ## W4 Windows 全栈交付（2–3 周）
 
-**目标**：从“能跑”到“能装、能卸载、能自动解压”。
+**目标**：从“能跑”到“能装、能卸载”。
 
 - [ ] 安装包：单一 Full 版（MSIX 或 Inno Setup）；卸载/升级/便携模式
 - [ ] Full 随包：未修改 `UnRAR.exe` + license，hashcat + MIT/第三方声明；版本/SHA 清单
 - [ ] 不随包：WinRAR、CUDA/HIP/OpenCL 运行时、GPU 驱动
 - [ ] 代码签名：OV/EV；SmartScreen/Defender 误报提交
-- [ ] 自动解压：目标目录、覆盖策略、磁盘空间检查、Zip Slip 防护
 - [ ] 崩溃转储/日志脱敏（不记完整密码）；sidecar 隔离开关
 - [ ] zh/en、键盘、读屏基础；高 DPI/深色
 - [ ] 首次启动授权提示；GPU/引擎检测与 CPU 回落提示
@@ -214,7 +213,7 @@
 - [ ] `acx-jni`：handle 生命周期、回调、错误码
 - [ ] Compose：文件选择、模式、进度、暂停/停止、结果
 - [ ] SAF：`ACTION_OPEN_DOCUMENT` + 持久化权限；fd `dup` 给 native
-- [ ] 输出：`CREATE_DOCUMENT`/目录；自动解压
+- [ ] 输出：`CREATE_DOCUMENT`/目录用于报告导出；不解压解压
 - [ ] 前台服务 + 常亮 + 通知；Android 15 配额适配
 - [ ] 按 ABI 打包 `libacx.so`（arm64-v8a/armeabi-v7a/x86_64）
 - [ ] 后台/锁屏/断电恢复测试
@@ -297,6 +296,6 @@ W0 ──► W1 ──► W2 ──► W3 ──► W4 ──► W5 ──► Wi
 | W1 | Windows CLI 恢复 ZIP/7z；1M 字典 p/s 基线 |
 | W2 | RAR 外部/分卷/快筛/爆破；Windows CLI 可用 |
 | W3 | Windows GUI 可用；C ABI v1 |
-| W4 | 安装/卸载/签名/自动解压全流程 |
+| W4 | 安装/卸载/签名全流程 |
 | W5 | Windows beta；许可/安全/性能达标 |
 | v1.0 | Windows 1.0；其他平台另行排期 |

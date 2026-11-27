@@ -185,7 +185,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
 | **W2 引擎/攻击** | **✅ 已签核（2026-11-28）** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量、W2-006 编码/严格模式、W2-007 CPU 快筛、W2-008 语料/差分/基准；CI 6/6 | 未验证项见 [W2-SIGNOFF](W2-SIGNOFF.md)；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
-| **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
+| **W3 桌面 GUI** | 未开始 | — | C ABI v1（完整 `path/fd/uri` 抽象）、Avalonia 工程、进度/暂停、报告导出；不自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
 | **D1–D3 其他平台** | **Deferred** | 接口保留 | Linux/macOS/Android/HarmonyOS 前端与打包 |
@@ -247,7 +247,7 @@ cargo run -p acx-cli -- batch jobs.toml --max-parallel 2 --reuse-found
 - `--mask-file`、`?b`、`--export-dictionary`、`--increment`；
 - 跨运行跳过已命中的批量任务（首版无批量状态文件；中断任务按各自断点续跑）；
 - GPU/hashcat 加速（W2-001 Deferred，W2 不启动）；
-- GUI、安装包、自动解压；
+- GUI、安装包；项目不实现自动解压；
 - Full 随包 UnRAR/hashcat（W4）；
 - Linux/macOS/Android/HarmonyOS 的实际产品交付。
 

@@ -12,7 +12,7 @@
 | 内核 | Rust `acx-core`：ZIP/7z/RAR（外部）+ 候选 + 调度 + 断点 | 1M 字典、1GB 归档、缺卷/损坏分类 |
 | C ABI | `acx.dll` + `acx.h` | C/C# 可加载；错误码/回调稳定 |
 | CLI | `acx.exe` | 脚本可跑；退出码明确 |
-| GUI | Avalonia 12 桌面 | 拖放/模式/进度/暂停/结果/自动解压 |
+| GUI | Avalonia 12 桌面 | 拖放/模式/进度/暂停/结果/报告导出；不自动解压 |
 | 安装 | Inno Setup（首选）或 MSIX | 安装/升级/卸载；普通用户权限 |
 | 信任 | 代码签名、哈希、无捆绑 | SmartScreen/Defender 可接受 |
 | 文档 | README/FAQ/已知问题/许可 | 用户能自助 |
@@ -42,7 +42,7 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 4. **RAR（外部）**：W1-003 已实现检测 `UnRAR.exe`、整包 `t` 验证；密码走 stdin，不写 argv；W1-003b 在 factory 创建时预检一次并缓存，worker 不再重复预检；W1-003c 已在 WinRAR 6.24 下验证 RAR4 `-ma4` 与 RAR5。
 5. **字典（W1-007）**：流式 UTF-8/UTF-16/GBK、空行/长行、有界候选源、检查点续跑；流式默认不做全局去重（本地实现 reviewer APPROVE，待 500MB 基准）。
 6. **运行控制与断点（W1-006 合并 epic）**：在现有有界队列/worker 上增加暂停/继续、优雅/强制停止、外部 UnRAR 子进程取消；连续批次水位、检查点原子写、`--resume` 指纹校验（已本地实现，reviewer APPROVE，待用户大语料测试）。
-7. **CLI**：`-f -m dict -d -t --strict/--fast --checkpoint --resume --auto-extract`；退出码 0/1/2/3/4（4=已停止并保存检查点）。
+7. **CLI**：`-f -m dict -d -t --strict/--fast --checkpoint --resume`；退出码 0/1/2/3/4（4=已停止并保存检查点）。项目不实现 `--auto-extract`。
 
 **W1 状态**：已完成并签核（2026-11-26，[W1-SIGNOFF](W1-SIGNOFF.md)）；W2 启动。
 
@@ -80,12 +80,11 @@ third_party/hashcat/     hashcat（固定版本）+ MIT/第三方声明
 
 ```text
 UnRAR.exe t -p "<archive>"         # -p 触发提示；密码通过 stdin 提供，避免出现在 argv
-UnRAR.exe x -p "<archive>" "<out>" # 命中后确认/解压
 ```
 
 - 密码不写命令行；用 stdin/管道，日志脱敏。`-p-` 在部分版本表示“禁用密码”，不要使用；`-p` 的 stdin 行为已在 W1-003 用 UnRAR 7.22 验证；其他版本需回归。
 - 超时/取消：杀进程树；错误输出映射为 `ACX_ERR_*`。
-- `t` 用于**确认**；W2 起优先用 clean-room RAR 头/密钥 hash 交 hashcat GPU，疑似命中再交 `UnRAR.exe` 完整测试。
+- `t` 用于**完整复核**；项目不使用 `x/e`，不实现自动解压。
 - 路径含空格/中文：参数用 `CommandLineToArgvW` 兼容的引用；不要拼接 shell 字符串。
 
 ### 5.3 性能策略
@@ -100,7 +99,7 @@ UnRAR.exe x -p "<archive>" "<out>" # 命中后确认/解压
 
 三屏：
 
-1. **主界面**：拖放/选择、归档信息、模式 Tab、字典/字符集/长度、线程、fast/strict、自动解压。
+1. **主界面**：拖放/选择、归档信息、模式 Tab、字典/字符集/长度、线程、fast/strict、报告导出；不自动解压。
 2. **运行**：进度/速度/ETA、暂停/继续/停止、日志折叠、当前候选（可选脱敏）。
 3. **结果**：密码大字展示/复制、报告、打开目录、失败原因（缺卷/损坏/未加密/不支持/未确认）。
 

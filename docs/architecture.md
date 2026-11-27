@@ -127,7 +127,7 @@ W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` �
 - 句柄不透明；创建/销毁成对；回调在 `stop` 返回后不再触发。
 - Rust panic 不跨 FFI：`catch_unwind` → `ACX_ERR_PANIC`。
 - 线程安全：一个 handle 同时只允许一个 `start`；`pause/resume/stop` 可从任意线程调用。
-- **v0 范围**：只覆盖 Windows/桌面路径；在 D2/D3 之前必须扩展 `AcxInput{path|fd|uri}`、`on_finished`、`AcxStatusInfo` 与 `struct_size`，并补 JNI/NAPI 生命周期测试。
+- **v1 范围**：C ABI v1 冻结完整 `AcxInput{path|fd|uri}` 抽象、`on_finished`、`AcxStatusInfo` 与 `struct_size`；Windows 桌面先使用 `path`，Android/HarmonyOS 后续通过 JNI/NAPI 接入 `fd`/`uri`，不破坏 ABI。
 
 ### 5.2 草案
 
@@ -158,9 +158,23 @@ typedef struct {
   uint8_t  mode;                /* 0 dict, 1 mask, 2 brute, 3 hybrid */
   uint8_t  backend;             /* 0 auto, 1 cpu, 2 hashcat-gpu */
   uint8_t  fast_mode;           /* 1 fast, 0 strict */
-  uint8_t  auto_extract;
-  const char* output_dir;       /* nullable */
 } AcxAttackSpec;
+
+typedef enum {
+  ACX_INPUT_PATH = 0,           /* const char* UTF-8 path */
+  ACX_INPUT_FD = 1,             /* platform fd/handle */
+  ACX_INPUT_URI = 2             /* const char* UTF-8 URI */
+} AcxInputKind;
+
+typedef struct {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t kind;                /* AcxInputKind */
+  const char* path;             /* ACX_INPUT_PATH */
+  int64_t fd;                   /* ACX_INPUT_FD */
+  const char* uri;              /* ACX_INPUT_URI */
+  uint64_t reserved[4];
+} AcxInput;
 
 typedef struct {
   void (*on_progress)(void* user, uint64_t tried, uint64_t total, double rate, uint64_t eta_sec);
@@ -249,7 +263,7 @@ created_unix_ms=...
 ### 7.1 桌面：Avalonia 12 / .NET 10
 
 - 一套代码 Windows/Linux/macOS；MVVM；XAML。
-- 主窗口一屏：拖放 → 模式/字典/线程 → 开始；进度/速度/ETA；暂停/停止；结果/自动解压。
+- 主窗口一屏：拖放 → 模式/字典/线程 → 开始；进度/速度/ETA；暂停/停止；结果（密码复制/报告导出，不做自动解压）。
 - P/Invoke 调 `acx.dll`；先进程内，保留 sidecar 崩溃隔离开关。
 - 进度回调限流 ~10 Hz；UI 线程不做解密。
 - 打包：Windows MSIX/Inno + EV 签名；macOS universal + hardened runtime + 公证（官网分发，不上 Mac App Store）；Linux AppImage/Flatpak。
@@ -257,7 +271,7 @@ created_unix_ms=...
 ### 7.2 Android：Kotlin + Compose
 
 - 文件：SAF `ACTION_OPEN_DOCUMENT` + 持久化权限；`ParcelFileDescriptor` → `dup` → native 路径；不整包拷贝。
-- 输出：`CREATE_DOCUMENT`/SAF 目录；自动解压写到用户选择目录。
+- 输出：`CREATE_DOCUMENT`/SAF 目录用于报告导出；项目不实现自动解压。
 - 后台：前台服务 + 常亮；Android 15 `dataSync` 6h/24h 配额；默认“前台运行 + 可续算”，不承诺后台跑完。
 - 包：每 ABI 的 `libacx.so`；JNI 薄层；Play 审查需明确“仅恢复自有档案”。
 
