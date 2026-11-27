@@ -123,82 +123,43 @@ W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` �
 ### 5.1 原则
 
 - 稳定、可版本化；结构体带 `size`/`version` 字段；未知字段忽略。
-- v0 字符串：UTF-8、NUL 结尾（路径不允许 NUL）；二进制 blob 用 `ptr + len`。移动端前再评估是否需要统一的 `(ptr,len)` 形式。
+- v1 字符串：UTF-8、NUL 结尾（路径不允许 NUL）；二进制密码用 `ptr + len`；fd 用平台原生句柄。
 - 句柄不透明；创建/销毁成对；回调在 `stop` 返回后不再触发。
 - Rust panic 不跨 FFI：`catch_unwind` → `ACX_ERR_PANIC`。
 - 线程安全：一个 handle 同时只允许一个 `start`；`pause/resume/stop` 可从任意线程调用。
 - **v1 范围**：C ABI v1 冻结完整 `AcxInput{path|fd|uri}` 抽象、`on_finished`、`AcxStatusInfo` 与 `struct_size`；Windows 桌面先使用 `path`，Android/HarmonyOS 后续通过 JNI/NAPI 接入 `fd`/`uri`，不破坏 ABI。
 
-### 5.2 草案
+### 5.2 v1（已实现）
+
+完整定义以 `core/crates/acx-ffi/include/acx.h` 为唯一事实源；实现位于 `core/crates/acx-ffi/src/lib.rs`。
 
 ```c
+#define ACX_ABI_VERSION 1
+
 typedef struct AcxHandle AcxHandle;
 
-typedef enum {
-  ACX_OK = 0,
-  ACX_ERR_INVALID_ARG = 1,
-  ACX_ERR_IO = 2,
-  ACX_ERR_UNSUPPORTED = 3,
-  ACX_ERR_ARCHIVE = 4,
-  ACX_ERR_MISSING_VOLUME = 5,
-  ACX_ERR_CANCELLED = 6,
-  ACX_ERR_INTERNAL = 7,
-  ACX_ERR_PANIC = 8
-} AcxStatus;
-
-typedef struct {
-  uint32_t struct_size;
-  uint32_t version;
-  const char* archive_path;     /* UTF-8, first volume */
-  const char* dictionary_path;  /* nullable */
-  const char* mask;             /* nullable */
-  const char* charset;          /* nullable */
-  uint32_t min_len, max_len;
-  uint32_t threads;             /* 0 = auto (physical cores) */
-  uint8_t  mode;                /* 0 dict, 1 mask, 2 brute, 3 hybrid */
-  uint8_t  backend;             /* 0 auto, 1 cpu, 2 hashcat-gpu */
-  uint8_t  fast_mode;           /* 1 fast, 0 strict */
-} AcxAttackSpec;
-
-typedef enum {
-  ACX_INPUT_PATH = 0,           /* const char* UTF-8 path */
-  ACX_INPUT_FD = 1,             /* platform fd/handle */
-  ACX_INPUT_URI = 2             /* const char* UTF-8 URI */
-} AcxInputKind;
-
-typedef struct {
-  uint32_t struct_size;
-  uint32_t version;
-  uint32_t kind;                /* AcxInputKind */
-  const char* path;             /* ACX_INPUT_PATH */
-  int64_t fd;                   /* ACX_INPUT_FD */
-  const char* uri;              /* ACX_INPUT_URI */
-  uint64_t reserved[4];
-} AcxInput;
-
-typedef struct {
-  void (*on_progress)(void* user, uint64_t tried, uint64_t total, double rate, uint64_t eta_sec);
-  void (*on_hit)(void* user, const uint8_t* password, size_t len);
-  void (*on_log)(void* user, int level, const char* message);
-  void* user;
-} AcxCallbacks;
-
-AcxStatus acx_create(const char* config_json, AcxHandle** out);
-void      acx_destroy(AcxHandle* h);
-AcxStatus acx_start(AcxHandle* h, const AcxAttackSpec* spec, const AcxCallbacks* cb);
-AcxStatus acx_pause(AcxHandle* h);
-AcxStatus acx_resume(AcxHandle* h);
-AcxStatus acx_stop(AcxHandle* h);
-AcxStatus acx_status(AcxHandle* h, AcxStatusInfo* out);
+uint32_t    acx_abi_version(void);
+const char* acx_product(void);
 const char* acx_version(void);
-const char* acx_last_error(AcxHandle* h); /* thread-local copy */
+const char* acx_status_name(int32_t status);
+AcxStatus   acx_create(const AcxConfig* config, AcxHandle** out);
+void        acx_destroy(AcxHandle* handle);
+AcxStatus   acx_start(AcxHandle* handle, const AcxAttackSpec* spec,
+                      const AcxCallbacks* callbacks);
+AcxStatus   acx_pause(AcxHandle* handle);
+AcxStatus   acx_resume(AcxHandle* handle);
+AcxStatus   acx_stop(AcxHandle* handle);
+AcxStatus   acx_status(AcxHandle* handle, AcxStatusInfo* info);
+const char* acx_last_error(AcxHandle* handle);
 ```
+
+v1 结构体：`AcxConfig`、`AcxInput`、`AcxAttackSpec`、`AcxCallbacks`、`AcxStatusInfo` 均带 `struct_size`/`version` 与 reserved 字段；句柄一次只承载一个 job。`AcxInput` 同时定义 `path`/`fd`/`uri` 三种输入；桌面先用 path，JNI/NAPI 后续接入 fd/uri 而不破坏 ABI。`AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`。回调含 `on_progress`/`on_hit`/`on_log`/`on_finished`；`acx_stop` 返回后不再启动新回调。
 
 ### 5.3 语言绑定
 
 | 前端 | 方式 |
 |---|---|
-| Avalonia (C#) | `[LibraryImport]` P/Invoke；结构体 `[StructLayout(LayoutKind.Sequential)]`；回调用 `UnmanagedCallersOnly` 或 `Marshal.GetFunctionPointerForDelegate`（注意生命周期） |
+| Avalonia (C#) | `[LibraryImport]` P/Invoke；结构体 `[StructLayout(LayoutKind.Sequential)]`；回调模型在 `frontends/desktop/tests/AcxFfiSmoke` 中按 .NET 10 生命周期、稳定性与性能实测选择 |
 | Android (Kotlin) | JNI 薄层 `acx-jni`：`external fun start(...)`；Native 持有 handle；SAF fd → `/proc/self/fd/N` 或 `dup` 后传路径 |
 | HarmonyOS (ArkTS) | NAPI 薄层 `acx-napi`：`napi_create_function` 导出 start/stop/status；ArkTS 侧 `import acx from 'libacx.so'` |
 | CLI | 直接依赖 `acx-core`，不经 FFI（减少一层） |

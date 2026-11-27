@@ -24,7 +24,7 @@ use crate::encoding::{
 };
 use crate::error::{AcxError, Result};
 use crate::estimate::{estimate_space, SpaceEstimate, SpaceInput};
-use crate::scheduler::{self, RunContext, RunControl, RunOutcome};
+use crate::scheduler::{self, RunContext, RunControl, RunOutcome, RunProgress};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +34,46 @@ use std::time::{Duration, Instant};
 
 /// Maximum worker threads accepted by a job.
 pub const MAX_JOB_THREADS: usize = 256;
+
+/// Interval between progress observations for API consumers such as the C ABI.
+pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Snapshot callback used by presentation layers. It is invoked from a core
+/// background thread and must not call back into the same job synchronously.
+pub type ProgressHook = Arc<dyn Fn(RunProgress) + Send + Sync>;
+
+/// Owns the optional progress thread and stops it on every return path.
+struct ProgressReporter {
+    finished: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl ProgressReporter {
+    fn start(context: Arc<RunContext>, hook: ProgressHook) -> Self {
+        let finished = Arc::new(AtomicBool::new(false));
+        let thread_finished = Arc::clone(&finished);
+        let thread = thread::spawn(move || loop {
+            thread::sleep(PROGRESS_INTERVAL);
+            if thread_finished.load(Ordering::SeqCst) {
+                break;
+            }
+            hook(context.snapshot());
+        });
+        Self {
+            finished,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for ProgressReporter {
+    fn drop(&mut self) {
+        self.finished.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum AttackConfig {
@@ -738,6 +778,21 @@ pub fn run_job(
     prepass: &[Vec<u8>],
     observer: &mut dyn JobObserver,
 ) -> Result<JobReport> {
+    run_job_with_progress(spec, control, prepass, observer, None)
+}
+
+/// [`run_job`] with an optional progress snapshot hook for FFI/GUI consumers.
+///
+/// The hook is called from a dedicated background thread at
+/// [`PROGRESS_INTERVAL`] and once with the final snapshot before returning. It
+/// must be safe to call from a worker thread and must not re-enter the job.
+pub fn run_job_with_progress(
+    spec: &JobSpec,
+    control: Arc<RunControl>,
+    prepass: &[Vec<u8>],
+    observer: &mut dyn JobObserver,
+    progress_hook: Option<ProgressHook>,
+) -> Result<JobReport> {
     let started = Instant::now();
     let info = archive::preflight(&spec.archive)?;
     observer.archive(&info);
@@ -889,6 +944,8 @@ pub fn run_job(
         Arc::clone(&finished),
         Arc::clone(&monitor_error),
     );
+    let _progress_reporter =
+        progress_hook.map(|hook| ProgressReporter::start(Arc::clone(&context), hook));
 
     let outcome = scheduler::run_with_source(factory, prepared.source, Arc::clone(&context));
     finished.store(true, Ordering::SeqCst);

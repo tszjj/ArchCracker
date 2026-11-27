@@ -30,7 +30,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 
 | 切片 | 状态 | 交付核心 |
 |---|---|---|
-| W3-001 C ABI v1 | 待启动 | `acx.h` v1、句柄/攻击参数/回调/错误码/panic 隔离 |
+| W3-001 C ABI v1 | **已完成（本地验证）** | `acx.h` v1、句柄/攻击参数/回调/错误码/panic 隔离；见 `docs/tasks/W3-001-cabi-v1.md` |
 | W3-002 Avalonia 骨架 | 待启动 | .NET 10 工程、MVVM、NativeBridge、主题/i18n 基础 |
 | W3-003 垂直切片 | 待启动 | Setup/Run/Result、ZIP 字典攻击、暂停/停止/命中复制 |
 | W3-004 攻击模式扩展 | 待启动 | 掩码/暴力/混合、编码变体、strict/resume、估算 |

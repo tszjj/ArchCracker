@@ -35,6 +35,7 @@ name = "acx-ffi"
 version = "0.0.1"
 dependencies = [
  "acx-core",
+ "zip",
 ]
 
 [[package]]
