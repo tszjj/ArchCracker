@@ -1,100 +1,70 @@
 # W2-003a：空间估算公共函数与回填
 
-- **状态**：首版完成（2026-11-27，PR #28 已合并）
-- **日期**：2026-11-27
-- **角色**：core-engineer + reviewer
-- **分支**：与 W2-004 同一 PR（`feat/w2-004-hybrid-rules`）
-- **依赖**：W2-002 `MaskEstimate`、W2-003 `BruteEstimate`、W1-006 scheduler 批次窗口
-- **范围**：`acx-core` 公共空间估算函数、mask/brute 回填、hybrid 复用；**不含**字典模式 `--estimate`
+- 状态：首版完成（2026-11-27，PR #28 已合并）
+- 日期：2026-11-27
+- 角色：core-engineer、reviewer
+- 分支：与 W2-004 同一分支 `feat/w2-004-hybrid-rules`
+- 依赖：W2-002 掩码估算、W2-003 暴力估算、W1-006 调度批次窗口
+- 范围：公共空间估算函数、掩码/暴力回填、混合复用；不含字典模式估算
 
-> 本切片是 W2-004 的前置：W2-002/003 的空间复杂度只写在文档里，程序没有输出。W2-004 的水位位图会被 `V` 放大，必须在攻击前让用户看到真实内存成本。
+## 设计目标
 
-## 1. 问题
+解决「攻击前不知道要占多少内存」的问题。此前掩码/暴力的空间复杂度只写在文档里，程序不输出；而完成位图按候选数分配，一个 10¹⁰ 候选的掩码可通过索引检查却会让位图占到约 1.25 GB，足以在启动时耗尽内存。面向大键空间场景，把水位位图、在飞批次与源缓冲统一成公共估算函数，让三种攻击模式在启动前打印真实内存成本并告警。
 
-- `RunContext::new` 按 `ceil(total/64)` 个 `AtomicU64` 预分配完成位图，即 **`ceil(total/8)` 字节**，没有 `try_reserve`；
-- 现有 `MaskEstimate`/`BruteEstimate` 只有 keyspace，没有内存字段；`--estimate` 不打印空间；
-- `?d`×10 = 10¹⁰ 个候选可以通过 `usize` 检查，但位图约 **1.25 GB**，足以在启动时 OOM；
-- 调度器同时可能持有 `threads + 3` 个批次，W2-004 文档里的“一个 8 MiB 批次”低估多线程场景。
+## 1. 决策
 
-## 2. 决策（2026-11-27）
-
-| 决策 | 内容 |
+| 项 | 决策 |
 |---|---|
-| “三个模式” | 指 W2 的 **mask / brute / hybrid**；字典模式不新增 `--estimate`，继续只走攻击路径 |
-| API 签名 | `MaskSet::estimate(threads)`、`BruteSet::estimate(threads)`、`HybridSet::estimate(threads)` 直接带线程数，不保留无参版本 |
-| 超阈值行为 | **只警告，不拒绝执行**；位图 >128 MB 时打印警告。是否拒绝留给后续切片评审 |
-| 单位 | 十进制 MB（`182.9 MB`），与 W2-004 §7.1 示例一致 |
-| 估算口径 | 单候选用**最大长度**（不是平均值），批次按 `threads+3` 个在飞 + 源自身 8 MiB cap，加上位图与源缓冲；**不含归档会话**，输出标注 `(+ archive sessions)` |
-| 归档会话 | ZIP 中央目录、7z header、外部 UnRAR 进程无法从核心侧精确估算，不纳入 |
+| 适用范围 | 掩码、暴力、混合三种模式；字典模式不新增估算 |
+| 函数签名 | 三种估算直接接收线程数，不保留无参版本 |
+| 超阈值 | 只警告不拒绝；位图 >128 MB 时打印警告，是否拒绝留后续评审 |
+| 单位 | 十进制 MB（如 182.9 MB） |
+| 估算口径 | 单候选按最大长度；批次按「线程数+3」个在飞，含源自身上限；不含归档会话，输出标注 |
+| 归档会话 | 归档目录、外部进程占用无法从内核侧精确估算，不纳入 |
 
-## 3. API
+## 2. 公共接口
 
 ```text
-acx_core::estimate::SpaceInput
-  total: u128
-  threads: usize
-  max_candidate_bytes: u128
-  batch_bytes_cap: Option<u128>
-  source_bytes: u128
+SpaceInput
+  total: 128 位整数
+  threads: 线程数
+  max_candidate_bytes: 单候选最大字节
+  batch_bytes_cap: 单批次字节上限（可选）
+  source_bytes: 候选源自身缓冲
 
-acx_core::estimate::SpaceEstimate
-  total: u128
-  watermark_bytes: u128            // ceil(total/8)
-  candidates_per_batch: u128       // 与 scheduler 共用 batch_candidates()
-  in_flight_batches: u128          // threads + 3
-  in_flight_bytes: u128
-  source_bytes: u128
-  estimated_peak_bytes: u128
-  warnings: Vec<SpaceWarning>      // 位图 >128 MB
+SpaceEstimate
+  total / watermark_bytes / candidates_per_batch
+  in_flight_batches / in_flight_bytes / source_bytes
+  estimated_peak_bytes / warnings
 
-acx_core::estimate::estimate_space(&SpaceInput) -> SpaceEstimate
+estimate_space(&SpaceInput) -> SpaceEstimate
 ```
 
 公式：
 
 ```text
-watermark   = ceil(total / 8)
-per_batch   = min(cap, batch_candidates(threads) × (24 + round16(max_candidate + 16)))
-in_flight   = (threads + 3) × per_batch
-peak        = watermark + in_flight + source_bytes
+水位位图 = ceil(total / 8) 字节
+单批字节 = min(上限, 每批候选数 × (24 + 按16对齐(最大候选字节 + 16)))
+在飞字节 = (线程数 + 3) × 单批字节
+峰值 = 水位位图 + 在飞字节 + 源缓冲
 ```
 
-`batch_candidates()` 与 scheduler 共用（[scheduler.rs](../../core/crates/acx-core/src/scheduler.rs)），避免公式漂移。
+每批候选数与调度器共用同一函数，避免公式漂移。
 
-## 4. 各模式输入
+## 3. 各模式输入
 
-| 模式 | total | max_candidate_bytes | batch cap | source_bytes |
-|---|---:|---:|---|---:|
-| mask | keyspace | 最大 positions（≤128） | 无 | 4 KiB |
-| brute | Σ keyspace(L) | `max_len`（≤128） | 无 | 4 KiB |
-| hybrid | dict_lines × V | max(最大行 + 规则增长, 最大行 + 前后缀 positions) | 8 MiB | 2 MiB + 2×最大行 |
+| 模式 | 总数 | 单候选最大字节 | 批次上限 | 源缓冲 |
+|---|---:|---|---:|---:|
+| 掩码 | 键空间 | 最大位置数（≤128） | 无 | 4 KiB |
+| 暴力 | 各长度键空间之和 | 最大长度（≤128） | 无 | 4 KiB |
+| 混合 | 字典行数 × 每词变体数 | 最大行 + 规则增长或前后缀位数 | 8 MiB | 2 MiB + 2×最大行 |
 
-## 5. 验收
+## 4. 验收与结果
 
-- [x] 位图 = `ceil(total/8)`；t=1/14/256 时 `candidates_per_batch` 与 scheduler 一致；
-- [x] 8 MiB cap 生效；`8 MiB × (threads+3)` 的上界；
-- [x] 位图 >128 MB 产生警告；`--estimate` 打印位图与峰值；
-- [x] mask/brute/hybrid 三个模式输出相同字段；
-- [x] `--estimate` 不启动攻击、不写检查点；
-- [x] 超过 `usize::MAX` 的 mask/brute/hybrid keyspace 只展示估算并拒绝攻击（hybrid 的 affix keyspace、`V`、`total` 全程 `u128`，仅 `into_source` 转 `usize`）；
-- [x] 估算不影响调度行为（`batch_candidates` 原公式不变）；
-- [x] 无新依赖、无许可变化。
+位图等于 `ceil(total/8)`；线程数 1/14/256 时每批候选数与调度器一致；8 MiB 上限生效；位图 >128 MB 产生警告；三种模式输出相同字段；估算不启动攻击、不写断点；超过机器字长上限的键空间只展示并拒绝攻击；估算不改变调度行为；无新依赖、无许可变化。
 
-## 6. 实现记录（2026-11-27）
+新增 `acx-core` 的 `estimate.rs`，调度器暴露每批候选数函数供估算与运行共用；三种估算结构增加空间字段并改为接收线程数；CLI 在估算与攻击启动前打印水位位图与峰值。测试：`cargo test --workspace` 144 core / 69 CLI（1 忽略）/ 2 FFI 全绿。
 
-- 新增 `core/crates/acx-core/src/estimate.rs`；
-- `scheduler.rs` 暴露 `batch_candidates()`，`run_with_source` 改为调用它（行为不变）；
-- `MaskEstimate`/`BruteEstimate` 增加 `space: SpaceEstimate`，`estimate()` 改为 `estimate(threads)`；
-- CLI `--estimate` 与攻击启动前都打印 `Watermark bitmap` / `Estimated peak (core) (+ archive sessions)`，空间警告与 ETA 警告并列；
-- 测试：`estimate` 单测 5 个；mask/brute/hybrid 估算与 CLI 空间输出覆盖；`cargo test --workspace` 144 core / 69 CLI passed（1 ignored）/ 2 FFI 全绿。
+## 许可与评审意见
 
-## 7. 交接
-
-```text
-STATUS: done
-CHANGED: core/crates/acx-core/src/estimate.rs, scheduler.rs, candidates/{mask,brute,hybrid}.rs, acx-cli/src/main.rs
-VERIFIED: fmt / clippy -D warnings / cargo test --workspace
-NOT VERIFIED: 估算不含归档会话；未做 RSS 实测对比
-NEXT: 已合并；W2-004 复用同一 SpaceEstimate；后续若需按实际 RSS 校准，另开切片
-RISKS: 位图随 total 线性增长；只警告不拒绝，超大 keyspace 仍可能 OOM
-```
+无新增依赖，许可边界不变；不链接或复制任何外部引擎源码；hashcat 未成为依赖。评审通过。估算未纳入归档会话，未做实际常驻内存对比；位图随总数线性增长且只警告不拒绝，超大键空间仍可能耗尽内存；若需按实测校准，另开切片。
