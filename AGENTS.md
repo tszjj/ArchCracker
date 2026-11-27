@@ -149,7 +149,7 @@ Out of scope: ...
 
 ### 6.4 分支 / 提交 / 评审
 
-- `main` 保护（当前私有免费仓库无法启用 GitHub 分支保护，暂由流程约束；转公开/Pro 后开启）；所有改动走 `feat/`、`fix/`、`docs/`、`chore/` 分支 + PR。
+- `main` 不启用 GitHub 分支保护；禁止直接 push `main`。本地开发克隆安装 `.githooks/pre-push`（`powershell -ExecutionPolicy Bypass -File .\scripts\install-push-guard.ps1`），所有改动走 `feat/`、`fix/`、`docs/`、`chore/` 分支 + PR 合并；该钩子仅保护已安装的克隆，不替代服务端门禁。
 - 提交信息：`type(scope): summary`，例如 `feat(core): add zipcrypto probe`。
 - PR 描述必须包含：改了什么、怎么验证、风险/许可影响、未验证项。
 - 评审门禁：至少 1 个 reviewer agent；核心/许可/安全改动需要 architect 或 release 角色复核。
