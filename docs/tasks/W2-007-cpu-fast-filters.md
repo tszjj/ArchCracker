@@ -1,6 +1,6 @@
 # W2-007：CPU 快筛补全 — 设计目标
 
-- 状态：实现完成（2026-11-27，分支 `feat/w2-007-cpu-fast-filters`）；设计目标已按 W2-006 合并后的接口收敛
+- 状态：已合入 `main`（2026-11-27，PR #36，merge `c4cdbc2`）；设计目标已按 W2-006 合并后的接口收敛
 - 日期：2026-11-27
 - 门禁：属于 W2 准出项；界面之前完成
 - 角色：core-engineer、reviewer；architect 复核判据边界与断点签名；release 复核 RAR 许可不变
@@ -167,7 +167,7 @@ RAR 仍只通过外部未修改的 UnRAR 进程，不解压、不链接、不复
 ## 9. 交接
 
 ```text
-STATUS: done（实现完成；PR 与评审记录见 PR 描述）
+STATUS: done（已合入 main，PR #36 / merge c4cdbc2；评审记录见 PR）
 BRANCH: feat/w2-007-cpu-fast-filters
 CHANGED: core/crates/acx-core/src/archive/{filters,mod,zip,sevenz,rar}.rs、
          core/crates/acx-core/src/job.rs、core/crates/acx-cli/src/main.rs、
