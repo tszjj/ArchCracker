@@ -22,7 +22,7 @@
 | W2-006 编码变体/严格模式 | 已合并 | PR #33 |
 | **W2-007 CPU 快筛补全** | **已合并** | PR #36 / merge `c4cdbc2`；功能提交 `e9b33b1`；CL 见 `docs/CL-W2-007.md` |
 | 状态同步 | 已合并 | PR #37 / merge `e3854c1` |
-| W2-008 语料/差分/基准 | **预期目标已定稿，未实现** | `docs/tasks/W2-008-corpus-differential-benchmark.md` |
+| W2-008 语料/差分/基准 | **本地验证完成，已签核** | `docs/tasks/W2-008-corpus-differential-benchmark.md`、`docs/W2-SIGNOFF.md` |
 | W2-001 GPU/hashcat | Deferred | W2 不启动 |
 | W3 GUI / W4 安装包 / W5 Beta | 未开始 | 前端目录仅 README 占位 |
 | D1–D3 其他平台 | Deferred | 仅保留接口 |

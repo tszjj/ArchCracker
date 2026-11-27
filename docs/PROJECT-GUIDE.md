@@ -34,7 +34,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；PR #33 6/6 全绿（2026-11-27） |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
-> 最近一次全绿：`main` CI 6/6（PR #33，2026-11-27；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
+> 最近一次全绿：`main` CI 6/6（run `46025110880`，仓库转公开后重跑，2026-11-28；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)，W2 签核见 [W2-SIGNOFF](W2-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
 
 ## 3. 实际目录结构
 
@@ -182,7 +182,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
-| **W2 引擎/攻击** | **进行中** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量任务、W2-006 编码/严格模式（PR #33 已合并）；W2-007 CPU 快筛补全已合入（PR #36） | W2-008 语料/差分/1M 基准（本地验证完成，CI 待恢复）；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
+| **W2 引擎/攻击** | **✅ 已签核（2026-11-28）** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量、W2-006 编码/严格模式、W2-007 CPU 快筛、W2-008 语料/差分/基准；CI 6/6 | 未验证项见 [W2-SIGNOFF](W2-SIGNOFF.md)；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
