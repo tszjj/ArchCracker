@@ -723,6 +723,10 @@ fn dry_run(config: &BatchConfig, max_parallel: Option<usize>) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
+    if let Err(error) = batch::validate_batch(config) {
+        eprintln!("acx: {error}");
+        return ExitCode::from(EXIT_USAGE);
+    }
     let mut failed = false;
     let mut serial_seconds = 0.0f64;
     let mut peaks = Vec::new();
