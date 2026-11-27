@@ -1,6 +1,6 @@
 # ArchCracker 项目全景与开发指引
 
-> 最后更新：2026-11-27 · 阶段：**W1 已准出并签核；W2 已启动（Windows 全栈优先）**
+> 最后更新：2026-11-28 · 阶段：**W1 已准出并签核；W2 已启动（Windows 全栈优先）；本地开发模式**
 >
 > 本文是项目结构、文档地图和开发进度的**单一入口**。它不替代架构/许可/任务文档；
 > 具体设计、验收证据和决策以链接文档为准。每次完成一个切片或调整排期时，先更新本文的状态。
@@ -162,6 +162,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-005 批量任务/包间复用](tasks/W2-005-batch-jobs.md) | 任务清单、失败隔离、独立断点、有限并行、授权密码复用 | 首版完成（PR #30 已合并） |
 | [W2-006 编码变体与严格模式](tasks/W2-006-encoding-strict.md) | 非 ASCII 编码变体、严格模式开关、编码/快筛计数 | 首版完成（PR #33 已合并） |
 | [W2-007 CPU 快筛补全](tasks/W2-007-cpu-fast-filters.md) | 统一快筛契约、ZIP/AES verifier 计数、7z 指标、RAR4 `-hp` no-go、严格模式覆盖、快筛计数 | 已合入 `main`（PR #36，merge `c4cdbc2`）；全量差分/1M 基准留 W2-008 |
+| [W2-008 语料/差分/基准](tasks/W2-008-corpus-differential-benchmark.md) | 语料生成脚本、oracle 差分、W2-007 判据证据、1M 基准、Windows 全栈验证 | 预期目标已定稿（2026-11-28），本地开发中，未实现 |
+| [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -179,7 +181,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
-| **W2 引擎/攻击** | **进行中** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量任务、W2-006 编码/严格模式（PR #33 已合并）；W2-007 CPU 快筛补全已合入（PR #36） | W2-008 语料/差分/1M 基准；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
+| **W2 引擎/攻击** | **进行中** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量任务、W2-006 编码/严格模式（PR #33 已合并）；W2-007 CPU 快筛补全已合入（PR #36） | W2-008 语料/差分/1M 基准（预期目标已定稿、本地开发中）；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
@@ -361,6 +363,8 @@ cargo deny check licenses bans sources
 4. `rust (windows-latest, gnu)`：GNU target 测试；
 5. `rust (msrv 1.89)`：最低 Rust 版本；
 6. `cargo-deny`：licenses/bans/sources。
+
+> **注意（2026-11-28 起）**：GitHub Actions 计费账户月度额度耗尽，上述 6 个 job 当前均未启动（非代码失败）。后续开发先按 [`docs/DEV-ARCHIVE-2026-11-28.md`](DEV-ARCHIVE-2026-11-28.md) §3 切换到**本地开发模式**：本地分支 + 本地等价门禁 + 本地证据，暂不 push / 开 PR；CI 绿灯待额度恢复或 CI 通道切换后补。跨平台结论只能写"Windows x64 本地验证 / 其他平台未验证"。
 
 ### 7.5 Definition of Done
 
