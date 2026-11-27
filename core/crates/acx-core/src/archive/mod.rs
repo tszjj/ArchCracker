@@ -9,6 +9,9 @@ pub mod sevenz;
 pub mod source;
 pub mod zip;
 
+mod filters;
+
+pub use filters::{FastFilterKind, FilterCounts};
 pub use info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 pub use rar::{RarFactory, RarSession};
 pub use sevenz::{SevenZFactory, SevenZSession};
@@ -35,15 +38,27 @@ pub trait ArchiveSession: Send {
     /// Attach a cancellation token used by blocking external engines. Engines
     /// whose candidate test is bounded in-process may ignore it.
     fn set_cancel_token(&mut self, _token: CancelToken) {}
+
+    /// Whether the most recent `test_password` ended because the candidate
+    /// could not be represented in the engine's encoding. Such a variant is a
+    /// skip, not an attempt, and must not enter the attempts equation (W2-007).
+    fn was_variant_skipped(&self) -> bool {
+        false
+    }
 }
 
-/// Candidate-test counters shared by an archive engine. Only engines with
-/// potentially lossy fast filters report non-zero values.
+/// Candidate-test counters shared by an archive engine (W2-007).
+///
+/// All values are per encoding-variant attempt. `fast_rejected` equals
+/// `by_filter.total()`; `external_attempts` is a subset of `full_attempted`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ArchiveStats {
     pub fast_rejected: u64,
+    pub full_attempted: u64,
+    pub external_attempts: u64,
     pub external_confirmed: u64,
     pub encoding_skipped: u64,
+    pub by_filter: FilterCounts,
 }
 
 /// Opens independent sessions for scheduler workers.

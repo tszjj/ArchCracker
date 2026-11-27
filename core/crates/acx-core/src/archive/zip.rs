@@ -13,10 +13,12 @@
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 use super::source::{ArchiveSource, VolumeReader};
-use super::{ArchiveSession, ArchiveSessionFactory};
+use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats, FilterCounts};
 use crate::error::{AcxError, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use zip::result::ZipError;
 use zip::{HasZipMetadata, ZipArchive};
 
@@ -24,10 +26,18 @@ use zip::{HasZipMetadata, ZipArchive};
 /// a buffer proportional to the entry size; a 1 GB archive is a W1 target.
 const VERIFY_BUFFER: usize = 64 * 1024;
 
+/// Counters shared by every `ZipSession` opened from one `ZipFactory`.
+#[derive(Debug, Default)]
+struct ZipCounters {
+    fast_rejected: AtomicU64,
+    full_attempted: AtomicU64,
+}
+
 /// One open ZIP archive, owned by a scheduler worker.
 pub struct ZipSession {
     archive: ZipArchive<VolumeReader>,
     info: ArchiveInfo,
+    counters: Arc<ZipCounters>,
 }
 
 impl ZipSession {
@@ -38,6 +48,11 @@ impl ZipSession {
     /// entries is rejected with [`AcxError::EmptyArchive`]; an archive without
     /// encrypted entries is *not* an error (callers decide what to do).
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_counters(path, Arc::new(ZipCounters::default()))
+    }
+
+    /// Open with counters supplied by a factory so all workers share them.
+    fn open_with_counters(path: &Path, counters: Arc<ZipCounters>) -> Result<Self> {
         let source = ArchiveSource::resolve(path)?;
         if source.format != ArchiveFormat::Zip {
             return Err(AcxError::Unsupported(format!(
@@ -144,6 +159,7 @@ impl ZipSession {
                 header_encrypted: false,
                 entries,
             },
+            counters,
         })
     }
 }
@@ -180,14 +196,24 @@ impl ZipSession {
     /// Verify a legacy ZipCrypto candidate.
     fn test_zipcrypto(&mut self, index: usize, password: &[u8]) -> Result<PasswordTest> {
         let mut entry = match self.archive.by_index_decrypt(index, password) {
-            Ok(entry) => entry,
+            Ok(entry) => {
+                self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
+                entry
+            }
             // The 12-byte ZipCrypto check header rejected the key: a normal
-            // wrong-password verdict, not an archive failure.
-            Err(ZipError::InvalidPassword) => return Ok(PasswordTest::Miss),
+            // wrong-password verdict, not an archive failure. Counted as the
+            // ZIP verifier fast filter (W2-007).
+            Err(ZipError::InvalidPassword) => {
+                self.counters.fast_rejected.fetch_add(1, Ordering::Relaxed);
+                return Ok(PasswordTest::Miss);
+            }
             // Everything else (I/O, corrupt local header, missing entry,
             // unsupported encryption) says the archive cannot be probed at
             // all; swallowing it would hide real corruption from the caller.
-            Err(err) => return Err(AcxError::Zip(err)),
+            Err(err) => {
+                self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
+                return Err(AcxError::Zip(err));
+            }
         };
 
         let expected_crc = entry.crc32();
@@ -231,9 +257,18 @@ impl ZipSession {
     /// the stronger check for both AE variants.
     fn test_aes(&mut self, index: usize, password: &[u8]) -> Result<PasswordTest> {
         let mut entry = match self.archive.by_index_decrypt(index, password) {
-            Ok(entry) => entry,
-            Err(ZipError::InvalidPassword) => return Ok(PasswordTest::Miss),
-            Err(err) => return Err(AcxError::Zip(err)),
+            Ok(entry) => {
+                self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
+                entry
+            }
+            Err(ZipError::InvalidPassword) => {
+                self.counters.fast_rejected.fetch_add(1, Ordering::Relaxed);
+                return Ok(PasswordTest::Miss);
+            }
+            Err(err) => {
+                self.counters.full_attempted.fetch_add(1, Ordering::Relaxed);
+                return Err(AcxError::Zip(err));
+            }
         };
 
         let declared_size = entry.size();
@@ -298,20 +333,48 @@ fn classify_zip_open(source: &ArchiveSource, error: ZipError) -> AcxError {
     source.classify_incomplete(classified)
 }
 
-/// Opens a fresh [`ZipSession`] per scheduler worker.
+/// Opens a fresh [`ZipSession`] per scheduler worker and shares counters.
 pub struct ZipFactory {
     pub path: PathBuf,
+    counters: Arc<ZipCounters>,
+}
+
+impl ZipFactory {
+    /// Create a factory with an isolated counter set.
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            counters: Arc::new(ZipCounters::default()),
+        }
+    }
 }
 
 impl ArchiveSessionFactory for ZipFactory {
     fn open(&self) -> Result<Box<dyn ArchiveSession>> {
-        Ok(Box::new(ZipSession::open(&self.path)?))
+        Ok(Box::new(ZipSession::open_with_counters(
+            &self.path,
+            Arc::clone(&self.counters),
+        )?))
+    }
+
+    fn stats(&self) -> ArchiveStats {
+        let fast_rejected = self.counters.fast_rejected.load(Ordering::Relaxed);
+        ArchiveStats {
+            fast_rejected,
+            full_attempted: self.counters.full_attempted.load(Ordering::Relaxed),
+            by_filter: FilterCounts {
+                zip_verifier: fast_rejected,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive::FastFilterKind;
     use std::io::{Cursor, Write};
     use std::sync::OnceLock;
     use zip::unstable::write::FileOptionsExt;
@@ -710,9 +773,7 @@ mod tests {
         let temp = TempArchive::new("factory");
         temp.write(&zipcrypto_zip());
 
-        let factory = ZipFactory {
-            path: temp.path().to_path_buf(),
-        };
+        let factory = ZipFactory::new(temp.path().to_path_buf());
         let mut first = factory.open().expect("first session");
         let mut second = factory.open().expect("second session");
 
@@ -724,5 +785,66 @@ mod tests {
             second.test_password(PASSWORD).expect("second password"),
             PasswordTest::Hit
         );
+    }
+
+    #[test]
+    fn zip_verifier_counts_fast_rejects_and_full_attempts() {
+        let temp = TempArchive::new("zip-counters");
+        temp.write(&zipcrypto_zip());
+        let factory = ZipFactory::new(temp.path().to_path_buf());
+        let mut session = factory.open().expect("session");
+
+        for index in 0..20 {
+            let candidate = format!("wrong-{index}");
+            assert_eq!(
+                session.test_password(candidate.as_bytes()).expect("miss"),
+                PasswordTest::Miss
+            );
+        }
+        assert_eq!(
+            session.test_password(PASSWORD).expect("hit"),
+            PasswordTest::Hit
+        );
+
+        let stats = factory.stats();
+        assert_eq!(stats.fast_rejected, stats.by_filter.total());
+        assert_eq!(stats.by_filter.zip_verifier, stats.fast_rejected);
+        assert_eq!(FastFilterKind::ZipVerifier.as_str(), "zip_verifier");
+        assert!(
+            stats.fast_rejected >= 1 && stats.full_attempted >= 1,
+            "verifier rejects and full checks must both be counted: {stats:?}"
+        );
+        // Every variant enters exactly one bucket: the 20 wrong candidates and
+        // the correct candidate account for all 21 attempts.
+        assert_eq!(stats.fast_rejected + stats.full_attempted, 21);
+    }
+
+    #[test]
+    fn aes_verifier_counts_fast_rejects_and_full_attempts() {
+        let bytes = aes_zip(
+            &[("hello.txt", HELLO)],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        let temp = TempArchive::new("aes-counters");
+        temp.write(&bytes);
+        let factory = ZipFactory::new(temp.path().to_path_buf());
+        let mut session = factory.open().expect("session");
+
+        for candidate in [b"wrong-a".as_slice(), b"wrong-b".as_slice()] {
+            assert_eq!(
+                session.test_password(candidate).expect("miss"),
+                PasswordTest::Miss
+            );
+        }
+        assert_eq!(
+            session.test_password(PASSWORD).expect("hit"),
+            PasswordTest::Hit
+        );
+
+        let stats = factory.stats();
+        assert_eq!(stats.fast_rejected, stats.by_filter.total());
+        assert_eq!(stats.by_filter.zip_verifier, stats.fast_rejected);
+        assert_eq!(stats.fast_rejected + stats.full_attempted, 3);
     }
 }

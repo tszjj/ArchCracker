@@ -19,9 +19,7 @@ use std::time::{Duration, Instant};
 
 fn factory(path: &Path, info: &acx_core::archive::ArchiveInfo) -> Arc<dyn ArchiveSessionFactory> {
     match info.format {
-        ArchiveFormat::Zip => Arc::new(ZipFactory {
-            path: path.to_path_buf(),
-        }),
+        ArchiveFormat::Zip => Arc::new(ZipFactory::new(path.to_path_buf())),
         ArchiveFormat::SevenZ => Arc::new(
             SevenZFactory::from_info(path.to_path_buf(), info.clone()).expect("7z factory"),
         ),
