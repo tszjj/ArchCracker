@@ -831,12 +831,8 @@ fn install_batch_stop_handler(control: Arc<BatchControl>) -> Result<(), String> 
 
     unsafe extern "system" fn handler(_event: u32) -> i32 {
         if let Some(control) = CONTROL.get() {
-            if PRESSES.fetch_add(1, Ordering::SeqCst) == 0 {
-                control.stop();
-            } else {
-                control.stop();
-                std::process::exit(EXIT_STOPPED as i32);
-            }
+            PRESSES.fetch_add(1, Ordering::SeqCst);
+            control.stop();
         }
         1
     }

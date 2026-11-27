@@ -165,8 +165,12 @@ pub fn load_manifest(path: &Path) -> Result<BatchConfig> {
     let mut max_threads = 0usize;
     for entry in manifest.jobs {
         validate_id(&entry.id)?;
-        if !ids.insert(entry.id.clone()) {
-            return Err(AcxError::Batch(format!("duplicate job id `{}`", entry.id)));
+        // Windows checkpoint file names are case-insensitive.
+        if !ids.insert(entry.id.to_ascii_lowercase()) {
+            return Err(AcxError::Batch(format!(
+                "duplicate job id `{}` (case-insensitive)",
+                entry.id
+            )));
         }
         if entry.threads == 0 || entry.threads > MAX_JOB_THREADS {
             return Err(AcxError::Batch(format!(
@@ -235,6 +239,11 @@ fn validate_id(id: &str) -> Result<()> {
     if id == "." || id == ".." {
         return Err(AcxError::Batch(format!("job id {id:?} is not a file name")));
     }
+    if id.ends_with('.') {
+        return Err(AcxError::Batch(format!(
+            "job id {id:?} must not end with a dot"
+        )));
+    }
     if !id
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
@@ -244,6 +253,7 @@ fn validate_id(id: &str) -> Result<()> {
         )));
     }
     let upper = id.to_ascii_uppercase();
+    let base = upper.split('.').next().unwrap_or("");
     let reserved = ["CON", "PRN", "AUX", "NUL"]
         .iter()
         .chain(
@@ -258,7 +268,7 @@ fn validate_id(id: &str) -> Result<()> {
             ]
             .iter(),
         )
-        .any(|name| upper == *name);
+        .any(|name| base == *name);
     if reserved {
         return Err(AcxError::Batch(format!(
             "job id {id:?} is a reserved Windows device name"
@@ -686,11 +696,29 @@ dictionary = "d.txt"
         );
         let error = load_manifest(&temp.path).expect_err("duplicate id");
         assert!(error.to_string().contains("duplicate job id"), "{error}");
+
+        let temp = TempManifest::new(
+            r#"
+[[jobs]]
+id = "a"
+archive = "a.zip"
+mode = "dict"
+dictionary = "d.txt"
+
+[[jobs]]
+id = "A"
+archive = "b.zip"
+mode = "dict"
+dictionary = "d.txt"
+"#,
+        );
+        let error = load_manifest(&temp.path).expect_err("case-insensitive duplicate id");
+        assert!(error.to_string().contains("duplicate job id"), "{error}");
     }
 
     #[test]
     fn rejects_invalid_ids_and_mode_fields() {
-        for id in ["../x", "a/b", "a:b", "", "CON", ".."] {
+        for id in ["../x", "a/b", "a:b", "", "CON", "..", "a.", "COM1.txt"] {
             let body = format!(
                 "[[jobs]]\nid = \"{id}\"\narchive = \"a.zip\"\nmode = \"dict\"\ndictionary = \"d.txt\"\n"
             );
