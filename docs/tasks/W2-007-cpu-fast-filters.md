@@ -30,7 +30,7 @@
 **W2-006 提供「开关与基础计数」，W2-007 提供「判据与缺失指标」。** 两者职责不重叠：
 
 - W2-006 已建立 `--strict`（关闭全部可能漏报快筛）、`--rar-no-fast-reject`（只关 RAR5 校验快筛）、`--report-stats` 与任务报告字段，并规定「快筛只否决、不产生命中」。当前 `JobStats` 包含：编码候选/尝试/跳过变体、`fast_rejected`、`external_confirmed`（仅外部命中）。
-- W2-006 **没有**提供「完整验证次数」和「外部进程调用次数」；`external_confirmed` 不是调用次数。W2-007 需要新增 `full_verified` 与 `external_attempts`，并接入单任务/批量报告。
+- W2-006 **没有**提供「完整验证次数」和「外部进程调用次数」；`external_confirmed` 不是调用次数。W2-007 需要新增 `full_attempted`（完整验证尝试，含 Miss/错误）与 `external_attempts`（外部进程调用），并接入单任务/批量报告。
 - W2-007 沿用 `RarSession`/`SevenZSession` 现有内部判据，通过**适配器/统计契约**接入，不做「把所有私有分支重写成同一个 trait」的重构；W1-004/W1-009 的稳定路径不重写。
 
 **接口契约（W2-007 必须遵守）**：
@@ -53,10 +53,10 @@
 |---|---|---|
 | F1 | 统一快筛计数/严格模式适配层，ZIP（新增）/7z/RAR5（现有）判据接入 | 三种格式的否决都进入同一统计契约，按格式/判据可区分；现有 RAR5/7z 内部判据保留，不强制重写 |
 | F2 | ZIP：仅实现可证明安全的密码 verifier 判据 | 负例上被否决的候选经完整验证确认无正确密码；给出误放行率与适用格式；不把未认证头字段/签名启发式当可靠否决 |
-| F3 | 7z：保留头 CRC/首块探测，补计数与有限错误分类 | 区分「候选被拒 / 结构解析失败 / I/O / 不支持」；**不承诺**区分「密码错」与「payload 损坏」 |
+| F3 | 7z：保留头 CRC/首块探测，补计数与**归档级**错误分类 | 只区分归档级「结构/损坏、I/O、不支持」；候选级 CRC/首块失败统一按 Miss/候选被拒，**不承诺**逐候选区分密码错与 payload 损坏 |
 | F4 | RAR4：评估 `-hp` 头加密首头校验可行性 | 产出 go/no-go 与证据；普通 RAR4（非 `-hp`）继续外部 `UnRAR t`；若 go，不越过「不解压 RAR」边界 |
 | F5 | 严格模式覆盖本切片新增判据 | `--strict` 下新增判据全部不执行，快筛否决计数为 0 |
-| F6 | 计数接入单任务与批量报告 | 报告含各判据否决数、`full_verified`、`external_attempts`；公式见 §4.4 |
+| F6 | 计数接入单任务与批量报告 | 报告含各判据否决数、`full_attempted`、`external_attempts`；公式见 §4.4 |
 
 ## 4. 非功能性目标
 
@@ -85,11 +85,15 @@
 - 计数公式：
 
 ```text
-attempts          = fast_rejected + full_verified + skipped
-candidates        = 源候选数（水位单位）
-tried             = 已完成的源候选数
-attempts >= candidates
-external_attempts ⊆ full_verified（RAR 外部路径；不要与 full_verified 重复相加）
+candidates      = 源候选数（水位单位）
+tried           = 已完成的源候选数
+variant_slots   = 每个候选去重后的变体数之和（含因不可表示而跳过的变体）
+attempts        = 实际尝试的编码变体数
+                = fast_rejected + full_attempted
+variant_slots   = attempts + skipped
+candidates <= variant_slots
+full_attempted  = 进入完整验证的尝试数（含 Miss、错误；不是成功数）
+external_attempts ⊆ full_attempted（RAR 外部路径；不要与 full_attempted 重复相加）
 除 candidates/tried 外，各项均按编码变体尝试计数
 误杀 false reject = fast_rejected 中错误拒绝了正确密码的数量；必须为 0
 误报 false positive = 命中结果不是真密码；快筛不产生 Hit，完整复核保证 0
@@ -100,10 +104,10 @@ external_attempts ⊆ full_verified（RAR 外部路径；不要与 full_verified
 
 1. 快筛适配器与统一计数契约（保留 RAR5/7z 内部判据）；
 2. ZIP 安全 verifier 判据与负例验证数据（含 `zip` crate 内部重复检查的确认）；
-3. 7z 计数 `full_verified`/错误分类接入，不承诺密码错/损坏区分；
+3. 7z 计数 `full_attempted`/错误分类接入，不承诺密码错/损坏区分；
 4. RAR4 `-hp` 首头校验可行性报告（go/no-go 与证据）；
 5. 严格模式覆盖本切片新增判据；
-6. `full_verified` / `external_attempts` 接入 `--report-stats` 与批量任务报告；
+6. `full_attempted` / `external_attempts` 接入 `--report-stats` 与批量任务报告；
 7. 判据配置的断点签名扩展（仅可配置判据）；
 8. 单测、端到端测试、小型差分语料清单；全量差分/1M 基准留 W2-008；
 9. 本任务文档的实现记录与交接。
@@ -111,7 +115,7 @@ external_attempts ⊆ full_verified（RAR 外部路径；不要与 full_verified
 ## 6. 关键约束与假设
 
 - **正确性优先**：快筛只否决、不产生命中；任何不确定情况一律放行到完整验证。
-- **7z 无认证器**：CRC 失败与 payload 损坏不可完全区分；统一按 Miss/候选被拒，不做「密码错/损坏」二分。
+- **7z 无认证器**：候选级 CRC/解压失败统一按 Miss/候选被拒，不做「密码错/损坏」二分；仅归档级打开/结构/I/O/不支持错误分类。
 - **RAR4 范围**：仅评估 `-hp` 头加密；普通 RAR4 无等价首头校验，维持外部进程。若实现需要 RAR4 AES-128 头解密，新增依赖/许可须单独评审。
 - **RAR 许可边界**：不解压 RAR、不链接或复制 UnRAR 源码、不做自研 RAR 解码；RAR4 评估越界即 no-go。
 - **hashcat 不是 Cargo 依赖**：GPU 不在本切片范围。
@@ -123,7 +127,7 @@ external_attempts ⊆ full_verified（RAR 外部路径；不要与 full_verified
 | 里程碑 | 内容 | 依赖 | 完成标志 |
 |---|---|---|---|
 | M1 契约定稿 | 适配器/计数契约、ZIP 判据清单、7z 分类、签名方案；architect 复核 | W2-006 已完成 | 本文更新为「实现中」并附接口定义 |
-| M2 ZIP + 7z | ZIP verifier、7z 分类与 `full_verified`、单测/小型负例 | M1 | ZIP 负例 0 误杀；计数可在 CLI 输出 |
+| M2 ZIP + 7z | ZIP verifier、7z 分类与 `full_attempted`、单测/小型负例 | M1 | ZIP 负例 0 误杀；计数可在 CLI 输出 |
 | M3 RAR4 与 strict | RAR4 `-hp` go/no-go、严格模式覆盖、批量报告计数 | M2 | RAR4 结论归档；`--strict` 下新增判据否决为 0 |
 | M4 小语料与基准 | 小型差分、ZIP before/after；全量 1M 留 W2-008 | M2/M3 | W2-007 证据完成；W2-008 另出全量报告 |
 
@@ -133,7 +137,7 @@ external_attempts ⊆ full_verified（RAR 外部路径；不要与 full_verified
 2. **0 误杀 / 0 误报**：小型差分语料上被快筛否决的候选，经完整验证确认无一是正确密码；所有命中均经完整复核，无错误命中；
 3. **0 漏报**：`--strict` 与默认模式在已知密码语料上命中率一致；
 4. **RAR4 结论**：产出 `-hp` go/no-go 文档；若 go，快筛只否决且不越过许可边界；若 no-go，普通 RAR4 与 `-hp` 均继续外部进程；
-5. **计数正确**：`--report-stats` 与批量报告按判据给出否决数、`full_verified`、`external_attempts`；满足 §4.4 公式，`attempts >= candidates`；
+5. **计数正确**：`--report-stats` 与批量报告按判据给出否决数、`full_attempted`、`external_attempts`；满足 §4.4 公式，`variant_slots >= candidates`；
 6. **签名生效**：改变可配置判据参数后 `--resume` 拒绝旧断点；无可配置参数时不改变默认签名；
 7. **编码共存**：W2-006 的每个可表示编码变体均独立经过快筛；不可表示变体计入 `skipped`；
 8. **性能证据**：给出 ZIP before/after（若实现）与 RAR4 外部调用计数（若 go）；无未实测百分比；

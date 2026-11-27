@@ -133,9 +133,9 @@ W2 前段（W2-002/003/004）有两种做法：
 **实现目标（参考）**
 
 - ZIP：只实现可证明安全的密码 verifier 判据（ZipCrypto header check / AES verifier），先确认 `zip` crate 是否已在完整验证内部做同样检查；
-- 7z：保留 W1 头 CRC/首块探测，补 `full_verified` 计数与有限错误分类（候选被拒/结构错误/I/O/不支持）；**不承诺**区分密码错与 payload 损坏；
+- 7z：保留 W1 头 CRC/首块探测，补 `full_attempted` 计数与归档级错误分类（结构/I/O/不支持）；候选级 CRC/首块失败统一按 Miss，**不承诺**逐候选区分密码错与 payload 损坏；
 - RAR4：仅评估 `-hp` 头加密首头校验；普通 RAR4 继续外部；不越过“不解压 RAR”边界，否则 no-go；
-- 快筛适配器/计数契约：保留 RAR5/7z 内部判据，不重写引擎；新增 `full_verified`、`external_attempts`；
+- 快筛适配器/计数契约：保留 RAR5/7z 内部判据，不重写引擎；新增 `full_attempted`、`external_attempts`；
 - 命中仍由内置引擎或 `UnRAR t` 完整复核。
 
 **设计目的**
@@ -149,6 +149,7 @@ W2 前段（W2-002/003/004）有两种做法：
 **实现目标（参考）**
 
 - 生成/索引 ZIP/7z/RAR 负例、分卷/SFX、非 ASCII、1GB 条目；
+- 覆盖 W2-007 判据：负例差分证明 0 误杀、strict/default 0 漏报、ZIP/RAR4 before/after 与外部调用计数；
 - ZIP/7z 用内置完整验证，RAR 用外部 `UnRAR t` 做 oracle；
 - 记录各攻击模式 p/s、CPU、RSS、ETA；报告写入 `docs/benchmarks/W2-*.md`；
 - 样本/字典不入库，只记录生成方式和哈希。
@@ -176,8 +177,8 @@ W1 signoff
    │
    ├─ W2-002 mask ──► W2-004 hybrid/rules
    ├─ W2-003 brute ─┘
-   ├─ W2-006 encoding/strict ──► W2-007 fast filters
-   └─ W2-005 batch/jobs ──► W2-008 evidence
+   ├─ W2-006 encoding/strict ──► W2-007 fast filters ──► W2-008 evidence
+   ├─ W2-005 batch/jobs ────────────────────────────────► W2-008 evidence
 W2-001 GPU: Deferred
 ```
 
