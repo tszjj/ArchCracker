@@ -1,7 +1,7 @@
 # W3：Windows GUI 设计大纲
 
 - 状态：设计大纲（2026-11-28），尚未实现
-- 分支：`window-gui`（从 W2 基线 `main @ fe02141` 创建）；**所有 Windows GUI 相关工作只在本分支进行**，合并回 `main` 前不得从 `main` 直接改动 GUI 文件
+- 分支：`windows-gui`（从 W2 基线 `main @ fe02141` 创建）；**所有 Windows GUI 相关工作只在本分支进行**，合并回 `main` 前不得从 `main` 直接改动 GUI 文件
 - 前置：W1/W2 已签核（`docs/W1-SIGNOFF.md`、`docs/W2-SIGNOFF.md`）
 - 平台：Windows 10 22H2 / 11 24H2 x64（ARM64 另评）
 - 依据：`docs/adr/0002-frontend-split.md`、`docs/windows-plan.md` §6、`docs/architecture.md` §5、`docs/W2-SIGNOFF.md`
@@ -165,8 +165,8 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 
 ## 10. 分支与工作流约束
 
-- 分支名：`window-gui`；从 `main @ fe02141`（W2 签核基线）创建。
-- 所有 Windows GUI 相关代码、测试、文档与 PR 目标分支都指向 `window-gui`；不得在 `main` 上直接提交 GUI 变更。
+- 分支名：`windows-gui`；从 `main @ fe02141`（W2 签核基线）创建。
+- 所有 Windows GUI 相关代码、测试、文档与 PR 目标分支都指向 `windows-gui`；不得在 `main` 上直接提交 GUI 变更。
 - 本仓库未启用服务端分支保护，但本地 `pre-push` 钩子禁止直接 push `main`；所有合并通过 PR。
 - 与核心/ABI 相关的改动需在 PR 中说明跨语言影响，并由 architect/release 复核许可与接口稳定性。
 

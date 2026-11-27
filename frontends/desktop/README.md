@@ -26,4 +26,4 @@ Planned for P3. Windows first, then Linux/macOS with the same codebase.
 
 ## Status
 
-Not scaffolded yet. W3 Windows GUI work is isolated on the local branch `window-gui`; see `docs/tasks/W3-windows-gui-outline.md` for architecture, modules, interaction rules, and priorities. M0 defines only the minimal C ABI; W3 must freeze C ABI v1 before GUI implementation.
+Not scaffolded yet. W3 Windows GUI work is isolated on the local branch `windows-gui`; see `docs/tasks/W3-windows-gui-outline.md` for architecture, modules, interaction rules, and priorities. M0 defines only the minimal C ABI; W3 must freeze C ABI v1 before GUI implementation.
