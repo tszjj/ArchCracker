@@ -17,6 +17,8 @@ thiserror = "2"
 encoding_rs = "0.8"
 crossbeam-channel = "0.5"
 sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [dev-dependencies]
 # Tests generate 7z fixtures in-process, so they need the writer/compressor

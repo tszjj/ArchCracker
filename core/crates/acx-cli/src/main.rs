@@ -1,30 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-//! ArchCracker command-line interface (W1: ZIP, 7z, and external RAR).
+//! ArchCracker command-line interface: single-task attacks and batch manifests.
 
-use acx_core::archive::{
-    self, ArchiveFormat, ArchiveSessionFactory, ArchiveSource, RarFactory, SevenZFactory,
-    ZipFactory,
+use acx_core::archive::{ArchiveFormat, ArchiveInfo};
+use acx_core::batch::{self, BatchConfig, BatchControl, BatchOptions};
+use acx_core::estimate::SpaceEstimate;
+use acx_core::job::{
+    self, AttackConfig, EstimateDetail, JobEstimate, JobObserver, JobPreview, JobReport, JobSpec,
+    JobStatus,
 };
-use acx_core::candidates::{BruteSet, CandidateSource, DictionaryStream, HybridSet, MaskSet};
-use acx_core::checkpoint::{
-    ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
-};
-use acx_core::error::AcxError;
-use acx_core::scheduler::{self, RunContext, RunControl, RunOutcome};
-use clap::Parser;
+use acx_core::scheduler::RunControl;
+use clap::{Args, Parser, Subcommand};
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+#[cfg(windows)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 /// Exit code used when the archive is unusable (bad format, unencrypted, unsupported).
 const EXIT_ARCHIVE: u8 = 3;
-/// Exit code used for argument and dictionary problems.
+/// Exit code used for arguments, manifests, dictionaries, and resume problems.
 const EXIT_USAGE: u8 = 2;
 /// Exit code used when no candidate password matched.
 const EXIT_NOT_FOUND: u8 = 1;
@@ -37,12 +35,51 @@ const EXIT_STOPPED: u8 = 4;
     bin_name = "acx",
     version = acx_core::VERSION,
     about = "Offline archive password recovery (authorized use only)",
-    long_about = None
+    long_about = None,
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    #[command(flatten)]
+    single: SingleArgs,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Run every job in a TOML manifest, isolating task failures.
+    Batch(BatchArgs),
+}
+
+#[derive(Args)]
+struct BatchArgs {
+    /// TOML batch manifest.
+    #[arg(value_name = "MANIFEST")]
+    manifest: PathBuf,
+
+    /// Override the manifest's max_parallel (1..=256).
+    #[arg(long = "max-parallel", value_name = "N")]
+    max_parallel: Option<usize>,
+
+    /// Enable reuse of confirmed passwords inside this batch (memory only).
+    #[arg(long = "reuse-found")]
+    reuse_found: bool,
+
+    /// Stop scheduling new tasks after the first failed task.
+    #[arg(long = "fail-fast")]
+    fail_fast: bool,
+
+    /// Print per-job estimates without starting an attack or writing checkpoints.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+}
+
+#[derive(Args)]
+struct SingleArgs {
     /// Archive to recover (ZIP, 7z, or RAR via a user-installed UnRAR).
     #[arg(short = 'f', long = "file", value_name = "PATH")]
-    file: PathBuf,
+    file: Option<PathBuf>,
 
     /// Attack mode: `dict`, `mask`, `brute`, or `hybrid`; the flags imply their mode.
     #[arg(
@@ -121,10 +158,13 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    run(cli)
+    match cli.command {
+        Some(Command::Batch(args)) => run_batch_command(args),
+        None => run_single(cli.single),
+    }
 }
 
-fn run(cli: Cli) -> ExitCode {
+fn run_single(cli: SingleArgs) -> ExitCode {
     let use_mask = !cli.mask.is_empty() || cli.mode == "mask";
     let use_brute = cli.brute.is_some() || cli.mode == "brute";
     let use_hybrid = !cli.rules.is_empty()
@@ -138,6 +178,10 @@ fn run(cli: Cli) -> ExitCode {
         );
         return ExitCode::from(EXIT_USAGE);
     }
+    let Some(file) = cli.file.clone() else {
+        eprintln!("acx: single-task mode requires --file; run `acx batch <manifest>` for a batch");
+        return ExitCode::from(EXIT_USAGE);
+    };
     let modes = [use_mask, use_brute, use_hybrid]
         .iter()
         .filter(|active| **active)
@@ -194,14 +238,116 @@ fn run(cli: Cli) -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
-    let info = match archive::preflight(&cli.file) {
-        Ok(info) => info,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_ARCHIVE);
-        }
+    let spec = JobSpec {
+        id: file
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("job")
+            .to_string(),
+        archive: file.clone(),
+        attack: attack_from_cli(&cli, use_brute, use_mask, use_hybrid),
+        threads: cli.threads,
+        checkpoint: cli
+            .checkpoint
+            .clone()
+            .unwrap_or_else(|| default_checkpoint_path(&file)),
+        resume: cli.resume,
     };
 
+    if cli.estimate {
+        let estimate = match job::estimate_job(&spec) {
+            Ok(estimate) => estimate,
+            Err(error) => {
+                eprintln!("acx: {error}");
+                return ExitCode::from(exit_for_error(&error));
+            }
+        };
+        print_archive(&estimate.info);
+        print_estimate(&estimate);
+        return ExitCode::SUCCESS;
+    }
+
+    let control = Arc::new(RunControl::new());
+    if let Err(error) = install_stop_handler(Arc::clone(&control)) {
+        eprintln!("acx: Ctrl+C handler unavailable: {error}");
+    }
+    if std::io::stdin().is_terminal() {
+        start_console_control(Arc::clone(&control));
+        eprintln!("Controls: p pause, r resume, s stop (Ctrl+C also stops)");
+    }
+
+    match job::run_job(&spec, control, &[], &mut CliObserver) {
+        Ok(report) => exit_for_report(&report),
+        Err(error) => {
+            eprintln!("acx: {error}");
+            ExitCode::from(exit_for_error(&error))
+        }
+    }
+}
+
+fn attack_from_cli(
+    cli: &SingleArgs,
+    use_brute: bool,
+    use_mask: bool,
+    use_hybrid: bool,
+) -> AttackConfig {
+    let custom = custom_texts(cli);
+    if use_brute {
+        AttackConfig::Brute {
+            charset: cli.brute.clone().expect("validated --brute"),
+            min_len: cli.min_len.expect("validated --min-len"),
+            max_len: cli.max_len.expect("validated --max-len"),
+            custom,
+        }
+    } else if use_mask {
+        AttackConfig::Mask {
+            masks: cli.mask.clone(),
+            custom,
+        }
+    } else if use_hybrid {
+        AttackConfig::Hybrid {
+            dictionary: cli.dictionary.clone().expect("validated dictionary"),
+            rules: cli.rules.clone(),
+            prefix_mask: cli.prefix_mask.clone(),
+            suffix_mask: cli.suffix_mask.clone(),
+            custom,
+        }
+    } else {
+        AttackConfig::Dictionary {
+            dictionary: cli.dictionary.clone().expect("validated dictionary"),
+        }
+    }
+}
+
+fn custom_texts(cli: &SingleArgs) -> [Option<String>; 4] {
+    [
+        cli.custom_charset1.clone(),
+        cli.custom_charset2.clone(),
+        cli.custom_charset3.clone(),
+        cli.custom_charset4.clone(),
+    ]
+}
+
+struct CliObserver;
+
+impl JobObserver for CliObserver {
+    fn prepared(&mut self, preview: &JobPreview) {
+        print_archive(&preview.estimate.info);
+        print_attack_summary(&preview.estimate);
+        if preview.resumed {
+            println!(
+                "Resume: {} (candidate {}/{}, tried {})",
+                preview.checkpoint.display(),
+                preview.start_index,
+                preview.estimate.total,
+                preview.tried
+            );
+        }
+        println!("Checkpoint: {}", preview.checkpoint.display());
+    }
+}
+
+fn print_archive(info: &ArchiveInfo) {
     println!("Archive: {}", info.path.display());
     println!("Format: {}", info.format.as_str());
     println!("Encryption: {}", info.encryption.as_str());
@@ -226,443 +372,93 @@ fn run(cli: Cli) -> ExitCode {
             None => println!("Selected: none"),
         }
     }
-
-    if cli.estimate {
-        return estimate_attack(&cli, &info, use_brute, use_hybrid);
-    }
-
-    if !info.has_verification_target() {
-        eprintln!("acx: archive is not encrypted or has no file entries");
-        return ExitCode::from(EXIT_ARCHIVE);
-    }
-
-    let factory: Arc<dyn ArchiveSessionFactory> = match info.format {
-        ArchiveFormat::Zip => Arc::new(ZipFactory {
-            path: cli.file.clone(),
-        }),
-        ArchiveFormat::SevenZ => match SevenZFactory::from_info(cli.file.clone(), info.clone()) {
-            Ok(factory) => Arc::new(factory),
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_ARCHIVE);
-            }
-        },
-        ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
-            match RarFactory::from_info(cli.file.clone(), info.clone()) {
-                Ok(factory) => Arc::new(factory),
-                Err(error) => {
-                    eprintln!("acx: {error}");
-                    return ExitCode::from(EXIT_ARCHIVE);
-                }
-            }
-        }
-    };
-    let checkpoint_path = cli
-        .checkpoint
-        .clone()
-        .unwrap_or_else(|| default_checkpoint_path(&cli.file));
-    let source = match ArchiveSource::resolve(&cli.file) {
-        Ok(source) => source,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_ARCHIVE);
-        }
-    };
-    let archive_fingerprint = match ArchiveFingerprint::from_source(&source) {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_ARCHIVE);
-        }
-    };
-
-    let store = CheckpointStore::new(checkpoint_path.clone());
-    if cli.resume {
-        if let Err(error) = store.clear_lock() {
-            eprintln!("acx: could not clear stale checkpoint lock: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    }
-    let _lock = match store.lock() {
-        Ok(lock) => lock,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-
-    let mut start_index = 0usize;
-    let mut tried = 0u64;
-    let mut loaded_checkpoint = None;
-    if cli.resume {
-        let checkpoint = match store.load() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        start_index = match usize::try_from(checkpoint.completed_through) {
-            Ok(start) => start,
-            Err(_) => {
-                eprintln!("acx: checkpoint watermark is too large");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        tried = checkpoint.tried;
-        loaded_checkpoint = Some(checkpoint);
-    }
-
-    let custom_texts = custom_texts(&cli);
-    let (dictionary_fingerprint, attack, source, total, label) = if use_brute {
-        let charset_text = cli.brute.as_deref().expect("validated --brute");
-        let min_len = cli.min_len.expect("validated --min-len");
-        let max_len = cli.max_len.expect("validated --max-len");
-        let set = match BruteSet::parse(charset_text, &custom_texts, min_len, max_len) {
-            Ok(set) => set,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let estimate = set.estimate(cli.threads);
-        for warning in &estimate.warnings {
-            eprintln!("WARNING: {warning}");
-        }
-        let (rate, rate_label) = rate_for(info.format);
-        let seconds = estimate.keyspace as f64 / rate;
-        if seconds > 86_400.0 {
-            eprintln!(
-                "WARNING: estimated {} exceeds 24h on {rate_label} at the measured rate",
-                format_duration(seconds)
-            );
-        }
-        println!("Brute charset: {charset_text}");
-        println!("Lengths: {min_len}..={max_len}");
-        println!("Brute keyspace: {}", estimate.keyspace);
-        print_space(&estimate.space);
-        if !estimate.fits_usize {
-            eprintln!(
-                "acx: brute keyspace {} cannot be executed with the current usize index limit",
-                estimate.keyspace
-            );
-            return ExitCode::from(EXIT_USAGE);
-        }
-        let attack = AttackFingerprint::new("brute", set.signature());
-        let source = match set.into_source(start_index) {
-            Ok(source) => source,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let total = source.total();
-        (
-            None,
-            attack,
-            Box::new(source) as Box<dyn CandidateSource>,
-            total,
-            "Candidates",
-        )
-    } else if use_hybrid {
-        let dictionary = cli
-            .dictionary
-            .as_ref()
-            .expect("validated hybrid dictionary");
-        let fingerprint = match FileFingerprint::from_path(dictionary) {
-            Ok(fingerprint) => fingerprint,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let set = match HybridSet::parse(
-            dictionary,
-            &cli.rules,
-            cli.prefix_mask.as_deref(),
-            cli.suffix_mask.as_deref(),
-            &custom_texts,
-        ) {
-            Ok(set) => set,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let estimate = set.estimate(cli.threads);
-        let (rate, rate_label) = rate_for(info.format);
-        let seconds = estimate.total as f64 / rate;
-        if seconds > 86_400.0 {
-            eprintln!(
-                "WARNING: estimated {} exceeds 24h on {rate_label} at the measured rate",
-                format_duration(seconds)
-            );
-        }
-        for warning in &estimate.warnings {
-            eprintln!("WARNING: {warning}");
-        }
-        println!("Dictionary lines: {}", estimate.dict_lines);
-        println!("Variants per line: {}", estimate.variants_per_line);
-        println!("Hybrid keyspace: {}", estimate.total);
-        print_space(&estimate.space);
-        if !estimate.fits_usize {
-            eprintln!(
-                "acx: hybrid total {} cannot be executed with the current usize index limit",
-                estimate.total
-            );
-            return ExitCode::from(EXIT_USAGE);
-        }
-        let attack = AttackFingerprint::new("hybrid", set.signature());
-        let source = match set.into_source(start_index) {
-            Ok(source) => source,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let total = source.total();
-        (
-            Some(fingerprint),
-            attack,
-            Box::new(source) as Box<dyn CandidateSource>,
-            total,
-            "Candidates",
-        )
-    } else if use_mask {
-        let set = match MaskSet::parse(&cli.mask, &custom_texts) {
-            Ok(set) => set,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let estimate = set.estimate(cli.threads);
-        for warning in &estimate.warnings {
-            eprintln!("WARNING: {warning}");
-        }
-        let (rate, label) = rate_for(info.format);
-        let seconds = estimate.keyspace as f64 / rate;
-        if seconds > 86_400.0 {
-            eprintln!(
-                "WARNING: estimated {} exceeds 24h on {label} at the measured rate",
-                format_duration(seconds)
-            );
-        }
-        println!("Mask keyspace: {}", estimate.keyspace);
-        print_space(&estimate.space);
-        if !estimate.fits_usize {
-            eprintln!(
-                "acx: mask keyspace {} cannot be executed with the current usize index limit",
-                estimate.keyspace
-            );
-            return ExitCode::from(EXIT_USAGE);
-        }
-        let attack = AttackFingerprint::new("mask", set.signature());
-        let source = match set.into_source(start_index) {
-            Ok(source) => source,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let total = source.total();
-        (
-            None,
-            attack,
-            Box::new(source) as Box<dyn CandidateSource>,
-            total,
-            "Candidates",
-        )
-    } else {
-        let dictionary = cli.dictionary.as_ref().expect("validated dict path");
-        let fingerprint = match FileFingerprint::from_path(dictionary) {
-            Ok(fingerprint) => fingerprint,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let dictionary = match DictionaryStream::open(dictionary, start_index) {
-            Ok(dictionary) => dictionary,
-            Err(error) => {
-                eprintln!("acx: {error}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        let total = dictionary.total();
-        (
-            Some(fingerprint),
-            AttackFingerprint::dictionary(),
-            Box::new(dictionary) as Box<dyn CandidateSource>,
-            total,
-            "Passwords",
-        )
-    };
-
-    println!("{label}: {total}");
-    if total == 0 {
-        eprintln!("acx: attack contains no candidates");
-        return ExitCode::from(EXIT_USAGE);
-    }
-
-    if let Some(checkpoint) = loaded_checkpoint.as_ref() {
-        if let Err(error) = checkpoint.validate(
-            &archive_fingerprint,
-            dictionary_fingerprint.as_ref(),
-            &attack,
-            total as u64,
-        ) {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-        println!(
-            "Resume: {} (candidate {start_index}/{total}, tried {})",
-            checkpoint_path.display(),
-            checkpoint.tried
-        );
-    }
-
-    if start_index >= total {
-        let _ = store.remove();
-        println!("NOT FOUND");
-        return ExitCode::from(EXIT_NOT_FOUND);
-    }
-
-    let initial = Checkpoint::new(
-        archive_fingerprint.clone(),
-        dictionary_fingerprint.clone(),
-        attack.clone(),
-        cli.threads.clamp(1, 256),
-        start_index as u64,
-        tried,
-        total as u64,
-    );
-    if let Err(error) = store.save(&initial) {
-        eprintln!("acx: could not write initial checkpoint: {error}");
-        return ExitCode::from(EXIT_ARCHIVE);
-    }
-
-    println!("Checkpoint: {}", checkpoint_path.display());
-    let context = RunContext::new(total, start_index, tried, cli.threads);
-    if let Err(error) = install_stop_handler(context.control_arc()) {
-        eprintln!("acx: Ctrl+C handler unavailable: {error}");
-    }
-    if std::io::stdin().is_terminal() {
-        start_console_control(context.control_arc());
-        eprintln!("Controls: p pause, r resume, s stop (Ctrl+C also stops)");
-    }
-
-    let finished = Arc::new(AtomicBool::new(false));
-    let monitor_error = Arc::new(Mutex::new(None::<String>));
-    let monitor = start_checkpoint_monitor(
-        store.clone(),
-        Arc::clone(&context),
-        archive_fingerprint.clone(),
-        dictionary_fingerprint.clone(),
-        attack.clone(),
-        Arc::clone(&finished),
-        Arc::clone(&monitor_error),
-    );
-
-    let outcome = scheduler::run_with_source(factory, source, Arc::clone(&context));
-    finished.store(true, Ordering::SeqCst);
-    let _ = monitor.join();
-    if let Some(error) = monitor_error
-        .lock()
-        .ok()
-        .and_then(|slot| slot.as_ref().cloned())
-    {
-        eprintln!("acx: checkpoint monitor: {error}");
-    }
-
-    match outcome {
-        Ok(RunOutcome::Found(hit)) => {
-            let password = String::from_utf8_lossy(&hit.password);
-            println!("FOUND: {password}");
-            if let Err(error) = store.remove() {
-                eprintln!(
-                    "acx: could not remove checkpoint {}: {error}; refusing to leave a resumable checkpoint",
-                    store.path().display()
-                );
-                return ExitCode::from(EXIT_ARCHIVE);
-            }
-            ExitCode::SUCCESS
-        }
-        Ok(RunOutcome::Exhausted) => {
-            if let Err(error) = store.remove() {
-                eprintln!("acx: could not remove checkpoint: {error}");
-            }
-            println!("NOT FOUND");
-            ExitCode::from(EXIT_NOT_FOUND)
-        }
-        Ok(RunOutcome::Stopped(progress)) => {
-            let checkpoint = Checkpoint::new(
-                archive_fingerprint,
-                dictionary_fingerprint,
-                attack,
-                context.threads(),
-                progress.completed_through,
-                progress.tried,
-                progress.total,
-            );
-            if let Err(error) = store.save(&checkpoint) {
-                eprintln!("acx: could not save checkpoint: {error}");
-                return ExitCode::from(EXIT_ARCHIVE);
-            }
-            println!(
-                "STOPPED: checkpoint {} (candidate {}/{})",
-                store.path().display(),
-                progress.completed_through,
-                progress.total
-            );
-            ExitCode::from(EXIT_STOPPED)
-        }
-        Err(error) => {
-            let progress = context.snapshot();
-            if progress.tried > 0 {
-                let checkpoint = Checkpoint::new(
-                    archive_fingerprint,
-                    dictionary_fingerprint,
-                    attack,
-                    context.threads(),
-                    progress.completed_through,
-                    progress.tried,
-                    progress.total,
-                );
-                if let Err(save_error) = store.save(&checkpoint) {
-                    eprintln!("acx: could not save checkpoint: {save_error}");
-                }
-            }
-            eprintln!("acx: {error}");
-            let exit = if matches!(&error, AcxError::Dictionary(_) | AcxError::Attack(_)) {
-                EXIT_USAGE
-            } else {
-                EXIT_ARCHIVE
-            };
-            ExitCode::from(exit)
-        }
-    }
 }
 
-fn custom_texts(cli: &Cli) -> [Option<String>; 4] {
-    [
-        cli.custom_charset1.clone(),
-        cli.custom_charset2.clone(),
-        cli.custom_charset3.clone(),
-        cli.custom_charset4.clone(),
-    ]
-}
-
-fn rate_for(format: ArchiveFormat) -> (f64, &'static str) {
-    match format {
-        ArchiveFormat::Zip => (25_409.0, "ZIP AES"),
-        ArchiveFormat::SevenZ => (967.9, "7z AES"),
-        ArchiveFormat::Rar4 => (221.5, "RAR4 external"),
-        ArchiveFormat::Rar5 => (1_727.2, "RAR5 check"),
+/// Pre-attack summary printed before an actual run.
+fn print_attack_summary(estimate: &JobEstimate) {
+    match &estimate.detail {
+        EstimateDetail::Dictionary => println!("Passwords: {}", estimate.total),
+        EstimateDetail::Mask { .. } => println!("Mask keyspace: {}", estimate.total),
+        EstimateDetail::Brute {
+            charset,
+            min_len,
+            max_len,
+            ..
+        } => {
+            println!("Brute charset: {charset}");
+            println!("Lengths: {min_len}..={max_len}");
+            println!("Brute keyspace: {}", estimate.total);
+        }
+        EstimateDetail::Hybrid {
+            dict_lines,
+            variants_per_line,
+        } => {
+            println!("Dictionary lines: {dict_lines}");
+            println!("Variants per line: {variants_per_line}");
+            println!("Hybrid keyspace: {}", estimate.total);
+        }
     }
+    print_space(&estimate.space);
+    for warning in &estimate.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+    warn_if_slow(estimate);
 }
 
-fn print_space(space: &acx_core::estimate::SpaceEstimate) {
+/// Estimate-mode output: mode details, space, then format/ETA/capacity.
+fn print_estimate(estimate: &JobEstimate) {
+    match &estimate.detail {
+        EstimateDetail::Dictionary => {
+            println!("Passwords: {}", estimate.total);
+            println!("Fits executable index: true");
+        }
+        EstimateDetail::Mask { masks, per_mask } => {
+            println!("Mask: {}", masks.join(" | "));
+            println!("Keyspace: {}", estimate.total);
+            println!("Fits executable index: {}", estimate.fits_usize);
+            for (index, keyspace) in per_mask.iter().enumerate() {
+                println!("Mask {}: {keyspace}", index + 1);
+            }
+        }
+        EstimateDetail::Brute {
+            charset,
+            min_len,
+            max_len,
+            per_len,
+        } => {
+            println!("Brute charset: {charset}");
+            println!("Lengths: {min_len}..={max_len}");
+            println!("Keyspace: {}", estimate.total);
+            println!("Fits executable index: {}", estimate.fits_usize);
+            for (offset, keyspace) in per_len.iter().enumerate() {
+                println!("Length {}: {keyspace}", min_len + offset);
+            }
+        }
+        EstimateDetail::Hybrid {
+            dict_lines,
+            variants_per_line,
+        } => {
+            println!("Dictionary lines: {dict_lines}");
+            println!("Variants per line: {variants_per_line}");
+            println!("Total candidates: {}", estimate.total);
+            println!("Fits executable index: {}", estimate.fits_usize);
+        }
+    }
+    print_space(&estimate.space);
+    for warning in &estimate.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+
+    let (rate, label) = rate_for(estimate.info.format);
+    let seconds = estimate.total as f64 / rate;
+    let capacity = rate * 86_400.0;
+    println!("Format: {label} ({rate:.1}/s measured)");
+    println!("ETA: {}", format_duration(seconds));
+    println!("24h capacity: {capacity:.0} candidates");
+    warn_if_over_24h(seconds);
+}
+
+fn print_space(space: &SpaceEstimate) {
     println!(
         "Watermark bitmap: {} ({} candidates)",
         format_bytes(space.watermark_bytes),
@@ -675,6 +471,86 @@ fn print_space(space: &acx_core::estimate::SpaceEstimate) {
     );
     for warning in &space.warnings {
         eprintln!("WARNING: {warning}");
+    }
+}
+
+fn warn_if_slow(estimate: &JobEstimate) {
+    let (rate, label) = rate_for(estimate.info.format);
+    let seconds = estimate.total as f64 / rate;
+    if seconds > 86_400.0 {
+        eprintln!(
+            "WARNING: estimated {} exceeds 24h on {label} at the measured rate",
+            format_duration(seconds)
+        );
+    }
+}
+
+fn warn_if_over_24h(seconds: f64) {
+    if seconds > 86_400.0 {
+        eprintln!(
+            "WARNING: estimated {} exceeds 24h at the measured rate; reduce the keyspace or variants",
+            format_duration(seconds)
+        );
+    }
+}
+
+fn exit_for_report(report: &JobReport) -> ExitCode {
+    for warning in &report.warnings {
+        eprintln!("acx: {warning}");
+    }
+    match report.status {
+        JobStatus::Found => {
+            let password = report
+                .password
+                .as_deref()
+                .map(String::from_utf8_lossy)
+                .unwrap_or_default();
+            println!("FOUND: {password}");
+            ExitCode::SUCCESS
+        }
+        JobStatus::NotFound => {
+            println!("NOT FOUND");
+            ExitCode::from(EXIT_NOT_FOUND)
+        }
+        JobStatus::Stopped => {
+            println!(
+                "STOPPED: checkpoint {} (candidate {}/{})",
+                report.checkpoint.display(),
+                report.completed_through,
+                report.total
+            );
+            ExitCode::from(EXIT_STOPPED)
+        }
+        JobStatus::Cancelled => ExitCode::from(EXIT_STOPPED),
+        JobStatus::Failed => {
+            if let Some(error) = &report.error {
+                eprintln!("acx: {error}");
+                ExitCode::from(exit_for_error(error))
+            } else {
+                eprintln!("acx: job failed");
+                ExitCode::from(EXIT_ARCHIVE)
+            }
+        }
+    }
+}
+
+fn exit_for_error(error: &acx_core::error::AcxError) -> u8 {
+    use acx_core::error::AcxError;
+    match error {
+        AcxError::Attack(_)
+        | AcxError::Batch(_)
+        | AcxError::Checkpoint(_)
+        | AcxError::Dictionary(_) => EXIT_USAGE,
+        _ => EXIT_ARCHIVE,
+    }
+}
+
+fn rate_for(format: ArchiveFormat) -> (f64, &'static str) {
+    match format {
+        ArchiveFormat::Zip => (25_409.0, "ZIP AES"),
+        ArchiveFormat::SevenZ => (967.9, "7z AES"),
+        ArchiveFormat::Rar4 => (221.5, "RAR4 external"),
+        ArchiveFormat::Rar5 => (1_727.2, "RAR5 check"),
     }
 }
 
@@ -697,136 +573,6 @@ fn format_bytes(bytes: u128) -> String {
     }
 }
 
-fn estimate_attack(
-    cli: &Cli,
-    info: &acx_core::archive::ArchiveInfo,
-    use_brute: bool,
-    use_hybrid: bool,
-) -> ExitCode {
-    if use_brute {
-        estimate_brute(cli, info)
-    } else if use_hybrid {
-        estimate_hybrid(cli, info)
-    } else {
-        estimate_mask(cli, info)
-    }
-}
-
-fn estimate_brute(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
-    let charset_text = cli.brute.as_deref().expect("validated --brute");
-    let min_len = cli.min_len.expect("validated --min-len");
-    let max_len = cli.max_len.expect("validated --max-len");
-    let set = match BruteSet::parse(charset_text, &custom_texts(cli), min_len, max_len) {
-        Ok(set) => set,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-    let estimate = set.estimate(cli.threads);
-    println!("Brute charset: {charset_text}");
-    println!("Lengths: {min_len}..={max_len}");
-    println!("Keyspace: {}", estimate.keyspace);
-    println!("Fits executable index: {}", estimate.fits_usize);
-    for (offset, keyspace) in estimate.per_len.iter().enumerate() {
-        println!("Length {}: {keyspace}", min_len + offset);
-    }
-    for warning in &estimate.warnings {
-        eprintln!("WARNING: {warning}");
-    }
-    print_space(&estimate.space);
-
-    let (rate, label) = rate_for(info.format);
-    let seconds = estimate.keyspace as f64 / rate;
-    let capacity = rate * 86_400.0;
-    println!("Format: {label} ({rate:.1}/s measured)");
-    println!("ETA: {}", format_duration(seconds));
-    println!("24h capacity: {capacity:.0} candidates");
-    if seconds > 86_400.0 {
-        eprintln!(
-            "WARNING: estimated {} exceeds 24h at the measured rate; reduce the charset or --max-len",
-            format_duration(seconds)
-        );
-    }
-    ExitCode::SUCCESS
-}
-
-fn estimate_hybrid(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
-    let dictionary = cli
-        .dictionary
-        .as_ref()
-        .expect("validated hybrid dictionary");
-    let set = match HybridSet::parse(
-        dictionary,
-        &cli.rules,
-        cli.prefix_mask.as_deref(),
-        cli.suffix_mask.as_deref(),
-        &custom_texts(cli),
-    ) {
-        Ok(set) => set,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-    let estimate = set.estimate(cli.threads);
-    println!("Dictionary lines: {}", estimate.dict_lines);
-    println!("Variants per line: {}", estimate.variants_per_line);
-    println!("Total candidates: {}", estimate.total);
-    println!("Fits executable index: {}", estimate.fits_usize);
-    print_space(&estimate.space);
-    for warning in &estimate.warnings {
-        eprintln!("WARNING: {warning}");
-    }
-
-    let (rate, label) = rate_for(info.format);
-    let seconds = estimate.total as f64 / rate;
-    let capacity = rate * 86_400.0;
-    println!("Format: {label} ({rate:.1}/s measured)");
-    println!("ETA: {}", format_duration(seconds));
-    println!("24h capacity: {capacity:.0} candidates");
-    if seconds > 86_400.0 {
-        eprintln!(
-            "WARNING: estimated {} exceeds 24h at the measured rate; reduce the dictionary or variants",
-            format_duration(seconds)
-        );
-    }
-    ExitCode::SUCCESS
-}
-
-fn estimate_mask(cli: &Cli, info: &acx_core::archive::ArchiveInfo) -> ExitCode {
-    let custom = custom_texts(cli);
-    let set = match MaskSet::parse(&cli.mask, &custom) {
-        Ok(set) => set,
-        Err(error) => {
-            eprintln!("acx: {error}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-    let estimate = set.estimate(cli.threads);
-    println!("Mask: {}", cli.mask.join(" | "));
-    println!("Keyspace: {}", estimate.keyspace);
-    println!("Fits executable index: {}", estimate.fits_usize);
-    for warning in &estimate.warnings {
-        eprintln!("WARNING: {warning}");
-    }
-    print_space(&estimate.space);
-
-    let (rate, label) = rate_for(info.format);
-    let seconds = estimate.keyspace as f64 / rate;
-    let capacity = rate * 86_400.0;
-    println!("Format: {label} ({rate:.1}/s measured)");
-    println!("ETA: {}", format_duration(seconds));
-    println!("24h capacity: {capacity:.0} candidates");
-    if seconds > 86_400.0 {
-        eprintln!(
-            "WARNING: estimated {} exceeds 24h at the measured rate; reduce mask/charset or use multiple masks",
-            format_duration(seconds)
-        );
-    }
-    ExitCode::SUCCESS
-}
-
 fn format_duration(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
         return "unknown".to_string();
@@ -844,49 +590,160 @@ fn format_duration(seconds: f64) -> String {
     }
 }
 
-fn default_checkpoint_path(archive: &std::path::Path) -> PathBuf {
+fn default_checkpoint_path(archive: &Path) -> PathBuf {
     PathBuf::from(format!("{}.acx-checkpoint", archive.display()))
 }
 
-fn start_checkpoint_monitor(
-    store: CheckpointStore,
-    context: Arc<RunContext>,
-    archive: ArchiveFingerprint,
-    dictionary: Option<FileFingerprint>,
-    attack: AttackFingerprint,
-    finished: Arc<AtomicBool>,
-    error_slot: Arc<Mutex<Option<String>>>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(1));
-        if finished.load(Ordering::SeqCst) {
-            break;
+fn run_batch_command(args: BatchArgs) -> ExitCode {
+    let config = match batch::load_manifest(&args.manifest) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
         }
-        if context.has_found() {
-            // The hit is in memory; never persist a checkpoint that could make
-            // a later --resume skip it.
-            break;
+    };
+    for warning in &config.warnings {
+        eprintln!("WARNING: {warning}");
+    }
+    if args.dry_run {
+        return dry_run(&config, args.max_parallel);
+    }
+    if let Some(max_parallel) = args.max_parallel {
+        if max_parallel == 0 || max_parallel > 256 {
+            eprintln!("acx: --max-parallel must be 1..=256");
+            return ExitCode::from(EXIT_USAGE);
         }
-        let progress = context.snapshot();
-        if progress.tried == 0 {
-            continue;
+    }
+    let control = Arc::new(BatchControl::new());
+    if let Err(error) = install_batch_stop_handler(Arc::clone(&control)) {
+        eprintln!("acx: Ctrl+C handler unavailable: {error}");
+    }
+    let options = BatchOptions {
+        max_parallel: args.max_parallel,
+        reuse_found: args.reuse_found.then_some(true),
+        fail_fast: args.fail_fast,
+        control,
+    };
+    let report = match batch::run_batch(&config, &options) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
         }
-        let checkpoint = Checkpoint::new(
-            archive.clone(),
-            dictionary.clone(),
-            attack.clone(),
-            context.threads(),
-            progress.completed_through,
-            progress.tried,
-            progress.total,
-        );
-        if let Err(error) = store.save(&checkpoint) {
-            if let Ok(mut slot) = error_slot.lock() {
-                *slot = Some(error.to_string());
+    };
+
+    for task in &report.tasks {
+        match task.report.status {
+            JobStatus::Found => {
+                let password = task
+                    .report
+                    .password
+                    .as_deref()
+                    .map(String::from_utf8_lossy)
+                    .unwrap_or_default();
+                let reused = if task.report.reused { " (reused)" } else { "" };
+                println!("[{0}] FOUND: {password}{reused}", task.id);
             }
-            break;
+            JobStatus::NotFound => println!(
+                "[{0}] NOT FOUND (tried {1}/{2})",
+                task.id, task.report.tried, task.report.total
+            ),
+            JobStatus::Stopped => println!(
+                "[{0}] STOPPED (checkpoint {1}, candidate {2}/{3})",
+                task.id,
+                task.report.checkpoint.display(),
+                task.report.completed_through,
+                task.report.total
+            ),
+            JobStatus::Cancelled => println!("[{}] CANCELLED", task.id),
+            JobStatus::Failed => {
+                let error = task
+                    .report
+                    .error
+                    .as_ref()
+                    .map(std::string::ToString::to_string)
+                    .unwrap_or_else(|| "unknown failure".to_string());
+                eprintln!("[{}] FAILED: {error}", task.id);
+            }
         }
-    })
+        for warning in &task.report.warnings {
+            eprintln!("[{}] {warning}", task.id);
+        }
+    }
+    println!(
+        "Batch summary: {} found, {} not found, {} failed, {} cancelled",
+        report.found_count(),
+        report
+            .tasks
+            .iter()
+            .filter(|task| task.report.status == JobStatus::NotFound)
+            .count(),
+        report.failed_count(),
+        report
+            .tasks
+            .iter()
+            .filter(|task| task.report.status == JobStatus::Cancelled)
+            .count()
+    );
+
+    if report.stopped
+        || report
+            .tasks
+            .iter()
+            .any(|task| task.report.status == JobStatus::Stopped)
+    {
+        ExitCode::from(EXIT_STOPPED)
+    } else if report.any_failed() {
+        ExitCode::from(EXIT_ARCHIVE)
+    } else if report.any_found() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_NOT_FOUND)
+    }
+}
+
+fn dry_run(config: &BatchConfig, max_parallel: Option<usize>) -> ExitCode {
+    if let Some(max_parallel) = max_parallel {
+        if max_parallel == 0 || max_parallel > 256 {
+            eprintln!("acx: --max-parallel must be 1..=256");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    }
+    let parallel = max_parallel
+        .unwrap_or(config.max_parallel)
+        .clamp(1, config.jobs.len().max(1));
+    let mut failed = false;
+    let mut serial_seconds = 0.0f64;
+    let mut peaks = Vec::new();
+    for preview in batch::estimate_batch(config) {
+        println!("Task: {}", preview.id);
+        match preview.result {
+            Ok(estimate) => {
+                print_archive(&estimate.info);
+                print_estimate(&estimate);
+                let (rate, _) = rate_for(estimate.info.format);
+                serial_seconds += estimate.total as f64 / rate;
+                peaks.push(estimate.space.estimated_peak_bytes);
+            }
+            Err(error) => {
+                eprintln!("acx: task `{}`: {error}", preview.id);
+                failed = true;
+            }
+        }
+        println!();
+    }
+    if failed {
+        return ExitCode::from(EXIT_USAGE);
+    }
+    peaks.sort_unstable_by(|left, right| right.cmp(left));
+    let peak_bytes: u128 = peaks.iter().take(parallel).sum();
+    println!(
+        "Batch estimate: {} jobs, serial ETA {}, peak core memory {} (max_parallel={parallel})",
+        config.jobs.len(),
+        format_duration(serial_seconds),
+        format_bytes(peak_bytes)
+    );
+    ExitCode::SUCCESS
 }
 
 /// Optional TTY control loop. It is detached: when the run finishes the process
@@ -929,7 +786,6 @@ fn start_console_control(control: Arc<RunControl>) {
 
 #[cfg(windows)]
 fn install_stop_handler(control: Arc<RunControl>) -> Result<(), String> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::OnceLock;
     use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 
@@ -961,7 +817,43 @@ fn install_stop_handler(control: Arc<RunControl>) -> Result<(), String> {
 
 #[cfg(not(windows))]
 fn install_stop_handler(_control: Arc<RunControl>) -> Result<(), String> {
-    // W1 is Windows-first. Other platforms keep the default SIGINT behavior;
-    // the core RunControl API is still available to future frontends.
+    // W1 is Windows-first. Other platforms keep the default SIGINT behavior.
+    Ok(())
+}
+
+#[cfg(windows)]
+fn install_batch_stop_handler(control: Arc<BatchControl>) -> Result<(), String> {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+
+    static CONTROL: OnceLock<Arc<BatchControl>> = OnceLock::new();
+    static PRESSES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "system" fn handler(_event: u32) -> i32 {
+        if let Some(control) = CONTROL.get() {
+            if PRESSES.fetch_add(1, Ordering::SeqCst) == 0 {
+                control.stop();
+            } else {
+                control.stop();
+                std::process::exit(EXIT_STOPPED as i32);
+            }
+        }
+        1
+    }
+
+    CONTROL
+        .set(control)
+        .map_err(|_| "Ctrl+C handler already installed".to_string())?;
+    // SAFETY: the handler has C ABI and lives for the process lifetime.
+    let installed = unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
+    if installed == 0 {
+        Err("SetConsoleCtrlHandler failed".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn install_batch_stop_handler(_control: Arc<BatchControl>) -> Result<(), String> {
     Ok(())
 }

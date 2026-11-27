@@ -95,6 +95,7 @@ impl Dictionary {
 pub struct DictionaryStream {
     reader: LineReader,
     total: usize,
+    max_line_bytes: usize,
     next_index: usize,
     held_line: Option<String>,
 }
@@ -120,6 +121,7 @@ impl DictionaryStream {
         Ok(Self {
             reader,
             total: scan.lines,
+            max_line_bytes: scan.max_line_bytes,
             next_index: skip,
             held_line: None,
         })
@@ -127,6 +129,11 @@ impl DictionaryStream {
 
     pub fn total(&self) -> usize {
         self.total
+    }
+
+    /// Longest decoded line, for the job/batch memory estimate.
+    pub fn max_line_bytes(&self) -> usize {
+        self.max_line_bytes
     }
 }
 
