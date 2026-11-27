@@ -331,8 +331,11 @@ fn custom_texts(cli: &SingleArgs) -> [Option<String>; 4] {
 struct CliObserver;
 
 impl JobObserver for CliObserver {
+    fn archive(&mut self, info: &ArchiveInfo) {
+        print_archive(info);
+    }
+
     fn prepared(&mut self, preview: &JobPreview) {
-        print_archive(&preview.estimate.info);
         print_attack_summary(&preview.estimate);
         if preview.resumed {
             println!(
@@ -608,6 +611,16 @@ fn run_batch_command(args: BatchArgs) -> ExitCode {
     if args.dry_run {
         return dry_run(&config, args.max_parallel);
     }
+    let effective_reuse = args.reuse_found || config.reuse_found;
+    let effective_parallel = args
+        .max_parallel
+        .unwrap_or(config.max_parallel)
+        .clamp(1, config.jobs.len().max(1));
+    if effective_reuse && effective_parallel > 1 {
+        eprintln!(
+            "WARNING: password reuse is best-effort with max_parallel > 1; completed tasks only feed later-started tasks. Use --max-parallel 1 for deterministic reuse"
+        );
+    }
     if let Some(max_parallel) = args.max_parallel {
         if max_parallel == 0 || max_parallel > 256 {
             eprintln!("acx: --max-parallel must be 1..=256");
@@ -703,15 +716,13 @@ fn run_batch_command(args: BatchArgs) -> ExitCode {
 }
 
 fn dry_run(config: &BatchConfig, max_parallel: Option<usize>) -> ExitCode {
-    if let Some(max_parallel) = max_parallel {
-        if max_parallel == 0 || max_parallel > 256 {
-            eprintln!("acx: --max-parallel must be 1..=256");
+    let parallel = match resolve_parallel(config, max_parallel) {
+        Ok(parallel) => parallel,
+        Err(error) => {
+            eprintln!("acx: {error}");
             return ExitCode::from(EXIT_USAGE);
         }
-    }
-    let parallel = max_parallel
-        .unwrap_or(config.max_parallel)
-        .clamp(1, config.jobs.len().max(1));
+    };
     let mut failed = false;
     let mut serial_seconds = 0.0f64;
     let mut peaks = Vec::new();
@@ -744,6 +755,30 @@ fn dry_run(config: &BatchConfig, max_parallel: Option<usize>) -> ExitCode {
         format_bytes(peak_bytes)
     );
     ExitCode::SUCCESS
+}
+
+fn resolve_parallel(config: &BatchConfig, max_parallel: Option<usize>) -> Result<usize, String> {
+    if let Some(max_parallel) = max_parallel {
+        if max_parallel == 0 || max_parallel > 256 {
+            return Err("--max-parallel must be 1..=256".to_string());
+        }
+    }
+    let parallel = max_parallel
+        .unwrap_or(config.max_parallel)
+        .clamp(1, config.jobs.len().max(1));
+    let max_threads = config
+        .jobs
+        .iter()
+        .map(|job| job.spec.threads)
+        .max()
+        .unwrap_or(1);
+    let peak_threads = parallel.saturating_mul(max_threads);
+    if peak_threads > 256 {
+        return Err(format!(
+            "max_parallel {parallel} × max job threads {max_threads} = {peak_threads}, above the 256-thread budget"
+        ));
+    }
+    Ok(parallel)
 }
 
 /// Optional TTY control loop. It is detached: when the run finishes the process

@@ -30,7 +30,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 150、CLI 79（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
+| 测试 | core 150、CLI 83（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；最近代码 PR #28 6/6（2026-11-27），PR #30 待跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 

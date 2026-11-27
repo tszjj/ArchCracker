@@ -106,6 +106,9 @@ pub struct JobPreview {
 
 /// Optional presentation hook. The default implementation prints nothing.
 pub trait JobObserver {
+    /// Called as soon as the archive preflight succeeds, before any attack
+    /// validation error can occur.
+    fn archive(&mut self, _info: &ArchiveInfo) {}
     fn prepared(&mut self, _preview: &JobPreview) {}
 }
 
@@ -196,12 +199,29 @@ pub fn validate_job(spec: &JobSpec) -> Result<()> {
     std::fs::File::open(&spec.archive)?;
     match &spec.attack {
         AttackConfig::Dictionary { dictionary } => {
-            std::fs::File::open(dictionary).map_err(|error| {
-                AcxError::Dictionary(format!("cannot read dictionary: {error}"))
-            })?;
+            let stream = DictionaryStream::open(dictionary, 0).map_err(dictionary_error)?;
+            if stream.total() == 0 {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` dictionary contains no candidates",
+                    spec.id
+                )));
+            }
         }
         AttackConfig::Mask { masks, custom } => {
-            MaskSet::parse(masks, custom)?;
+            let set = MaskSet::parse(masks, custom)?;
+            let estimate = set.estimate(spec.threads);
+            if !estimate.fits_usize {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` mask keyspace {} cannot be executed with the current usize index limit",
+                    spec.id, estimate.keyspace
+                )));
+            }
+            if estimate.keyspace == 0 {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` mask contains no candidates",
+                    spec.id
+                )));
+            }
         }
         AttackConfig::Brute {
             charset,
@@ -209,7 +229,14 @@ pub fn validate_job(spec: &JobSpec) -> Result<()> {
             max_len,
             custom,
         } => {
-            BruteSet::parse(charset, custom, *min_len, *max_len)?;
+            let set = BruteSet::parse(charset, custom, *min_len, *max_len)?;
+            let estimate = set.estimate(spec.threads);
+            if !estimate.fits_usize {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` brute keyspace {} cannot be executed with the current usize index limit",
+                    spec.id, estimate.keyspace
+                )));
+            }
         }
         AttackConfig::Hybrid {
             dictionary,
@@ -218,10 +245,7 @@ pub fn validate_job(spec: &JobSpec) -> Result<()> {
             suffix_mask,
             custom,
         } => {
-            std::fs::File::open(dictionary).map_err(|error| {
-                AcxError::Dictionary(format!("cannot read dictionary: {error}"))
-            })?;
-            HybridSet::parse(
+            let set = HybridSet::parse(
                 dictionary,
                 rules,
                 prefix_mask.as_deref(),
@@ -229,6 +253,19 @@ pub fn validate_job(spec: &JobSpec) -> Result<()> {
                 custom,
             )
             .map_err(dictionary_error)?;
+            let estimate = set.estimate(spec.threads);
+            if !estimate.fits_usize {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` hybrid total {} cannot be executed with the current usize index limit",
+                    spec.id, estimate.total
+                )));
+            }
+            if estimate.total == 0 {
+                return Err(AcxError::Attack(format!(
+                    "job `{}` dictionary contains no candidates",
+                    spec.id
+                )));
+            }
         }
     }
     Ok(())
@@ -559,6 +596,7 @@ pub fn run_job(
 ) -> Result<JobReport> {
     let started = Instant::now();
     let info = archive::preflight(&spec.archive)?;
+    observer.archive(&info);
     if !info.has_verification_target() {
         return Err(AcxError::Unsupported(
             "archive is not encrypted or has no file entries".to_string(),
@@ -605,28 +643,6 @@ pub fn run_job(
         resumed: loaded.is_some(),
     });
 
-    if prepared.total == 0 {
-        return Err(AcxError::Attack(
-            "attack contains no candidates".to_string(),
-        ));
-    }
-
-    if start_index >= prepared.total {
-        store.remove()?;
-        return Ok(JobReport {
-            status: JobStatus::NotFound,
-            password: None,
-            reused: false,
-            tried,
-            completed_through: start_index as u64,
-            total: prepared.total as u64,
-            elapsed: started.elapsed(),
-            checkpoint: spec.checkpoint.clone(),
-            error: None,
-            warnings: Vec::new(),
-        });
-    }
-
     let mut warnings = Vec::new();
     let mut prepass_tried = 0u64;
     if !prepass.is_empty() {
@@ -639,7 +655,9 @@ pub fn run_job(
             prepass_tried += 1;
             match session.test_password(password)? {
                 PasswordTest::Hit => {
-                    store.remove()?;
+                    if let Err(error) = store.remove() {
+                        warnings.push(format!("could not remove checkpoint: {error}"));
+                    }
                     return Ok(JobReport {
                         status: JobStatus::Found,
                         password: Some(password.clone()),
@@ -656,6 +674,30 @@ pub fn run_job(
                 PasswordTest::Miss => {}
             }
         }
+    }
+
+    if prepared.total == 0 {
+        return Err(AcxError::Attack(
+            "attack contains no candidates".to_string(),
+        ));
+    }
+
+    if start_index >= prepared.total {
+        if let Err(error) = store.remove() {
+            warnings.push(format!("could not remove checkpoint: {error}"));
+        }
+        return Ok(JobReport {
+            status: JobStatus::NotFound,
+            password: None,
+            reused: false,
+            tried,
+            completed_through: start_index as u64,
+            total: prepared.total as u64,
+            elapsed: started.elapsed(),
+            checkpoint: spec.checkpoint.clone(),
+            error: None,
+            warnings,
+        });
     }
 
     let initial = Checkpoint::new(
@@ -706,7 +748,9 @@ pub fn run_job(
 
     match outcome {
         Ok(RunOutcome::Found(hit)) => {
-            store.remove()?;
+            if let Err(error) = store.remove() {
+                warnings.push(format!("could not remove checkpoint: {error}"));
+            }
             Ok(JobReport {
                 status: JobStatus::Found,
                 password: Some(hit.password),
@@ -721,7 +765,9 @@ pub fn run_job(
             })
         }
         Ok(RunOutcome::Exhausted) => {
-            store.remove()?;
+            if let Err(error) = store.remove() {
+                warnings.push(format!("could not remove checkpoint: {error}"));
+            }
             Ok(JobReport {
                 status: JobStatus::NotFound,
                 password: None,

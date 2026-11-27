@@ -391,12 +391,14 @@ dictionary = "b.txt"
         &temp.join("a.txt"),
         &runs.join("a.acx-checkpoint"),
         1,
+        2,
     );
     write_dictionary_checkpoint(
         &temp.join("b.zip"),
         &temp.join("b.txt"),
         &runs.join("b.acx-checkpoint"),
         0,
+        2,
     );
 
     let output = run_batch(temp.path(), &[]);
@@ -414,7 +416,13 @@ dictionary = "b.txt"
     assert!(!runs.join("b.acx-checkpoint").exists());
 }
 
-fn write_dictionary_checkpoint(archive: &Path, dictionary: &Path, path: &Path, watermark: u64) {
+fn write_dictionary_checkpoint(
+    archive: &Path,
+    dictionary: &Path,
+    path: &Path,
+    watermark: u64,
+    total: u64,
+) {
     // Match the batch resolver, which canonicalizes the manifest directory.
     let archive = std::fs::canonicalize(archive).expect("canonicalize archive");
     let dictionary = std::fs::canonicalize(dictionary).expect("canonicalize dictionary");
@@ -428,7 +436,7 @@ fn write_dictionary_checkpoint(archive: &Path, dictionary: &Path, path: &Path, w
         1,
         watermark,
         watermark,
-        2,
+        total,
     );
     CheckpointStore::new(path.to_path_buf())
         .save(&checkpoint)
@@ -491,6 +499,138 @@ suffix_mask = "?d"
         stdout.contains("Batch estimate: 4 jobs"),
         "stdout: {stdout}"
     );
+}
+
+#[test]
+fn batch_reuse_finishes_a_completed_checkpoint() {
+    let temp = TempDir::new("reuse-completed");
+    write_zipcrypto_zip(&temp.join("first.zip"), "shared");
+    write_dictionary(&temp.join("first.txt"), &["shared"]);
+    write_zipcrypto_zip(&temp.join("second.zip"), "shared");
+    write_dictionary(&temp.join("second.txt"), &["wrong"]);
+    write_manifest(
+        &temp,
+        r#"
+max_parallel = 1
+reuse_found = true
+checkpoint_root = "runs"
+
+[[jobs]]
+id = "first"
+archive = "first.zip"
+mode = "dict"
+dictionary = "first.txt"
+
+[[jobs]]
+id = "second"
+archive = "second.zip"
+mode = "dict"
+dictionary = "second.txt"
+"#,
+    );
+    let runs = temp.join("runs");
+    std::fs::create_dir_all(&runs).expect("create runs");
+    // Second task already completed (watermark == total); reuse must still run
+    // before the "already exhausted" branch.
+    write_dictionary_checkpoint(
+        &temp.join("second.zip"),
+        &temp.join("second.txt"),
+        &runs.join("second.acx-checkpoint"),
+        1,
+        1,
+    );
+
+    let output = run_batch(temp.path(), &[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[second] FOUND: shared (reused)"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn batch_rejects_over_usize_attack_before_running() {
+    let temp = TempDir::new("over-usize");
+    write_zipcrypto_zip(&temp.join("a.zip"), "one");
+    write_manifest(
+        &temp,
+        r#"
+[[jobs]]
+id = "huge"
+archive = "a.zip"
+mode = "mask"
+masks = ["?a?a?a?a?a?a?a?a?a?a"]
+"#,
+    );
+    let output = run_batch(temp.path(), &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("cannot be executed with the current usize index limit"),
+        "stderr: {stderr}"
+    );
+    assert!(!temp.join("acx-checkpoints").exists());
+}
+
+#[test]
+fn batch_rejects_empty_dictionary_before_running() {
+    let temp = TempDir::new("empty-dict");
+    write_zipcrypto_zip(&temp.join("a.zip"), "one");
+    std::fs::write(temp.join("empty.txt"), b"").expect("write empty dictionary");
+    write_manifest(
+        &temp,
+        r#"
+[[jobs]]
+id = "empty"
+archive = "a.zip"
+mode = "dict"
+dictionary = "empty.txt"
+"#,
+    );
+    let output = run_batch(temp.path(), &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(stderr.contains("no candidates"), "stderr: {stderr}");
+    assert!(!temp.join("acx-checkpoints").exists());
+}
+
+#[test]
+fn batch_dry_run_enforces_the_thread_budget() {
+    let temp = TempDir::new("dry-run-budget");
+    write_manifest(
+        &temp,
+        r#"
+max_parallel = 1
+
+[[jobs]]
+id = "a"
+archive = "a.zip"
+mode = "brute"
+charset = "?l"
+min_len = 1
+max_len = 1
+threads = 200
+
+[[jobs]]
+id = "b"
+archive = "b.zip"
+mode = "brute"
+charset = "?l"
+min_len = 1
+max_len = 1
+threads = 200
+"#,
+    );
+    let output = run_batch(temp.path(), &["--max-parallel", "2", "--dry-run"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(stderr.contains("256-thread budget"), "stderr: {stderr}");
 }
 
 #[test]
