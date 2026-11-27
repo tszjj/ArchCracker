@@ -12,14 +12,23 @@
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, PasswordTest};
 use super::rar5_verify::Rar5Verifier;
 use super::source::ArchiveSource;
-use super::{ArchiveSession, ArchiveSessionFactory};
+use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats};
 use crate::engines::external::{self, CancelToken, ExternalOutput, DEFAULT_TIMEOUT};
 use crate::error::{AcxError, Result};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(Debug, Default)]
+struct RarCounters {
+    fast_rejected: AtomicU64,
+    external_confirmed: AtomicU64,
+    encoding_skipped: AtomicU64,
+}
 
 /// One RAR session, owned by a scheduler worker.
 pub struct RarSession {
@@ -29,6 +38,8 @@ pub struct RarSession {
     timeout: Duration,
     cancel: Option<CancelToken>,
     fast: Option<Rar5Verifier>,
+    fast_filter: bool,
+    counters: Arc<RarCounters>,
 }
 
 impl RarSession {
@@ -43,7 +54,14 @@ impl RarSession {
         let first = source.first_path().to_path_buf();
         let info = preflight(&first, source.format, &engine)?;
         let fast = Rar5Verifier::from_source(&source);
-        Ok(Self::with_info(&first, engine, info, fast))
+        Ok(Self::with_info(
+            &first,
+            engine,
+            info,
+            fast,
+            true,
+            Arc::new(RarCounters::default()),
+        ))
     }
 
     /// Open with an explicit engine path (used by tests and diagnostics).
@@ -53,7 +71,14 @@ impl RarSession {
         let fast = ArchiveSource::resolve(path)
             .ok()
             .and_then(|source| Rar5Verifier::from_source(&source));
-        Ok(Self::with_info(path, engine, info, fast))
+        Ok(Self::with_info(
+            path,
+            engine,
+            info,
+            fast,
+            true,
+            Arc::new(RarCounters::default()),
+        ))
     }
 
     /// Build a session around metadata that is already known.
@@ -62,6 +87,8 @@ impl RarSession {
         engine: PathBuf,
         info: ArchiveInfo,
         fast: Option<Rar5Verifier>,
+        fast_filter: bool,
+        counters: Arc<RarCounters>,
     ) -> Self {
         Self {
             path: path.to_path_buf(),
@@ -70,6 +97,8 @@ impl RarSession {
             timeout: DEFAULT_TIMEOUT,
             cancel: None,
             fast,
+            fast_filter,
+            counters,
         }
     }
 
@@ -101,15 +130,25 @@ impl ArchiveSession for RarSession {
         // hit is still confirmed by the external UnRAR oracle below. RAR4,
         // non-ASCII passwords, missing check values and parse failures fall
         // through to the oracle.
-        if let Some(fast) = &self.fast {
-            if let Some(matches) = fast.verify(password) {
-                if !matches {
-                    return Ok(PasswordTest::Miss);
+        if self.fast_filter {
+            if let Some(fast) = &self.fast {
+                if let Some(matches) = fast.verify(password) {
+                    if !matches {
+                        self.counters.fast_rejected.fetch_add(1, Ordering::Relaxed);
+                        return Ok(PasswordTest::Miss);
+                    }
                 }
             }
         }
 
-        let encoded = external::encode_password(password)?;
+        // A candidate that the OEM code page cannot represent (or a raw
+        // non-UTF-8 variant) is a miss for this variant, not a job failure.
+        let Ok(encoded) = external::encode_password(password) else {
+            self.counters
+                .encoding_skipped
+                .fetch_add(1, Ordering::Relaxed);
+            return Ok(PasswordTest::Miss);
+        };
         let output = external::run_cancellable(
             &self.engine,
             test_args(&self.path),
@@ -131,7 +170,13 @@ impl ArchiveSession for RarSession {
         }
 
         match classify_test_exit(self.info.format, output.code) {
-            Some(result) => Ok(result),
+            Some(PasswordTest::Hit) => {
+                self.counters
+                    .external_confirmed
+                    .fetch_add(1, Ordering::Relaxed);
+                Ok(PasswordTest::Hit)
+            }
+            Some(PasswordTest::Miss) => Ok(PasswordTest::Miss),
             None => Err(engine_failure("test", &output)),
         }
     }
@@ -155,6 +200,8 @@ pub struct RarFactory {
     engine: PathBuf,
     info: ArchiveInfo,
     fast: Option<Rar5Verifier>,
+    fast_filter: bool,
+    counters: Arc<RarCounters>,
 }
 
 impl RarFactory {
@@ -223,7 +270,16 @@ impl RarFactory {
             engine,
             info,
             fast,
+            fast_filter: true,
+            counters: Arc::new(RarCounters::default()),
         }
+    }
+
+    /// Disable the RAR5 check-value fast reject (`--strict` /
+    /// `--rar-no-fast-reject`). The external oracle still confirms every hit.
+    pub fn with_fast_filter(mut self, enabled: bool) -> Self {
+        self.fast_filter = enabled;
+        self
     }
 
     /// Metadata probed when this factory was created.
@@ -240,7 +296,17 @@ impl ArchiveSessionFactory for RarFactory {
             self.engine.clone(),
             self.info.clone(),
             self.fast.clone(),
+            self.fast_filter,
+            Arc::clone(&self.counters),
         )))
+    }
+
+    fn stats(&self) -> ArchiveStats {
+        ArchiveStats {
+            fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
+            external_confirmed: self.counters.external_confirmed.load(Ordering::Relaxed),
+            encoding_skipped: self.counters.encoding_skipped.load(Ordering::Relaxed),
+        }
     }
 }
 

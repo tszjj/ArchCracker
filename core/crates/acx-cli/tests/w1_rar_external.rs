@@ -564,3 +564,84 @@ fn local_rar_unicode_password() {
     assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
     assert!(stdout.contains(password), "stdout: {stdout}");
 }
+
+#[test]
+fn local_rar5_strict_and_no_fast_reject_still_hit() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let temp = TempDir::new("strict");
+    let hello = temp.join("hello.txt");
+    let archive = temp.join("strict.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    write_dictionary(&dictionary, &["wrong", PASSWORD]);
+    assert!(
+        create_rar(&rar, &archive, &hello, Some(PASSWORD.as_bytes()), &[]),
+        "Rar.exe must create a RAR5 fixture"
+    );
+
+    for flag in ["--strict", "--rar-no-fast-reject"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+            .args(["-f"])
+            .arg(&archive)
+            .args(["-d"])
+            .arg(&dictionary)
+            .args([flag, "--report-stats"])
+            .output()
+            .expect("run acx");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{flag} exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+            output.status.code()
+        );
+        assert!(stdout.contains("FOUND:"), "{flag} stdout: {stdout}");
+        assert!(
+            stdout.contains("fast rejects=0") && stdout.contains("external confirms=1"),
+            "{flag} stdout: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn local_rar4_unicode_password_uses_oem_path() {
+    let Some(rar) = local_rar() else {
+        return;
+    };
+    let password = "中文密码";
+    let Ok(encoded) = encode_password(password.as_bytes()) else {
+        eprintln!("skipping RAR4 Unicode test: active OEM code page cannot represent the fixture");
+        return;
+    };
+
+    let temp = TempDir::new("unicode-rar4");
+    let hello = temp.join("hello.txt");
+    let archive = temp.join("unicode4.rar");
+    let dictionary = temp.join("dict.txt");
+    std::fs::write(&hello, HELLO).expect("write hello");
+    write_dictionary(&dictionary, &["wrong", password]);
+    assert!(
+        create_rar(&rar, &archive, &hello, Some(encoded.as_ref()), &["-ma4"]),
+        "Rar.exe must create a RAR4 Unicode-password fixture"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_acx"))
+        .args(["-f"])
+        .arg(&archive)
+        .args(["-d"])
+        .arg(&dictionary)
+        .args(["-t", "1"])
+        .output()
+        .expect("run acx");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(stdout.contains("FOUND:"), "stdout: {stdout}");
+    assert!(stdout.contains(password), "stdout: {stdout}");
+}

@@ -37,9 +37,23 @@ pub trait ArchiveSession: Send {
     fn set_cancel_token(&mut self, _token: CancelToken) {}
 }
 
+/// Candidate-test counters shared by an archive engine. Only engines with
+/// potentially lossy fast filters report non-zero values.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArchiveStats {
+    pub fast_rejected: u64,
+    pub external_confirmed: u64,
+    pub encoding_skipped: u64,
+}
+
 /// Opens independent sessions for scheduler workers.
 pub trait ArchiveSessionFactory: Send + Sync {
     fn open(&self) -> Result<Box<dyn ArchiveSession>>;
+
+    /// Snapshot of candidate-test counters. Defaults to zeros.
+    fn stats(&self) -> ArchiveStats {
+        ArchiveStats::default()
+    }
 }
 
 /// Detect the archive format by magic bytes.

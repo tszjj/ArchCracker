@@ -5,6 +5,7 @@
 
 use acx_core::archive::{ArchiveFormat, ArchiveInfo};
 use acx_core::batch::{self, BatchConfig, BatchControl, BatchOptions};
+use acx_core::encoding::EncodingSelection;
 use acx_core::estimate::SpaceEstimate;
 use acx_core::job::{
     self, AttackConfig, EstimateDetail, JobEstimate, JobObserver, JobPreview, JobReport, JobSpec,
@@ -143,6 +144,26 @@ struct SingleArgs {
     #[arg(long = "estimate")]
     estimate: bool,
 
+    /// Encoding variants: `auto` or a comma list of utf8/gbk/cp437/oem.
+    #[arg(
+        long = "encoding-variants",
+        value_name = "LIST",
+        default_value = "auto"
+    )]
+    encoding_variants: String,
+
+    /// Disable every fast filter that could theoretically drop a candidate.
+    #[arg(long = "strict")]
+    strict: bool,
+
+    /// Disable only the RAR5 check-value fast reject.
+    #[arg(long = "rar-no-fast-reject")]
+    rar_no_fast_reject: bool,
+
+    /// Print per-job encoding/fast-filter counters.
+    #[arg(long = "report-stats")]
+    report_stats: bool,
+
     /// Worker threads (clamped to 1..=256 by the scheduler).
     #[arg(short = 't', long = "threads", value_name = "N", default_value_t = 1)]
     threads: usize,
@@ -238,6 +259,14 @@ fn run_single(cli: SingleArgs) -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
+    let encoding = match EncodingSelection::parse(&cli.encoding_variants) {
+        Ok(encoding) => encoding,
+        Err(error) => {
+            eprintln!("acx: {error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+
     let spec = JobSpec {
         id: file
             .file_stem()
@@ -252,6 +281,10 @@ fn run_single(cli: SingleArgs) -> ExitCode {
             .clone()
             .unwrap_or_else(|| default_checkpoint_path(&file)),
         resume: cli.resume,
+        encoding,
+        strict: cli.strict,
+        rar_no_fast_reject: cli.rar_no_fast_reject,
+        report_stats: cli.report_stats,
     };
 
     if cli.estimate {
@@ -277,7 +310,7 @@ fn run_single(cli: SingleArgs) -> ExitCode {
     }
 
     match job::run_job(&spec, control, &[], &mut CliObserver) {
-        Ok(report) => exit_for_report(&report),
+        Ok(report) => exit_for_report(&report, cli.report_stats),
         Err(error) => {
             eprintln!("acx: {error}");
             ExitCode::from(exit_for_error(&error))
@@ -405,6 +438,7 @@ fn print_attack_summary(estimate: &JobEstimate) {
     for warning in &estimate.warnings {
         eprintln!("WARNING: {warning}");
     }
+    print_encoding_variants(estimate);
     warn_if_slow(estimate);
 }
 
@@ -451,6 +485,7 @@ fn print_estimate(estimate: &JobEstimate) {
     for warning in &estimate.warnings {
         eprintln!("WARNING: {warning}");
     }
+    print_encoding_variants(estimate);
 
     let (rate, label) = rate_for(estimate.info.format);
     let seconds = estimate.total as f64 / rate;
@@ -459,6 +494,15 @@ fn print_estimate(estimate: &JobEstimate) {
     println!("ETA: {}", format_duration(seconds));
     println!("24h capacity: {capacity:.0} candidates");
     warn_if_over_24h(seconds);
+}
+
+fn print_encoding_variants(estimate: &JobEstimate) {
+    if estimate.encoding_variants > 1 {
+        println!(
+            "Encoding variants: up to {} per candidate (ETA covers candidate count, not variant attempts)",
+            estimate.encoding_variants
+        );
+    }
 }
 
 fn print_space(space: &SpaceEstimate) {
@@ -497,9 +541,12 @@ fn warn_if_over_24h(seconds: f64) {
     }
 }
 
-fn exit_for_report(report: &JobReport) -> ExitCode {
+fn exit_for_report(report: &JobReport, report_stats: bool) -> ExitCode {
     for warning in &report.warnings {
         eprintln!("acx: {warning}");
+    }
+    if report_stats {
+        print_stats(&report.stats);
     }
     match report.status {
         JobStatus::Found => {
@@ -535,6 +582,21 @@ fn exit_for_report(report: &JobReport) -> ExitCode {
             }
         }
     }
+}
+
+fn format_stats(stats: &acx_core::job::JobStats) -> String {
+    format!(
+        "encoding attempts={} (candidates={}, skipped variants={}), fast rejects={}, external confirms={}",
+        stats.encoding.attempts,
+        stats.encoding.candidates,
+        stats.encoding.variants_skipped,
+        stats.fast_rejected,
+        stats.external_confirmed
+    )
+}
+
+fn print_stats(stats: &acx_core::job::JobStats) {
+    println!("Stats: {}", format_stats(stats));
 }
 
 fn exit_for_error(error: &acx_core::error::AcxError) -> u8 {
@@ -681,6 +743,9 @@ fn run_batch_command(args: BatchArgs) -> ExitCode {
         }
         for warning in &task.report.warnings {
             eprintln!("[{}] {warning}", task.id);
+        }
+        if task.report_stats {
+            println!("[{}] Stats: {}", task.id, format_stats(&task.report.stats));
         }
     }
     println!(

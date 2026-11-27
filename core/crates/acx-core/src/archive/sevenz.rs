@@ -24,15 +24,22 @@
 
 use super::info::{ArchiveFormat, ArchiveInfo, Encryption, EntryInfo, PasswordTest};
 use super::source::ArchiveSource;
-use super::{ArchiveSession, ArchiveSessionFactory};
+use super::{ArchiveSession, ArchiveSessionFactory, ArchiveStats};
 use crate::error::{AcxError, Result};
 use sevenz_rust2::{Archive, BlockDecoder, EncoderMethod, Error as SevenZError, Password};
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// How much plaintext the first-block probe reads before declaring the
 /// candidate structurally plausible.
 const PROBE_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, Default)]
+struct SevenZCounters {
+    fast_rejected: AtomicU64,
+}
 
 /// One open 7z archive, owned by a scheduler worker.
 pub struct SevenZSession {
@@ -42,6 +49,10 @@ pub struct SevenZSession {
     /// encrypted archives cannot be parsed until a candidate is supplied, so
     /// this is `None` and each test re-reads the header with that candidate.
     archive: Option<Archive>,
+    /// `--strict`: skip the first-block probe and go straight to the full CRC
+    /// verification, so a probe false-negative cannot drop a password.
+    strict: bool,
+    counters: Arc<SevenZCounters>,
 }
 
 impl SevenZSession {
@@ -76,6 +87,8 @@ impl SevenZSession {
                     entries: Vec::new(),
                 },
                 archive: None,
+                strict: false,
+                counters: Arc::new(SevenZCounters::default()),
             });
         }
 
@@ -114,6 +127,8 @@ impl SevenZSession {
             source,
             info,
             archive: Some(archive),
+            strict: false,
+            counters: Arc::new(SevenZCounters::default()),
         })
     }
 
@@ -141,15 +156,20 @@ impl SevenZSession {
 
         // Tier 1: decrypt/decompress only a prefix of the first file in the
         // block. A wrong key normally fails here, before the full entry is read.
+        // `--strict` skips this tier so a probe false-negative cannot drop a
+        // candidate; the full CRC below still decides the hit.
         //
         // A COPY-only block has no compression structure for the probe to
         // reject, so skipping it avoids a second AES KDF; the full CRC check
         // below is the only meaningful test for stored entries.
-        if !block_is_stored(archive, block) {
+        if !self.strict && !block_is_stored(archive, block) {
             let mut probe_file = self.source.reader()?;
             match probe_first_file(&mut probe_file, archive, block, &password) {
                 Ok(()) => {}
-                Err(error) if is_candidate_rejection(&error) => return Ok(PasswordTest::Miss),
+                Err(error) if is_candidate_rejection(&error) => {
+                    self.counters.fast_rejected.fetch_add(1, Ordering::Relaxed);
+                    return Ok(PasswordTest::Miss);
+                }
                 Err(error) => return Err(classify_sevenz_open(error)),
             }
         }
@@ -219,6 +239,8 @@ pub struct SevenZFactory {
     source: ArchiveSource,
     info: ArchiveInfo,
     archive: Option<Archive>,
+    strict: bool,
+    counters: Arc<SevenZCounters>,
 }
 
 impl SevenZFactory {
@@ -229,6 +251,8 @@ impl SevenZFactory {
             source: session.source,
             info: session.info,
             archive: session.archive,
+            strict: false,
+            counters: Arc::new(SevenZCounters::default()),
         })
     }
 
@@ -271,7 +295,15 @@ impl SevenZFactory {
             source,
             info,
             archive,
+            strict: false,
+            counters: Arc::new(SevenZCounters::default()),
         })
+    }
+
+    /// `--strict`: skip the first-block probe and rely on the full CRC.
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
     }
 
     /// Metadata probed when this factory was created.
@@ -286,7 +318,17 @@ impl ArchiveSessionFactory for SevenZFactory {
             source: self.source.clone(),
             info: self.info.clone(),
             archive: self.archive.clone(),
+            strict: self.strict,
+            counters: Arc::clone(&self.counters),
         }))
+    }
+
+    fn stats(&self) -> ArchiveStats {
+        ArchiveStats {
+            fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
+            external_confirmed: 0,
+            encoding_skipped: 0,
+        }
     }
 }
 

@@ -9,6 +9,7 @@ pub mod attack;
 pub mod batch;
 pub mod candidates;
 pub mod checkpoint;
+pub mod encoding;
 pub mod engines;
 pub mod error;
 pub mod estimate;
