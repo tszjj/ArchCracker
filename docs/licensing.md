@@ -30,6 +30,7 @@
 | `encoding_rs` | 字典编码识别 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 是 | 源码依赖 |
 | `crossbeam-channel` | 有界任务队列 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `crc32fast` / `thiserror` / `clap` | 校验/错误/CLI | MIT OR Apache-2.0 | 是 | 源码依赖 |
+| `serde` / `toml`（含 `serde_spanned` / `toml_datetime` / `toml_edit` / `winnow` / `toml_write`） | W2-005 批量任务清单解析 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `windows-sys`（仅 Windows） | OEM 代码页转换 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `UnRAR.exe`（未修改） | RAR4/RAR5 密码/完整性测试 oracle | UnRAR License（非 OSI） | 是（独立组件，不改变主项目许可） | Full 安装包随包，仅进程 |
 | hashcat（固定版本） | GPU 字典后端 | MIT + 第三方声明 | 是 | Full 安装包随包，仅进程 |

@@ -49,6 +49,9 @@ pub enum AcxError {
     #[error("attack error: {0}")]
     Attack(String),
 
+    #[error("batch error: {0}")]
+    Batch(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

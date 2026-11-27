@@ -210,12 +210,30 @@ pub struct RunContext {
 
 impl RunContext {
     pub fn new(total: usize, start_index: usize, tried: u64, threads: usize) -> Arc<Self> {
+        Self::with_control(
+            total,
+            start_index,
+            tried,
+            threads,
+            Arc::new(RunControl::new()),
+        )
+    }
+
+    /// Build a context around a caller-owned control, so a batch runner can
+    /// stop this task without constructing a second control path.
+    pub fn with_control(
+        total: usize,
+        start_index: usize,
+        tried: u64,
+        threads: usize,
+        control: Arc<RunControl>,
+    ) -> Arc<Self> {
         let start_index = start_index.min(total);
         Arc::new(Self {
             total,
             start_index,
             threads: threads.clamp(1, MAX_THREADS),
-            control: Arc::new(RunControl::new()),
+            control,
             progress: ProgressState {
                 total,
                 completed: (0..total.div_ceil(64)).map(|_| AtomicU64::new(0)).collect(),
