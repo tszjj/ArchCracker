@@ -165,6 +165,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-008 语料/差分/基准](tasks/W2-008-corpus-differential-benchmark.md) | 语料生成脚本、oracle 差分、W2-007 判据证据、1M 基准、Windows 全栈验证 | 本地验证完成（2026-11-28）；证据见 [W2-008 基准](benchmarks/W2-008.md)；CI 待恢复 |
 | [W2 阶段准出规划](W2-EXIT-PLAN.md) | 准出门 G1–G7、阶段 P0–P5、证据映射、两级结论、签核模板 | 规划稿（2026-11-28），正式签核待 CI 恢复 |
 | [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
+| [W3 阶段目标划分](W3-PLAN.md) | W3-001…W3-006 切片、准出标准、角色与 W4 边界 | 计划稿（2026-11-28）；分支 `windows-gui` |
 | [W3 Windows GUI 设计大纲](tasks/W3-windows-gui-outline.md) | Avalonia 12 架构、模块、C ABI v1、交互规范、优先级 | 设计大纲（2026-11-28）；分支 `windows-gui` |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |

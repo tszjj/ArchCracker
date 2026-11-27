@@ -6,7 +6,7 @@
 - 平台：Windows 10 22H2 / 11 24H2 x64（ARM64 另评）
 - 依据：`docs/adr/0002-frontend-split.md`、`docs/windows-plan.md` §6、`docs/architecture.md` §5、`docs/W2-SIGNOFF.md`
 
-> 本文只定义 W3 Windows GUI 的设计大纲与开发顺序，不作为 W3 准出标准。正式任务文档需为 C ABI v1、Avalonia 工程、各屏幕/组件分别建立验收。
+> 本文只定义 W3 Windows GUI 的设计大纲与开发顺序，不作为 W3 准出标准。阶段化切片与准出标准见 [`docs/W3-PLAN.md`](../W3-PLAN.md)；正式任务文档需为 C ABI v1、Avalonia 工程、各屏幕/组件分别建立验收。
 
 ## 1. 目标与非目标
 
