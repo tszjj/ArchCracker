@@ -75,6 +75,7 @@ desktop.ini
 *.dict
 /tests/corpus/*
 !/tests/corpus/README.md
+!/tests/corpus/generate.py
 
 # local acceptance corpus prepared by the user — never commit
 /测试文件/

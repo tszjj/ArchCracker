@@ -38,4 +38,4 @@ M0：仅目录说明。P1 加入 ZIP/7z 语料生成器与首个差分用例。
 W1-004 起，7z 单测/CLI 集成测试在测试进程内用 `sevenz-rust2` writer 生成夹具；官方 7-Zip 26.04 `7zr` 仅作为本机差分 oracle（见 `docs/tasks/W1-004-sevenz.md`），二进制不提交。
 W1-005 起，ZIP/7z 分卷与 SFX 夹具在测试进程内生成；RAR 分卷用本机 `Rar.exe -m0 -v1k` 生成，CI 无引擎时跳过（见 `docs/tasks/W1-005-volumes-sfx.md`）。
 
-W2-008（2026-11-28 预期目标已定稿、**尚未实现**）将在本目录补齐 `corpus/` 生成脚本与 manifest、`differential/` oracle 脚本与向量；只提交脚本、哈希与报告，不提交归档/字典二进制。详见 `docs/tasks/W2-008-corpus-differential-benchmark.md`。
+W2-008（2026-11-28 本地验证完成）已在本目录补齐 `corpus/generate.py` 生成脚本与 manifest 输出；差分 oracle 在 `core/crates/acx-cli/tests/w2_008_differential.rs`，基准报告见 `docs/benchmarks/W2-008.md`。只提交脚本与报告，不提交归档/字典二进制。

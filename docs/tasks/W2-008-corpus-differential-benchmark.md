@@ -1,6 +1,6 @@
 # W2-008：语料 / 差分 / 基准 — 设计目标
 
-- 状态：预期目标已定稿（2026-11-28），**尚未实现**
+- 状态：已实现（2026-11-28，本地开发模式）；验证记录见 [`docs/benchmarks/W2-008.md`](../benchmarks/W2-008.md)
 - 日期：2026-11-28
 - 门禁：W2 准出项；为 W3 GUI 与 W2 退出提供可复现证据
 - 角色：qa-engineer 主责；core-engineer 支持计数/工具接口；reviewer 复核正确性与口径；architect 复核边界；release 复核许可与平台标注
@@ -118,11 +118,12 @@ external_attempts ⊆ full_attempted（不与 full_attempted 相加）
 ## 9. 预期交接格式
 
 ```text
-STATUS: planned（本地开发模式）
-BRANCH: feat/w2-008-corpus-evidence（本地待创建）
-CHANGED（预期）: tests/corpus/、tests/differential/、tests/README.md、
-                 docs/benchmarks/W2-008.md、docs/PROJECT-GUIDE.md
+STATUS: done（本地验证完成；CI 恢复后仍需补远端绿灯）
+BRANCH: feat/w2-008-corpus-evidence（本地分支，未推送）
+CHANGED: tests/corpus/{README.md,generate.py}、scripts/bench-w2.ps1、
+         core/crates/acx-cli/{examples/w2_008_fixtures.rs,tests/common/w2_008_fixtures.rs,tests/w2_008_differential.rs}、
+         docs/benchmarks/W2-008.md、docs/PROJECT-GUIDE.md
 ROLE: qa-engineer + review；architect/release 按边界参与
-NEXT: M1 语料生成脚本与 manifest 定稿；随后 M2 差分 oracle
+NEXT: CI 额度恢复后重跑 main 的 CI 并把 6/6 链接写入 W2 签核文件
 RISKS: 语料生成耗时、第三方 RAR 语料不足、CI 额度未恢复导致跨平台证据缺失
 ```
