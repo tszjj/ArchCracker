@@ -124,8 +124,8 @@ suffix_mask = "?d?d"
 ```text
 STATUS: done
 CHANGED: core/crates/acx-core/src/{job,batch,error}.rs、scheduler.rs、candidates/dictionary.rs、acx-cli/src/main.rs、acx-cli/tests/w2_005_batch.rs、docs/licensing.md
-VERIFIED: fmt / clippy -D warnings / cargo test --workspace（150 core / 79 CLI +1 ignored / 2 FFI）/ MSRV 1.89
+VERIFIED: fmt / clippy -D warnings / cargo test --workspace（150 core / 83 CLI +1 ignored / 2 FFI）/ MSRV 1.89
 NOT VERIFIED: 非 Windows 停止传播；跨运行跳过已命中；批量规模基准
-NEXT: 合并后更新 PROJECT-GUIDE/README 状态；W2-006 编码变体/严格模式
+NEXT: W2-006 编码变体/严格模式、W2-007 CPU 快筛
 RISKS: 并发超订、明文密码集中输出、断点路径冲突、批量状态未持久化
 ```

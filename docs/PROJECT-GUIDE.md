@@ -34,7 +34,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；PR #30 6/6 全绿（2026-11-27） |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
-> 最近一次全绿：`main` CI 6/6（PR #28，2026-11-27；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
+> 最近一次全绿：`main` CI 6/6（PR #30，2026-11-27；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
 
 ## 3. 实际目录结构
 
