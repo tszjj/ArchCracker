@@ -163,6 +163,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-006 编码变体与严格模式](tasks/W2-006-encoding-strict.md) | 非 ASCII 编码变体、严格模式开关、编码/快筛计数 | 首版完成（PR #33 已合并） |
 | [W2-007 CPU 快筛补全](tasks/W2-007-cpu-fast-filters.md) | 统一快筛契约、ZIP/AES verifier 计数、7z 指标、RAR4 `-hp` no-go、严格模式覆盖、快筛计数 | 已合入 `main`（PR #36，merge `c4cdbc2`）；全量差分/1M 基准留 W2-008 |
 | [W2-008 语料/差分/基准](tasks/W2-008-corpus-differential-benchmark.md) | 语料生成脚本、oracle 差分、W2-007 判据证据、1M 基准、Windows 全栈验证 | 预期目标已定稿（2026-11-28），本地开发中，未实现 |
+| [W2 阶段准出规划](W2-EXIT-PLAN.md) | 准出门 G1–G7、阶段 P0–P5、证据映射、两级结论、签核模板 | 规划稿（2026-11-28），正式签核待 CI 恢复 |
 | [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
