@@ -124,7 +124,7 @@ W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` �
 
 - 稳定、可版本化；结构体带 `size`/`version` 字段；未知字段忽略。
 - v1 字符串：UTF-8、NUL 结尾（路径不允许 NUL）；二进制密码用 `ptr + len`；fd 用平台原生句柄。
-- 句柄不透明；创建/销毁成对；回调在 `stop` 返回后不再触发。
+- 句柄不透明；创建/销毁成对；`stop` 返回后不再启动新的 progress/hit/log 回调，`on_finished` 作为终态通知仍会触发一次。
 - Rust panic 不跨 FFI：`catch_unwind` → `ACX_ERR_PANIC`。
 - 线程安全：一个 handle 同时只允许一个 `start`；`pause/resume/stop` 可从任意线程调用。
 - **v1 范围**：C ABI v1 冻结完整 `AcxInput{path|fd|uri}` 抽象、`on_finished`、`AcxStatusInfo` 与 `struct_size`；Windows 桌面先使用 `path`，Android/HarmonyOS 后续通过 JNI/NAPI 接入 `fd`/`uri`，不破坏 ABI。
@@ -150,10 +150,11 @@ AcxStatus   acx_pause(AcxHandle* handle);
 AcxStatus   acx_resume(AcxHandle* handle);
 AcxStatus   acx_stop(AcxHandle* handle);
 AcxStatus   acx_status(AcxHandle* handle, AcxStatusInfo* info);
+AcxStatus   acx_estimate(const AcxAttackSpec* spec, AcxEstimateInfo* info);
 const char* acx_last_error(AcxHandle* handle);
 ```
 
-v1 结构体：`AcxConfig`、`AcxInput`、`AcxAttackSpec`、`AcxCallbacks`、`AcxStatusInfo` 均带 `struct_size`/`version` 与 reserved 字段；句柄一次只承载一个 job。`AcxInput` 同时定义 `path`/`fd`/`uri` 三种输入；桌面先用 path，JNI/NAPI 后续接入 fd/uri 而不破坏 ABI。`AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`。回调含 `on_progress`/`on_hit`/`on_log`/`on_finished`；`acx_stop` 返回后不再启动新回调。
+v1 结构体：`AcxConfig`、`AcxInput`、`AcxAttackSpec`、`AcxCallbacks`、`AcxStatusInfo`、`AcxEstimateInfo` 均带 `struct_size`/`version` 与 reserved 字段；句柄一次只承载一个 job。`acx_estimate` 暴露 keyspace、编码变体、水位位图、峰值内存、基准速率与 ETA。`AcxInput` 同时定义 `path`/`fd`/`uri` 三种输入；桌面先用 path，JNI/NAPI 后续接入 fd/uri 而不破坏 ABI。`AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`。回调含 `on_progress`/`on_hit`/`on_log`/`on_finished`；`acx_stop` 返回后不再启动新的 progress/hit/log 回调，`on_finished` 作为终态通知仍触发一次。
 
 ### 5.3 语言绑定
 

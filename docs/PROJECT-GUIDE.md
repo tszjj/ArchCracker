@@ -1,6 +1,6 @@
 # ArchCracker 项目全景与开发指引
 
-> 最后更新：2026-11-28 · 阶段：**W1 已准出并签核；W2 已启动（Windows 全栈优先）；本地开发模式**
+> 最后更新：2026-11-28 · 阶段：**W1/W2 已签核；W3 Windows GUI 开发中（分支 `windows-gui`，C ABI v1 已实现并评审修复中）**
 >
 > 本文是项目结构、文档地图和开发进度的**单一入口**。它不替代架构/许可/任务文档；
 > 具体设计、验收证据和决策以链接文档为准。每次完成一个切片或调整排期时，先更新本文的状态。
@@ -23,15 +23,15 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 当前阶段 | **W2 进行中** | W1 signoff 2026-11-26；W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则（PR #23/#26/#28）、W2-005 批量（PR #30）、W2-006 编码/严格模式（PR #33）已合入；W2-001 GPU Deferred；GUI 未开始 |
-| 已完成切片 | W1-001…W1-010；W2-002、W2-003、W2-003a、W2-004、W2-005、W2-006 | W1 PR #10–#15；W2 PR #23、#26、#28、#30、#33 已合入 `main` |
+| 当前阶段 | **W3 开发中** | W1 2026-11-26、W2 2026-11-28 已签核；W2-001 GPU Deferred；`windows-gui` 分支进行 W3-001 评审修复，Avalonia 工程尚未开始 |
+| 已完成切片 | W1-001…W1-010；W2-002…W2-008（W2-001 Deferred） | W1 PR #10–#15；W2 PR #23/#26/#28/#30/#33/#36、W2-008 PR #38/#39 已合入 `main` |
 | 内核能力 | ZIP、7z、RAR（外部）、RAR5 check 快筛、分卷、SFX、流式字典、掩码/暴力/混合候选源、规则链、空间估算、批量任务编排、编码变体/严格模式、多线程调度、运行控制/检查点 | W1-009 RAR5 快筛 completed（reviewer APPROVE + 法务复核附条件通过）；W1-006/007、W2-002/003/003a/004 reviewer APPROVE；W1-008 三格式 1M×1GB 实测 |
 | CLI | 单任务：字典/掩码/暴力/混合；批量：`acx batch <manifest>` | `--encoding-variants`/`--strict`/`--rar-no-fast-reject`/`--report-stats`；退出码 0/1/2/3/4；`--estimate` 输出时间 + 空间 + 变体倍数；批量退出码停止 4 > 失败 3 > 校验 2 > 有命中 0 > 全未命中 1 |
-| C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
+| C ABI | `acx.h` ABI v1：句柄/攻击/回调/状态/估算/`path|fd|uri` | W3-001 已实现（评审修复中）；Windows `path` 可用，fd/uri 预留 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 157、CLI 96（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
-| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；PR #33 6/6 全绿（2026-11-27） |
+| 测试 | core 165、CLI 含 W2-008 差分 5、FFI 8 单元 + 4 E2E | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；C/C++/C# smoke 本地全绿 |
+| CI | 6 个 Rust/license job + `ffi-smoke`（C99/C++17/.NET 10） | `.github/workflows/ci.yml`；main run `46025110880` 6/6 全绿；`ffi-smoke` 为本分支新增，待远端确认 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
 > 最近一次全绿：`main` CI 6/6（run `46025110880`，仓库转公开后重跑，2026-11-28；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)，W2 签核见 [W2-SIGNOFF](W2-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
@@ -62,7 +62,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │     │  ├─ src/main.rs
 │     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_sevenz.rs、w1_rar_external.rs、w1_volumes_sfx.rs、w1_resume.rs
 │     └─ acx-ffi/                         # 最小 C ABI
-│        ├─ include/acx.h                 # ABI v0，仅 product/version/status
+│        ├─ include/acx.h                 # ABI v1：攻击/回调/状态/估算/input
 │        └─ src/lib.rs
 │
 ├─ frontends/                             # 目前只有 README 占位，尚无工程文件
@@ -167,6 +167,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
 | [W3 阶段目标划分](W3-PLAN.md) | W3-001…W3-006 切片、准出标准、角色与 W4 边界 | 计划稿（2026-11-28）；W3-001 已完成；分支 `windows-gui` |
 | [W3-001 C ABI v1](tasks/W3-001-cabi-v1.md) | `acx.h` v1、FFI 薄层、回调/状态/错误、C/C# smoke | 本地验证完成（2026-11-28） |
+| [CL-W3-001](CL-W3-001.md) | W3-001 变更说明、影响范围、风险与回滚方案 | 已创建，随评审修复更新 |
 | [W3 Windows GUI 设计大纲](tasks/W3-windows-gui-outline.md) | Avalonia 12 架构、模块、C ABI v1、交互规范、优先级 | 设计大纲（2026-11-28）；分支 `windows-gui` |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
@@ -186,7 +187,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
 | **W2 引擎/攻击** | **✅ 已签核（2026-11-28）** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量、W2-006 编码/严格模式、W2-007 CPU 快筛、W2-008 语料/差分/基准；CI 6/6 | 未验证项见 [W2-SIGNOFF](W2-SIGNOFF.md)；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
-| **W3 桌面 GUI** | 未开始 | — | C ABI v1（完整 `path/fd/uri` 抽象）、Avalonia 工程、进度/暂停、报告导出；不自动解压 |
+| **W3 桌面 GUI** | **开发中** | C ABI v1 已实现并评审修复中；W3-002 Avalonia 未开始 | Avalonia 工程、进度/暂停、报告导出；不自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
 | **D1–D3 其他平台** | **Deferred** | 接口保留 | Linux/macOS/Android/HarmonyOS 前端与打包 |
@@ -359,16 +360,17 @@ cargo deny check licenses bans sources
 
 ### 7.4 CI 门禁
 
-`.github/workflows/ci.yml` 当前 6 个 job：
+`.github/workflows/ci.yml` 当前 7 个 job：
 
 1. `rust (windows-latest)`：fmt/clippy/test/release build；
 2. `rust (ubuntu-latest)`：同上 + C header smoke；
 3. `rust (macos-latest)`：同上；
-4. `rust (windows-latest, gnu)`：GNU target 测试；
-5. `rust (msrv 1.89)`：最低 Rust 版本；
-6. `cargo-deny`：licenses/bans/sources。
+4. `ffi-smoke`（W3-001 新增）：C99/C++17 header smoke + .NET 10 P/Invoke smoke；
+5. `rust (windows-latest, gnu)`：GNU target 测试；
+6. `rust (msrv 1.89)`：最低 Rust 版本；
+7. `cargo-deny`：licenses/bans/sources。
 
-> **注意（2026-11-28 起）**：GitHub Actions 计费账户月度额度耗尽，上述 6 个 job 当前均未启动（非代码失败）。后续开发先按 [`docs/DEV-ARCHIVE-2026-11-28.md`](DEV-ARCHIVE-2026-11-28.md) §3 切换到**本地开发模式**：本地分支 + 本地等价门禁 + 本地证据，暂不 push / 开 PR；CI 绿灯待额度恢复或 CI 通道切换后补。跨平台结论只能写"Windows x64 本地验证 / 其他平台未验证"。
+> **状态说明（2026-11-28）**：仓库已转公开，原 6 个 job 的 `main` run `46025110880` 已重跑为 6/6 全绿；`ffi-smoke` 为本分支新增，需随 W3-001 远端验证确认。W3 开发先在 `windows-gui` 分支本地提交，未 push / 开 PR 时不得把本地结果写成远端绿灯。跨平台运行时结论只能写"Windows x64 本地验证 / 其他平台未验证"。
 
 ### 7.5 Definition of Done
 

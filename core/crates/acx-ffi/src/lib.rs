@@ -12,7 +12,7 @@ use acx_core::encoding::EncodingSelection;
 use acx_core::error::AcxError;
 use acx_core::job::{self, AttackConfig, JobObserver, JobPreview, JobSpec, ProgressHook};
 use acx_core::scheduler::{RunControl, RunProgress};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -47,8 +47,22 @@ pub const ACX_RUN_STOPPED: u32 = 3;
 pub const ACX_RUN_FINISHED: u32 = 4;
 pub const ACX_RUN_FAILED: u32 = 5;
 
+pub const ACX_FORMAT_ZIP: u32 = 0;
+pub const ACX_FORMAT_SEVEN_Z: u32 = 1;
+pub const ACX_FORMAT_RAR4: u32 = 2;
+pub const ACX_FORMAT_RAR5: u32 = 3;
+
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
+    static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
+}
+
+fn in_callback() -> bool {
+    IN_CALLBACK.with(Cell::get)
+}
+
+fn reject_reentrant(api: &str) -> AcxError {
+    AcxError::Attack(format!("{api} cannot be called from a native callback"))
 }
 
 static PRODUCT_C: OnceLock<CString> = OnceLock::new();
@@ -114,6 +128,79 @@ fn finish_handle(handle: *mut AcxHandle, result: std::result::Result<(), AcxErro
         }
     }
     finish(result)
+}
+
+fn guard(api: &str, op: impl FnOnce() -> i32) -> i32 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)) {
+        Ok(status) => status,
+        Err(_) => {
+            set_last_error(&format!("Rust panic caught in {api}"));
+            ACX_ERR_PANIC
+        }
+    }
+}
+
+fn format_code(format: acx_core::archive::ArchiveFormat) -> u32 {
+    use acx_core::archive::ArchiveFormat;
+    match format {
+        ArchiveFormat::Zip => ACX_FORMAT_ZIP,
+        ArchiveFormat::SevenZ => ACX_FORMAT_SEVEN_Z,
+        ArchiveFormat::Rar4 => ACX_FORMAT_RAR4,
+        ArchiveFormat::Rar5 => ACX_FORMAT_RAR5,
+    }
+}
+
+fn measured_rate(format: acx_core::archive::ArchiveFormat) -> f64 {
+    use acx_core::archive::ArchiveFormat;
+    match format {
+        ArchiveFormat::Zip => 25_409.0,
+        ArchiveFormat::SevenZ => 967.9,
+        ArchiveFormat::Rar4 => 221.5,
+        ArchiveFormat::Rar5 => 1_727.2,
+    }
+}
+
+fn saturating_u128(value: u128) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn estimate_impl(
+    spec: *const AcxAttackSpec,
+    out: *mut AcxEstimateInfo,
+) -> std::result::Result<(), AcxError> {
+    if spec.is_null() || out.is_null() {
+        return Err(AcxError::Attack(
+            "estimate spec or output is null".to_string(),
+        ));
+    }
+    // SAFETY: caller supplies valid structs for the duration of this call.
+    let native_spec = unsafe { &*spec };
+    let native_out = unsafe { &mut *out };
+    validate_layout(
+        native_out.struct_size,
+        native_out.version,
+        size_of::<AcxEstimateInfo>(),
+    )?;
+    let job_spec = unsafe { build_job_spec(native_spec)? };
+    let estimate = job::estimate_job(&job_spec)?;
+    let rate = measured_rate(estimate.info.format);
+    let eta_seconds = if rate > 0.0 {
+        ((estimate.total as f64 / rate).ceil()).min(u64::MAX as f64) as u64
+    } else {
+        0
+    };
+
+    native_out.format = format_code(estimate.info.format);
+    native_out.total_low = estimate.total as u64;
+    native_out.total_high = (estimate.total >> 64) as u64;
+    native_out.fits_usize = u8::from(estimate.fits_usize);
+    native_out.encoding_variants = estimate.encoding_variants as u8;
+    native_out.watermark_bytes = saturating_u128(estimate.space.watermark_bytes);
+    native_out.estimated_peak_bytes = saturating_u128(estimate.space.estimated_peak_bytes);
+    native_out.in_flight_batches = saturating_u128(estimate.space.in_flight_batches);
+    native_out.measured_rate = rate;
+    native_out.eta_sec = eta_seconds;
+    Ok(())
 }
 
 /// Stable ABI revision.
@@ -216,6 +303,7 @@ pub struct AcxCallbacks {
 }
 
 #[repr(C)]
+#[derive(Default)]
 pub struct AcxStatusInfo {
     pub struct_size: u32,
     pub version: u32,
@@ -225,6 +313,27 @@ pub struct AcxStatusInfo {
     pub rate: f64,
     pub eta_sec: u64,
     pub last_status: i32,
+    pub reserved: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct AcxEstimateInfo {
+    pub struct_size: u32,
+    pub version: u32,
+    pub format: u32,
+    pub reserved32: u32,
+    /// Keyspace as `u128` split into little-endian halves for stable C layout.
+    pub total_low: u64,
+    pub total_high: u64,
+    pub fits_usize: u8,
+    pub encoding_variants: u8,
+    pub reserved8: [u8; 2],
+    pub watermark_bytes: u64,
+    pub estimated_peak_bytes: u64,
+    pub in_flight_batches: u64,
+    pub measured_rate: f64,
+    pub eta_sec: u64,
     pub reserved: [u64; 4],
 }
 
@@ -246,6 +355,7 @@ unsafe impl Sync for CallbackSet {}
 #[derive(Default)]
 struct GateState {
     closed: bool,
+    claimed: bool,
     active: usize,
 }
 
@@ -263,9 +373,17 @@ impl CallbackGate {
         }
     }
 
-    fn reopen(&self) {
+    /// Claim the gate for this handle's single job. Once claimed or closed it
+    /// can never be reopened; stop-before-start therefore cannot race a later
+    /// start into re-enabling callbacks.
+    fn claim(&self) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed || state.claimed {
+            return false;
+        }
+        state.claimed = true;
         state.closed = false;
+        true
     }
 
     fn invoke(&self, callbacks: &CallbackSet, action: impl FnOnce(&CallbackSet)) {
@@ -276,7 +394,13 @@ impl CallbackGate {
             }
             state.active += 1;
         }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| action(callbacks)));
+        let result = IN_CALLBACK.with(|flag| {
+            flag.set(true);
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| action(callbacks)));
+            flag.set(false);
+            result
+        });
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.active -= 1;
         if state.active == 0 {
@@ -290,6 +414,7 @@ impl CallbackGate {
     fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.closed = true;
+        state.claimed = true;
         while state.active > 0 {
             state = self.idle.wait(state).unwrap_or_else(|e| e.into_inner());
         }
@@ -349,6 +474,16 @@ fn lock_inner(inner: &Mutex<HandleInner>) -> MutexGuard<'_, HandleInner> {
 
 fn update_progress(inner: &Mutex<HandleInner>, progress: ProgressSnapshot) {
     lock_inner(inner).progress = progress;
+}
+
+/// Publish a state transition only while the handle is still in one of the
+/// caller-visible active states. This prevents pause/resume/stop from
+/// overwriting a terminal state written by the worker.
+fn set_state_if_active(inner: &Mutex<HandleInner>, target: HandleState, from: &[HandleState]) {
+    let mut guard = lock_inner(inner);
+    if from.contains(&guard.state) {
+        guard.state = target;
+    }
 }
 
 fn finish_state(
@@ -621,11 +756,32 @@ fn create_impl(
     Ok(())
 }
 
+fn invoke_finish(callbacks: &CallbackSet, status: i32) {
+    let Some(callback) = callbacks.on_finished else {
+        return;
+    };
+    let result = IN_CALLBACK.with(|flag| {
+        flag.set(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: user data remains valid until acx_destroy.
+            unsafe { callback(callbacks.user as *mut c_void, status) };
+        }));
+        flag.set(false);
+        result
+    });
+    if result.is_err() {
+        set_last_error("native on_finished callback panicked");
+    }
+}
+
 fn start_impl(
     handle: *mut AcxHandle,
     spec: *const AcxAttackSpec,
     callbacks: *const AcxCallbacks,
 ) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_start"));
+    }
     if handle.is_null() {
         return Err(AcxError::Attack("handle is null".to_string()));
     }
@@ -639,26 +795,7 @@ fn start_impl(
 
     // SAFETY: handle was validated above and points to a live AcxHandle.
     let handle_ref = unsafe { &*handle };
-    {
-        let mut inner = lock_inner(&handle_ref.inner);
-        if inner.worker.is_some() {
-            return Err(AcxError::Attack(
-                "a job is already running on this handle".to_string(),
-            ));
-        }
-        inner.state = HandleState::Running;
-        inner.progress = ProgressSnapshot::default();
-        inner.last_status = ACX_OK;
-        inner.callbacks = Arc::clone(&callbacks);
-    }
-    handle_ref.gate.reopen();
-
     let control = Arc::new(RunControl::new());
-    {
-        let mut inner = lock_inner(&handle_ref.inner);
-        inner.control = Some(Arc::clone(&control));
-    }
-
     let state = Arc::clone(&handle_ref.inner);
     let gate = Arc::clone(&handle_ref.gate);
     let worker_callbacks = Arc::clone(&callbacks);
@@ -696,6 +833,25 @@ fn start_impl(
         });
     });
 
+    // Keep the mutex across the worker assignment so concurrent start/stop
+    // cannot observe a half-initialized job or race on gate reopen/close.
+    let mut inner = lock_inner(&handle_ref.inner);
+    if inner.worker.is_some() {
+        return Err(AcxError::Attack(
+            "one handle owns at most one job; call acx_destroy before reusing it".to_string(),
+        ));
+    }
+    if !handle_ref.gate.claim() {
+        return Err(AcxError::Attack(
+            "handle gate is closed; create a new handle after stop".to_string(),
+        ));
+    }
+    inner.state = HandleState::Running;
+    inner.progress = ProgressSnapshot::default();
+    inner.last_status = ACX_OK;
+    inner.callbacks = Arc::clone(&callbacks);
+    inner.control = Some(Arc::clone(&control));
+
     let worker = thread::spawn(move || {
         let mut observer = FfiObserver {
             callbacks: worker_callbacks.clone(),
@@ -726,8 +882,13 @@ fn start_impl(
                         .as_ref()
                         .map(ToString::to_string)
                         .unwrap_or_else(|| "job failed".to_string());
+                    set_last_error(&message);
                     set_handle_error(&state, &message);
                 }
+                // The final progress hook has already published rate/ETA; keep
+                // those display values while replacing tried/total with the
+                // authoritative report counters.
+                let displayed = lock_inner(&state).progress;
                 finish_state(
                     &state,
                     final_state,
@@ -735,8 +896,8 @@ fn start_impl(
                     ProgressSnapshot {
                         tried: report.tried,
                         total: report.total,
-                        rate: 0.0,
-                        eta_sec: 0,
+                        rate: displayed.rate,
+                        eta_sec: displayed.eta_sec,
                     },
                 );
                 if let Some(password) = report.password {
@@ -755,15 +916,14 @@ fn start_impl(
                     1,
                     &format!("job finished: {:?}", report.status),
                 );
-                worker_gate.invoke(&worker_callbacks, |set| {
-                    if let Some(callback) = set.on_finished {
-                        // SAFETY: user data remains valid for the handle lifetime.
-                        unsafe { callback(set.user as *mut c_void, status) };
-                    }
-                });
+                // Terminal notification is delivered outside the stop gate:
+                // callers that stop must still learn the final status, while
+                // progress/hit/log callbacks remain suppressed after stop.
+                invoke_finish(&worker_callbacks, status);
             }
             Ok(Err(error)) => {
                 let status = status_for_error(&error);
+                set_last_error(&error.to_string());
                 set_handle_error(&state, &error.to_string());
                 finish_state(
                     &state,
@@ -772,14 +932,10 @@ fn start_impl(
                     ProgressSnapshot::default(),
                 );
                 log_message(&worker_callbacks, &worker_gate, 2, &error.to_string());
-                worker_gate.invoke(&worker_callbacks, |set| {
-                    if let Some(callback) = set.on_finished {
-                        // SAFETY: user data remains valid for the handle lifetime.
-                        unsafe { callback(set.user as *mut c_void, status) };
-                    }
-                });
+                invoke_finish(&worker_callbacks, status);
             }
             Err(_) => {
+                set_last_error("Rust panic caught in job");
                 set_handle_error(&state, "Rust panic caught in job");
                 finish_state(
                     &state,
@@ -793,24 +949,18 @@ fn start_impl(
                     2,
                     "Rust panic caught in job",
                 );
-                worker_gate.invoke(&worker_callbacks, |set| {
-                    if let Some(callback) = set.on_finished {
-                        // SAFETY: user data remains valid for the handle lifetime.
-                        unsafe { callback(set.user as *mut c_void, ACX_ERR_PANIC) };
-                    }
-                });
+                invoke_finish(&worker_callbacks, ACX_ERR_PANIC);
             }
         }
     });
-
-    {
-        let mut inner = lock_inner(&handle_ref.inner);
-        inner.worker = Some(worker);
-    }
+    inner.worker = Some(worker);
     Ok(())
 }
 
 fn pause_impl(handle: *mut AcxHandle) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_pause"));
+    }
     if handle.is_null() {
         return Err(AcxError::Attack("handle is null".to_string()));
     }
@@ -824,11 +974,18 @@ fn pause_impl(handle: *mut AcxHandle) -> std::result::Result<(), AcxError> {
     if !control.pause() {
         return Err(AcxError::Attack("job is not running".to_string()));
     }
-    lock_inner(&handle_ref.inner).state = HandleState::Paused;
+    set_state_if_active(
+        &handle_ref.inner,
+        HandleState::Paused,
+        &[HandleState::Running],
+    );
     Ok(())
 }
 
 fn resume_impl(handle: *mut AcxHandle) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_resume"));
+    }
     if handle.is_null() {
         return Err(AcxError::Attack("handle is null".to_string()));
     }
@@ -842,24 +999,29 @@ fn resume_impl(handle: *mut AcxHandle) -> std::result::Result<(), AcxError> {
     if !control.resume() {
         return Err(AcxError::Attack("job is not paused".to_string()));
     }
-    lock_inner(&handle_ref.inner).state = HandleState::Running;
+    set_state_if_active(
+        &handle_ref.inner,
+        HandleState::Running,
+        &[HandleState::Paused],
+    );
     Ok(())
 }
 
 fn stop_impl(handle: *mut AcxHandle) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_stop"));
+    }
     if handle.is_null() {
         return Err(AcxError::Attack("handle is null".to_string()));
     }
     // SAFETY: handle was validated above.
     let handle_ref = unsafe { &*handle };
-    let control = {
-        let inner = lock_inner(&handle_ref.inner);
-        inner.control.clone()
-    };
+    // Close the gate while holding the handle lock so a concurrent start
+    // cannot reopen it after stop has returned.
+    let mut inner = lock_inner(&handle_ref.inner);
     handle_ref.gate.close();
-    if let Some(control) = control {
+    if let Some(control) = inner.control.clone() {
         control.stop();
-        let mut inner = lock_inner(&handle_ref.inner);
         if matches!(inner.state, HandleState::Running | HandleState::Paused) {
             inner.state = HandleState::Stopped;
         }
@@ -871,6 +1033,9 @@ fn status_impl(
     handle: *mut AcxHandle,
     info: *mut AcxStatusInfo,
 ) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_status"));
+    }
     if handle.is_null() {
         return Err(AcxError::Attack("handle is null".to_string()));
     }
@@ -912,6 +1077,10 @@ fn status_impl(
 }
 
 fn destroy_impl(handle: *mut AcxHandle) {
+    if in_callback() {
+        set_last_error("acx_destroy cannot be called from a native callback");
+        return;
+    }
     if handle.is_null() {
         return;
     }
@@ -942,13 +1111,7 @@ fn destroy_impl(handle: *mut AcxHandle) {
 /// valid writable pointer for one handle pointer.
 #[no_mangle]
 pub unsafe extern "C" fn acx_create(config: *const AcxConfig, out: *mut *mut AcxHandle) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| create_impl(config, out))) {
-        Ok(result) => finish(result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_create");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_create", || finish(create_impl(config, out)))
 }
 
 /// Stop, join, and free a handle. Null is a no-op.
@@ -973,15 +1136,9 @@ pub unsafe extern "C" fn acx_start(
     spec: *const AcxAttackSpec,
     callbacks: *const AcxCallbacks,
 ) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        start_impl(handle, spec, callbacks)
-    })) {
-        Ok(result) => finish_handle(handle, result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_start");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_start", || {
+        finish_handle(handle, start_impl(handle, spec, callbacks))
+    })
 }
 
 /// Pause the running job.
@@ -990,13 +1147,7 @@ pub unsafe extern "C" fn acx_start(
 /// `handle` must be null or a live handle from `acx_create`.
 #[no_mangle]
 pub unsafe extern "C" fn acx_pause(handle: *mut AcxHandle) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pause_impl(handle))) {
-        Ok(result) => finish_handle(handle, result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_pause");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_pause", || finish_handle(handle, pause_impl(handle)))
 }
 
 /// Resume a paused job.
@@ -1005,28 +1156,30 @@ pub unsafe extern "C" fn acx_pause(handle: *mut AcxHandle) -> i32 {
 /// `handle` must be null or a live handle from `acx_create`.
 #[no_mangle]
 pub unsafe extern "C" fn acx_resume(handle: *mut AcxHandle) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| resume_impl(handle))) {
-        Ok(result) => finish_handle(handle, result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_resume");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_resume", || finish_handle(handle, resume_impl(handle)))
 }
 
-/// Stop the job; no new callback starts after this returns.
+/// Estimate keyspace, memory, and ETA without starting a job.
+///
+/// # Safety
+/// `spec` must be a valid `AcxAttackSpec`; `out` must be a writable
+/// `AcxEstimateInfo` with `struct_size`/`version` initialized.
+#[no_mangle]
+pub unsafe extern "C" fn acx_estimate(
+    spec: *const AcxAttackSpec,
+    out: *mut AcxEstimateInfo,
+) -> i32 {
+    guard("acx_estimate", || finish(estimate_impl(spec, out)))
+}
+
+/// Stop the job; no new progress/hit/log callback starts after this returns.
+/// `on_finished` is the terminal notification and is still delivered once.
 ///
 /// # Safety
 /// `handle` must be null or a live handle from `acx_create`.
 #[no_mangle]
 pub unsafe extern "C" fn acx_stop(handle: *mut AcxHandle) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stop_impl(handle))) {
-        Ok(result) => finish_handle(handle, result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_stop");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_stop", || finish_handle(handle, stop_impl(handle)))
 }
 
 /// Copy the current status into `info`.
@@ -1036,27 +1189,30 @@ pub unsafe extern "C" fn acx_stop(handle: *mut AcxHandle) -> i32 {
 /// `AcxStatusInfo` with `struct_size`/`version` initialized.
 #[no_mangle]
 pub unsafe extern "C" fn acx_status(handle: *mut AcxHandle, info: *mut AcxStatusInfo) -> i32 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| status_impl(handle, info))) {
-        Ok(result) => finish_handle(handle, result),
-        Err(_) => {
-            set_last_error("Rust panic caught in acx_status");
-            ACX_ERR_PANIC
-        }
-    }
+    guard("acx_status", || {
+        finish_handle(handle, status_impl(handle, info))
+    })
 }
 
 /// Last error for the handle, or the thread-local error when handle is null.
-/// The pointer is valid until the next failing call on that handle/thread.
+/// The returned pointer is copied into a caller-thread buffer and stays valid
+/// until the next `acx_last_error` call or failing call on this thread.
 ///
 /// # Safety
 /// `handle` must be null or a live handle from `acx_create`.
 #[no_mangle]
 pub unsafe extern "C" fn acx_last_error(handle: *mut AcxHandle) -> *const c_char {
-    if !handle.is_null() {
+    let message = if handle.is_null() {
+        LAST_ERROR.with(|slot| slot.borrow().to_string_lossy().into_owned())
+    } else {
         // SAFETY: handle was supplied by the caller and is live for this call.
         let handle_ref = unsafe { &*handle };
-        return lock_inner(&handle_ref.inner).last_error.as_ptr();
-    }
+        lock_inner(&handle_ref.inner)
+            .last_error
+            .to_string_lossy()
+            .into_owned()
+    };
+    set_last_error(&message);
     LAST_ERROR.with(|slot| slot.borrow().as_ptr())
 }
 
@@ -1165,5 +1321,81 @@ mod tests {
             seen.fetch_add(1, Ordering::SeqCst);
         });
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn guard_maps_panic_to_panic_status() {
+        let status = guard("test_panic", || -> i32 { panic!("boom") });
+        assert_eq!(status, ACX_ERR_PANIC);
+        assert!(cstr(unsafe { acx_last_error(std::ptr::null_mut()) }).contains("test_panic"));
+    }
+
+    #[test]
+    fn missing_input_kind_is_invalid_arg() {
+        let mut handle: *mut AcxHandle = std::ptr::null_mut();
+        assert_eq!(unsafe { acx_create(std::ptr::null(), &mut handle) }, ACX_OK);
+        let input = AcxInput {
+            struct_size: size_of::<AcxInput>() as u32,
+            version: ACX_ABI_V1,
+            kind: 99,
+            path: std::ptr::null(),
+            fd: -1,
+            uri: std::ptr::null(),
+            reserved: [0; 4],
+        };
+        let spec = AcxAttackSpec {
+            struct_size: size_of::<AcxAttackSpec>() as u32,
+            version: ACX_ABI_V1,
+            input,
+            mode: ACX_ATTACK_DICT,
+            dictionary_path: std::ptr::null(),
+            masks: std::ptr::null(),
+            mask_count: 0,
+            charset: std::ptr::null(),
+            min_len: 0,
+            max_len: 0,
+            custom: [std::ptr::null(); 4],
+            rules: std::ptr::null(),
+            rule_count: 0,
+            prefix_mask: std::ptr::null(),
+            suffix_mask: std::ptr::null(),
+            threads: 1,
+            checkpoint_path: std::ptr::null(),
+            resume: 0,
+            encoding: std::ptr::null(),
+            strict: 0,
+            rar_no_fast_reject: 0,
+            report_stats: 0,
+            reserved: [0; 8],
+        };
+        assert_eq!(
+            unsafe { acx_start(handle, &spec, std::ptr::null()) },
+            ACX_ERR_INVALID_ARG
+        );
+        assert!(!cstr(unsafe { acx_last_error(handle) }).is_empty());
+        unsafe { acx_destroy(handle) };
+    }
+
+    #[test]
+    fn terminal_state_is_not_overwritten_by_control_ops() {
+        let mut handle: *mut AcxHandle = std::ptr::null_mut();
+        assert_eq!(unsafe { acx_create(std::ptr::null(), &mut handle) }, ACX_OK);
+        {
+            let handle_ref = unsafe { &*handle };
+            let mut inner = lock_inner(&handle_ref.inner);
+            inner.state = HandleState::Finished;
+            inner.control = Some(Arc::new(RunControl::new()));
+        }
+        let _ = unsafe { acx_pause(handle) };
+        let _ = unsafe { acx_resume(handle) };
+        let _ = unsafe { acx_stop(handle) };
+        let mut info = AcxStatusInfo {
+            struct_size: size_of::<AcxStatusInfo>() as u32,
+            version: ACX_ABI_V1,
+            ..Default::default()
+        };
+        assert_eq!(unsafe { acx_status(handle, &mut info) }, ACX_OK);
+        assert_eq!(info.state, ACX_RUN_FINISHED);
+        unsafe { acx_destroy(handle) };
     }
 }

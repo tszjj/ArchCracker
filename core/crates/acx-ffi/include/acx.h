@@ -65,6 +65,13 @@ typedef enum AcxRunState {
     ACX_RUN_FAILED = 5
 } AcxRunState;
 
+typedef enum AcxFormat {
+    ACX_FORMAT_ZIP = 0,
+    ACX_FORMAT_SEVEN_Z = 1,
+    ACX_FORMAT_RAR4 = 2,
+    ACX_FORMAT_RAR5 = 3
+} AcxFormat;
+
 typedef struct AcxConfig {
     uint32_t struct_size;
     uint32_t version;
@@ -73,7 +80,8 @@ typedef struct AcxConfig {
 
 /* Full input abstraction frozen in v1. Windows uses PATH; FD/URI are reserved
  * for JNI/NAPI frontends and return ACX_ERR_UNSUPPORTED until those glue
- * layers exist. Pointers are borrowed only for the acx_start call. */
+ * layers exist. Pointers are borrowed only for the acx_start call. An fd is a
+ * borrowed native handle: native code neither duplicates nor closes it. */
 typedef struct AcxInput {
     uint32_t struct_size;
     uint32_t version;
@@ -118,7 +126,8 @@ typedef void (*AcxFinishedFn)(void* user, int32_t status);
 
 /* Callback functions must return quickly and must not call acx_* reentrantly.
  * User data must remain valid until acx_destroy. After acx_stop returns, no
- * further callback starts. */
+ * progress/hit/log callback starts; on_finished remains the terminal
+ * notification and is delivered once. */
 typedef struct AcxCallbacks {
     uint32_t struct_size;
     uint32_t version;
@@ -142,6 +151,24 @@ typedef struct AcxStatusInfo {
     uint64_t reserved[4];
 } AcxStatusInfo;
 
+typedef struct AcxEstimateInfo {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t format;        /* AcxFormat */
+    uint32_t reserved32;
+    uint64_t total_low;     /* keyspace low 64 bits */
+    uint64_t total_high;    /* keyspace high 64 bits */
+    uint8_t fits_usize;
+    uint8_t encoding_variants;
+    uint8_t reserved8[2];
+    uint64_t watermark_bytes;
+    uint64_t estimated_peak_bytes;
+    uint64_t in_flight_batches;
+    double measured_rate;   /* candidates/s from the W1/W2 same-machine baseline */
+    uint64_t eta_sec;
+    uint64_t reserved[4];
+} AcxEstimateInfo;
+
 /* One handle owns at most one job; call acx_destroy before reusing it. */
 typedef struct AcxHandle AcxHandle;
 
@@ -158,6 +185,7 @@ ACX_API AcxStatus acx_pause(AcxHandle* handle);
 ACX_API AcxStatus acx_resume(AcxHandle* handle);
 ACX_API AcxStatus acx_stop(AcxHandle* handle);
 ACX_API AcxStatus acx_status(AcxHandle* handle, AcxStatusInfo* info);
+ACX_API AcxStatus acx_estimate(const AcxAttackSpec* spec, AcxEstimateInfo* info);
 ACX_API const char* acx_last_error(AcxHandle* handle);
 
 #ifdef __cplusplus

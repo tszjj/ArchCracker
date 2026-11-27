@@ -7,7 +7,7 @@
 - 平台：Windows 10 22H2 / 11 24H2 x64；Linux/macOS/Android/HarmonyOS 不在 W3 实现
 - 设计依据：`docs/tasks/W3-windows-gui-outline.md`、`docs/adr/0002-frontend-split.md`、`docs/windows-plan.md` §6、`docs/architecture.md` §5
 
-> 本文沿用 `docs/W2-PLAN.md` 的切片方式：§3 是阶段目标参考，**准出只按 §4 和 W3 签核文件**。每个切片的实现目标、依赖、验收与禁止事项按 W1-001/W2-008 的任务文档格式展开。
+> 本文沿用 `docs/W2-PLAN.md` 的切片方式：§3 是阶段目标参考，**准出只按 §4 和 W3 签核文件**。每个切片的实现目标、依赖、验收与禁止事项按 W1-001/W2-008 的任务文档格式展开。C ABI v1 冻结后，任何破坏性接口/布局变更必须提升 ABI 版本，并经 architect + release 复审。
 
 ## 1. W3 目标
 
@@ -35,7 +35,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 | W3-003 垂直切片 | 待启动 | Setup/Run/Result、ZIP 字典攻击、暂停/停止/命中复制 |
 | W3-004 攻击模式扩展 | 待启动 | 掩码/暴力/混合、编码变体、strict/resume、估算 |
 | W3-005 报告与体验 | 待启动 | 统计/报告导出、错误分类、键盘/高 DPI/脱敏日志 |
-| W3-006 稳定与签核 | 待启动 | sidecar 开关预留、性能与 UI 冒烟、W3-SIGNOFF |
+| W3-006 稳定与签核 | 待启动 | sidecar 开关预留、性能与 UI 冒烟、W3-SIGNOFF；W3-001 的 CI ffi-smoke 前置已完成 |
 
 ---
 
@@ -49,10 +49,10 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 - Inputs: `docs/tasks/W3-windows-gui-outline.md` §4、`docs/architecture.md:121-181`、W2 已实现参数与统计
 - Acceptance:
   - `acx.h` 带 `ACX_ABI_VERSION`、结构体 `struct_size/version`、不透明句柄；
-  - `acx_create/acx_destroy/acx_start/acx_pause/acx_resume/acx_stop/acx_status/acx_version/acx_last_error` 可用；
+  - `acx_create/acx_destroy/acx_start/acx_pause/acx_resume/acx_stop/acx_status/acx_estimate/acx_version/acx_last_error` 可用；
   - `AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`；
   - `AcxInput` 在 v1 冻结完整 `path/fd/uri` 抽象：判别式、字段、生命周期、错误语义与 `reserved` 全部定义；Windows 桌面先使用 `path`，Android/HarmonyOS 后续接入不破坏 ABI；
-  - `on_progress/on_hit/on_log` 回调在 `stop` 返回后不再触发；Rust panic 转 `ACX_ERR_PANIC`；
+  - `on_progress/on_hit/on_log` 在 `stop` 返回后不再启动；`on_finished` 作为终态通知仍会触发一次；Rust panic 转 `ACX_ERR_PANIC`；
   - C/C++ header smoke 与 C# P/Invoke smoke 通过；不引入 hashcat/UI 依赖。
 - Out of scope: GUI 界面、Android JNI、HarmonyOS NAPI、安装包、W4 随包二进制。
 
@@ -122,7 +122,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 - Acceptance:
   - 进程内 DLL 为主路径；sidecar 只预留开关与配置，W3 不实现真实进程，P2 再实现；
   - 长任务 UI 不卡，取消请求观察 ≤200 ms，进度刷新 ~10 Hz；连续运行/大归档冒烟有记录；
-  - Windows CI 增加 .NET 构建/测试（或明确记录未加入原因），Rust 6 job 不回归；
+  - Windows CI 已加入 `ffi-smoke`（C99/C++17 header + .NET 10 P/Invoke，含两种回调模型），Rust 6 job 不回归；
   - 许可复核：RAR 外部边界、hashcat 非依赖、无新增不兼容依赖；
   - `docs/W3-SIGNOFF.md` 逐条勾选准出项，结论 GO / NO-GO；未验证项显式列出；
   - W3 分支合并回 `main` 前完成 reviewer/architect/release 评审与 CI。
@@ -140,7 +140,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 4. 暂停/继续/停止、进度/ETA、错误分类、断点续跑、统计报告符合 W2 语义；
 5. UI 不阻塞；取消 ≤200 ms；进度限流 ~10 Hz；zh/en、高 DPI、键盘/可访问名称可用；
 6. 日志/报告/崩溃信息默认不含完整密码；RAR 仅外部 UnRAR；hashcat 非 Cargo 依赖；无新不兼容依赖；
-7. Rust 6 job CI 与 .NET Windows 构建/测试全绿（若 .NET 未入 CI，必须在签核中列为阻塞或例外批准）；
+7. Rust 6 job CI 与 Windows `ffi-smoke` job（C99/C++17 header、.NET 10 P/Invoke）全绿；
 8. `docs/W3-SIGNOFF.md` 完成并给出 GO；所有未验证项写明，不把 W4/W5 事项写成完成。
 
 ## 5. 顺序与角色

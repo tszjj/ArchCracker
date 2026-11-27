@@ -46,22 +46,28 @@ pub type ProgressHook = Arc<dyn Fn(RunProgress) + Send + Sync>;
 struct ProgressReporter {
     finished: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
+    context: Arc<RunContext>,
+    hook: ProgressHook,
 }
 
 impl ProgressReporter {
     fn start(context: Arc<RunContext>, hook: ProgressHook) -> Self {
         let finished = Arc::new(AtomicBool::new(false));
         let thread_finished = Arc::clone(&finished);
+        let thread_context = Arc::clone(&context);
+        let thread_hook = Arc::clone(&hook);
         let thread = thread::spawn(move || loop {
             thread::sleep(PROGRESS_INTERVAL);
             if thread_finished.load(Ordering::SeqCst) {
                 break;
             }
-            hook(context.snapshot());
+            thread_hook(thread_context.snapshot());
         });
         Self {
             finished,
             thread: Some(thread),
+            context,
+            hook,
         }
     }
 }
@@ -72,6 +78,9 @@ impl Drop for ProgressReporter {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        // Contract: exactly one final snapshot after the reporter stops. The
+        // worker-thread hook cannot race with the final FFI state write.
+        (self.hook)(self.context.snapshot());
     }
 }
 

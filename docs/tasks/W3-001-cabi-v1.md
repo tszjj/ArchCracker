@@ -1,7 +1,7 @@
 # W3-001：C ABI v1 冻结 — 实现记录
 
-- 状态：完成（2026-11-28，`windows-gui`；本地验证通过）
-- 角色：core-engineer（FFI）、frontend-engineer（C# smoke）、architect（ABI 边界）、reviewer/release（复核待办）
+- 状态：完成（2026-11-28，`windows-gui`；本地验证通过；reviewer/architect/release 最终复审 APPROVE）
+- 角色：core-engineer（FFI）、frontend-engineer（C# smoke）、architect（ABI 边界）、reviewer/release（复核通过）
 - 分支：`windows-gui`
 - 依赖：W2 已签核（`docs/W2-SIGNOFF.md`）；`acx-core` 的 `run_job`/`validate_job`/`RunControl`/W2 攻击与统计能力
 - 依据：`docs/W3-PLAN.md` §3、`docs/tasks/W3-windows-gui-outline.md` §4、`docs/architecture.md` §5
@@ -15,11 +15,11 @@
 ### 1. ABI 表面
 
 - `include/acx.h` 提升至 `ACX_ABI_VERSION 1`；全部结构体带 `struct_size`/`version` 与 `reserved[]`。
-- 函数：`acx_abi_version`、`acx_product`、`acx_version`、`acx_status_name`、`acx_create`、`acx_destroy`、`acx_start`、`acx_pause`、`acx_resume`、`acx_stop`、`acx_status`、`acx_last_error`。
+- 函数：`acx_abi_version`、`acx_product`、`acx_version`、`acx_status_name`、`acx_create`、`acx_destroy`、`acx_start`、`acx_pause`、`acx_resume`、`acx_stop`、`acx_status`、`acx_estimate`、`acx_last_error`。
 - `AcxInput` 冻结 `path/fd/uri` 完整抽象；Windows 桌面使用 `path`，`fd`/`uri` 返回 `ACX_ERR_UNSUPPORTED`，为 JNI/NAPI 保留 ABI 槽位。
 - `AcxAttackSpec` 覆盖字典/掩码/暴力/混合、线程、encoding、strict、`rar_no_fast_reject`、checkpoint/resume、`report_stats`。
 - `AcxCallbacks` 含 `on_progress`、`on_hit`、`on_log`、`on_finished`；`AcxStatusInfo` 暴露状态、tried/total、rate、ETA 与最后状态码。
-- 一个 handle 只承载一个 job；销毁前不可重复 start。`acx_stop` 返回后不再启动新回调。
+- 一个 handle 只承载一个 job；销毁前不可重复 start。`acx_stop` 返回后不再启动新的 progress/hit/log 回调，`on_finished` 作为终态通知仍触发一次。
 
 ### 2. Rust FFI（`core/crates/acx-ffi/src/lib.rs`）
 
@@ -45,7 +45,7 @@
 |---|---|
 | `cargo fmt --all -- --check` | 通过 |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 通过 |
-| `cargo test --workspace --locked` | 通过；FFI 5 单测 + 1 C ABI E2E |
+| `cargo test --workspace --locked` | 通过；FFI 8 单测 + 5 个 C ABI E2E（命中、最终进度、stop 回调、pause/resume/重复 start、stop-before-start、错误映射分列） |
 | `cargo +1.89 test --workspace --locked` | 通过 |
 | `cargo deny check licenses bans sources` | 通过 |
 | `cargo build --workspace --release --locked` | 通过 |
@@ -57,7 +57,7 @@
 
 - 影响：新增 dev-dependency `zip`（已在依赖登记中，非生产依赖）与 `acx-core` 的进度钩子；不改命中复核路径。
 - ABI：v1 尚未发布；本切片冻结后 W3-002 GUI 必须按 `acx.h` 对接，不得复制参数/错误码。
-- 平台：Windows x64 本地验证；Linux/macOS 由 CI 编译/单测；Android fd 与 HarmonyOS uri 仍为预留，未运行时验证。
+- 平台：Windows x64 本地等价门禁全绿；Linux/macOS 仅由 Rust job 的 CI 编译/单测覆盖并需在评审前重跑确认，本分支未持有独立远端绿灯；Android fd 与 HarmonyOS uri 仍为预留，未运行时验证。
 - 生命周期：用户指针/回调必须在 `acx_destroy` 前保持有效，回调内不得重入 `acx_*`；已写入头文件注释。
 - sidecar：未实现真实进程，仅保留后续 P2 开关设计；自动解压不在项目范围内。
 
