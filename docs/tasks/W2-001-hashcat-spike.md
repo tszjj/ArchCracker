@@ -23,7 +23,7 @@
 
 目标命令：`acx -f aes.zip -m dict -d dict.txt --gpu auto`
 
-- Rust 侧提取 hashspec：ZIP AES 提取盐、校验字、认证码、首块密文与 CRC；RAR5 提取盐、派生参数与校验值（clean-room，不复制 unRAR 源码）。
+- Rust 侧提取 hashspec：ZIP AES 提取盐、校验字、认证码、首块密文与 CRC；RAR5 提取盐、派生参数与校验值（独立实现，不复制 UnRAR 源码；不声称正式 clean-room）。
 - `engines::external` 增加 hashcat 进程封装：检测、状态 JSON、独立 potfile、会话恢复、取消/超时、临时文件清理。
 - CLI 增加 `--gpu auto|cpu|hashcat`，默认 auto；命中后必须由归档引擎完整复核，GPU 结果不直接发布。
 - CPU 回退：hashcat 缺失、无 GPU、驱动不满足、模式不支持时自动走现有调度器。

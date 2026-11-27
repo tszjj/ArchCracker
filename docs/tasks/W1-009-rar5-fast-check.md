@@ -26,6 +26,8 @@
 - 命中仍由外部复核；非 ASCII、无校验值、校验失败、派生次数超限均正确回退；
 - fmt/clippy/MSRV/release/cargo-deny 全绿。
 
+结果：`cargo test --workspace` 98 core + 39 CLI（1 忽略）+ 2 FFI 通过；PR 已合并，CI 6/6。
+
 ## 许可与引用
 
 快筛只做密钥派生与校验值比对，不做解密/解压；不实现 RAR 解压/压缩，不复制或链接 UnRAR 源码。任何扩展到数据解密都需重新做 ADR 与许可评审。许可分析属工程判断，已按项目负责人确认完成法务复核（附条件），发布前由 release-engineer 按条件检查。相关文档：ADR-0005、ADR-0003、`docs/licensing.md`、`docs/architecture.md`。
