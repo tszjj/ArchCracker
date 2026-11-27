@@ -4,7 +4,7 @@
 - 评审编号：W2-EXIT-REVIEW-2026-11-28
 - 签核范围：`docs/W2-PLAN.md` §4 六条准出标准；`docs/W2-EXIT-PLAN.md` G1–G7
 - 功能基线：`feat/w2-008-corpus-evidence @ da3adf7`；公开仓库主基线 `main @ e3854c1`
-- CI 证据：仓库转公开后重跑 `main` run [`46025110880`](https://github.com/tszjj/ArchCracker/actions/runs/46025110880)，**6/6 成功**；W2-008 分支的远端验证见合并 PR（合并后回填 run id）。
+- CI 证据：仓库转公开后重跑 `main` run [`46025110880`](https://github.com/tszjj/ArchCracker/actions/runs/46025110880)，**6/6 成功**；W2-008 合并 PR [#38](https://github.com/tszjj/ArchCracker/pull/38) 的 CI run [`46039049481`](https://github.com/tszjj/ArchCracker/actions/runs/46039049481) **6/6 成功**；合并提交 `b495bdfef9e4f3ac47b035b36568e9c198a40772`。
 - 结论：**GO（有条件签核）**。条件仅为"列为未验证的证据项"，不再是功能开发阻塞项；无 P0/P1 缺陷。
 
 ## 1. 准出清单
@@ -41,8 +41,8 @@
 
 | # | 行动 | 责任角色 | 完成标志 |
 |---|---|---|---|
-| A1 | 合并 W2-008 分支并回填合并 PR/run id 到本文件 | release-engineer | 本文件 §头部 CI 证据含合并 PR 链接 |
-| A2 | 合并后清理公开仓库旧分支，仅保留 W2 基线 `main` | release-engineer | `git branch -r` 仅 `origin/main`（与 HEAD） |
+| A1 | 合并 W2-008 分支并回填合并 PR/run id 到本文件 | release-engineer | ✅ 已完成：PR #38 / run `46039049481` / merge `b495bdf` 已记录 |
+| A2 | 合并后清理公开仓库旧分支，仅保留 W2 基线 `main` | release-engineer | 合并后执行；`git branch -r` 仅 `origin/main`（与 HEAD） |
 | A3 | 发布说明标注 `Stats:` 行扩展与非 Windows 平台未验证 | release-engineer | W4/发布清单引用本文件 |
 | A4 | RAR5 校验器 ADR-0005 附条件复核 | release-engineer | W4 发布前复核记录 |
 | A5 | 1M strict 对照与 7z/RAR 基准 | qa-engineer + core-engineer | 新基准报告；不阻塞 W2 签核 |
