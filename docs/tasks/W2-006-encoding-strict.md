@@ -86,19 +86,21 @@ RAR 仍只通过外部未修改的 UnRAR 进程，快筛边界不变；不复制
 ## 8. 实现记录（2026-11-27）
 
 - **编码变体**：`acx-core::encoding` 提供 `EncodingSelection`（`auto` 或显式列表）、按格式解析的 `EncodingPlan` 与验证阶段包装器。变体不进入候选源，候选水位仍按候选推进；一个候选的所有变体试完才算完成。
-- **各格式默认集合**：ZIP = UTF-8 / GBK / CP437；RAR4 = UTF-8 / OEM（外部引擎内部将 UTF-8 转 OEM，不可表示时跳过）；RAR5 = UTF-8；7z = UTF-8（引擎内部转 UTF-16LE，变体不重复展开）。显式指定引擎内部已处理的变体会报错。
-- **不可表示字符**：GBK/CP437/OEM 编码失败时跳过该变体并计数，不把整个任务判失败；RAR 外部引擎的 OEM 编码失败也按 Miss 处理。
-- **严格模式**：`--strict` 关闭 RAR5 check 快筛与 7z 首块探测，直接走完整 CRC/HMAC 复核；`--rar-no-fast-reject` 只关 RAR5。命中仍由归档引擎完整复核，快筛只否决。
-- **计数**：`JobStats` 汇总编码尝试、候选数、跳过变体、快筛否决、外部复核；单任务 `--report-stats` 输出，批量每个任务固定输出一行。
+- **各格式默认集合**：ZIP = UTF-8 / GBK / CP437；RAR4 = UTF-8 / OEM（外部引擎内部将 UTF-8 转 OEM，不可表示时跳过；显式只接受 utf8/oem，避免 GBK/CP437 字节被二次转码）；RAR5 = UTF-8；7z = UTF-8（引擎内部转 UTF-16LE，变体不重复展开）。显式指定引擎内部已处理的变体会报错。
+- **不可表示字符**：GBK/CP437/OEM 编码失败时跳过该变体并计数，不把整个任务判失败；RAR 外部引擎的 OEM 编码失败也按 Miss 处理并计入跳过变体。
+- **严格模式**：`--strict` 关闭 RAR5 check 快筛与 7z 首块探测，直接走完整 CRC/HMAC 复核；`--rar-no-fast-reject` 只关 RAR5。命中仍由归档引擎完整复核，快筛只否决；外部复核计数只在真正命中时递增。
+- **计数**：`JobStats` 汇总编码尝试、候选数、跳过变体、快筛否决、外部确认；复用预阶段使用独立计数器，不计入任务 `tried`/统计，候选数不会超过源总数；单任务 `--report-stats` 输出，批量按任务 `report_stats` 输出。
 - **指纹**：编码选项、`--strict`、`--rar-no-fast-reject` 任一非默认值时，攻击签名追加规范化选项后再取 SHA-256；全默认值保持原有签名，避免破坏已有 W1/W2 检查点。
 - **CLI/批量**：新增 `--encoding-variants`、`--strict`、`--rar-no-fast-reject`、`--report-stats`；批量 `[[jobs]]` 支持同名字段。`--estimate` 增加“最多 N 个编码变体”的说明。
-- **测试**：156 core / 93 CLI passed（1 ignored）/ 2 FFI；新增编码单测 6 个与端到端 9 个（ZIP GBK/CP437/UTF-8、7z 中文严格模式、统计、估算倍数、续跑拒绝选项变化、批量字段、显式变体拒绝）；本机 WinRAR 6.24 额外验证 RAR4 `-ma4` 中文密码/OEM 路径。
+- **测试**：157 core / 96 CLI passed（1 ignored）/ 2 FFI；新增编码单测 7 个与端到端 11 个（ZIP GBK/CP437/UTF-8、7z 中文严格模式、统计、估算倍数、续跑拒绝选项变化、批量字段、显式变体拒绝、批量统计开关、复用预阶段计数）；本机 WinRAR 6.24 额外验证 RAR4 `-ma4` 中文密码/OEM 与 RAR5 `--strict`/`--rar-no-fast-reject`。
 - **跨平台**：Windows x64 已验证 CP437/GBK/OEM 与 RAR4 中文路径；非 Windows 的 OEM 回退为 CP437；Linux/macOS 仅 CI 编译/单测。
 
 **首版未实现 / 未验证**：
 
 - RAR4 非 ASCII 端到端已在本机 WinRAR 6.24 通过；CI 无 RAR 引擎，自动跳过该用例。
 - 非 Windows OEM 与 Windows 区域设置差异未做对照；OEM 回退固定 CP437。
+- 7z 首块探测的“正确密码被探测误拒”构造样本未做；严格模式跳过探测的代码路径已由中文密码用例覆盖。
+- 直接传入原始 GBK 字节并命中 7z 时，报告的密码仍是传入字节，而不是实际匹配的 UTF-8 文本；CLI 候选源当前不产生该输入。
 - 未做编码变体带来的 1M 级 p/s 基准；变体只增加验证次数，不改候选水位。
 - 7z 的“非 UTF-8 原始候选”仍依赖 UTF-8 变体；7z 引擎内部完成 UTF-16LE 转换，不额外展开变体。
 - W2-007 新增快筛后仍需纳入 `--strict` 关闭范围与计数。
@@ -108,8 +110,8 @@ RAR 仍只通过外部未修改的 UnRAR 进程，快筛边界不变；不复制
 ```text
 STATUS: done
 CHANGED: core/crates/acx-core/src/encoding.rs、archive/{mod,rar,sevenz}.rs、job.rs、batch.rs、engines/external.rs、acx-cli/src/main.rs、acx-cli/tests/w2_006_encoding.rs
-VERIFIED: fmt / clippy -D warnings / cargo test --workspace（156 core / 93 CLI +1 ignored / 2 FFI）；本机 WinRAR 6.24 RAR4 中文密码
-NOT VERIFIED: 非 Windows OEM；编码变体 1M 基准；CI 无 RAR 引擎（RAR 用例本机跑）
+VERIFIED: fmt / clippy -D warnings / cargo test --workspace（157 core / 96 CLI +1 ignored / 2 FFI）；本机 WinRAR 6.24 RAR4 中文密码、RAR5 strict
+NOT VERIFIED: 非 Windows OEM；编码变体 1M 基准；7z 探测误拒样本；CI 无 RAR 引擎（RAR 用例本机跑）
 NEXT: W2-007 CPU 快筛补全（新增快筛须同步 --strict 与计数）
 RISKS: 平台 OEM 差异；变体放大验证成本；RAR 许可边界不变
 ```

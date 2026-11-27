@@ -138,7 +138,11 @@ fn auto_variants(format: ArchiveFormat) -> Vec<EncodingVariant> {
 fn variant_supported(format: ArchiveFormat, variant: EncodingVariant) -> bool {
     match format {
         ArchiveFormat::Zip => true,
-        ArchiveFormat::Rar4 => true,
+        // The external RAR engine converts UTF-8 to OEM itself. Accepting
+        // GBK/CP437 bytes here would double-encode a password that happens to
+        // be valid UTF-8, so only UTF-8 and the (internally converted) OEM
+        // choice are allowed.
+        ArchiveFormat::Rar4 => matches!(variant, EncodingVariant::Utf8 | EncodingVariant::Oem),
         ArchiveFormat::Rar5 | ArchiveFormat::SevenZ => variant == EncodingVariant::Utf8,
     }
 }
@@ -465,8 +469,16 @@ mod tests {
         let selection = EncodingSelection::parse("gbk").expect("parse");
         assert!(selection.resolve(ArchiveFormat::Rar5).is_err());
         assert!(selection.resolve(ArchiveFormat::SevenZ).is_err());
+        assert!(selection.resolve(ArchiveFormat::Rar4).is_err());
         assert!(selection.resolve(ArchiveFormat::Zip).is_ok());
-        assert!(selection.resolve(ArchiveFormat::Rar4).is_ok());
+        assert!(EncodingSelection::parse("oem")
+            .expect("parse")
+            .resolve(ArchiveFormat::Rar4)
+            .is_ok());
+        assert!(EncodingSelection::parse("utf8")
+            .expect("parse")
+            .resolve(ArchiveFormat::Rar4)
+            .is_ok());
     }
 
     #[test]

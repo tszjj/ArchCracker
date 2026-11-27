@@ -327,6 +327,7 @@ impl ArchiveSessionFactory for SevenZFactory {
         ArchiveStats {
             fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
             external_confirmed: 0,
+            encoding_skipped: 0,
         }
     }
 }

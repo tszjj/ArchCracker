@@ -744,7 +744,9 @@ fn run_batch_command(args: BatchArgs) -> ExitCode {
         for warning in &task.report.warnings {
             eprintln!("[{}] {warning}", task.id);
         }
-        println!("[{}] Stats: {}", task.id, format_stats(&task.report.stats));
+        if task.report_stats {
+            println!("[{}] Stats: {}", task.id, format_stats(&task.report.stats));
+        }
     }
     println!(
         "Batch summary: {} found, {} not found, {} failed, {} cancelled",

@@ -108,6 +108,7 @@ pub struct BatchReport {
 pub struct BatchTaskReport {
     pub id: String,
     pub report: JobReport,
+    pub report_stats: bool,
 }
 
 impl BatchReport {
@@ -579,6 +580,7 @@ pub fn run_batch(config: &BatchConfig, options: &BatchOptions) -> Result<BatchRe
         tasks.push(BatchTaskReport {
             id: job.id.clone(),
             report: report.unwrap_or_else(|| JobReport::cancelled(job.spec.checkpoint.clone())),
+            report_stats: job.spec.report_stats,
         });
     }
     Ok(BatchReport {

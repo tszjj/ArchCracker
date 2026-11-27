@@ -27,6 +27,7 @@ use std::time::Duration;
 struct RarCounters {
     fast_rejected: AtomicU64,
     external_confirmed: AtomicU64,
+    encoding_skipped: AtomicU64,
 }
 
 /// One RAR session, owned by a scheduler worker.
@@ -143,11 +144,11 @@ impl ArchiveSession for RarSession {
         // A candidate that the OEM code page cannot represent (or a raw
         // non-UTF-8 variant) is a miss for this variant, not a job failure.
         let Ok(encoded) = external::encode_password(password) else {
+            self.counters
+                .encoding_skipped
+                .fetch_add(1, Ordering::Relaxed);
             return Ok(PasswordTest::Miss);
         };
-        self.counters
-            .external_confirmed
-            .fetch_add(1, Ordering::Relaxed);
         let output = external::run_cancellable(
             &self.engine,
             test_args(&self.path),
@@ -169,7 +170,13 @@ impl ArchiveSession for RarSession {
         }
 
         match classify_test_exit(self.info.format, output.code) {
-            Some(result) => Ok(result),
+            Some(PasswordTest::Hit) => {
+                self.counters
+                    .external_confirmed
+                    .fetch_add(1, Ordering::Relaxed);
+                Ok(PasswordTest::Hit)
+            }
+            Some(PasswordTest::Miss) => Ok(PasswordTest::Miss),
             None => Err(engine_failure("test", &output)),
         }
     }
@@ -298,6 +305,7 @@ impl ArchiveSessionFactory for RarFactory {
         ArchiveStats {
             fast_rejected: self.counters.fast_rejected.load(Ordering::Relaxed),
             external_confirmed: self.counters.external_confirmed.load(Ordering::Relaxed),
+            encoding_skipped: self.counters.encoding_skipped.load(Ordering::Relaxed),
         }
     }
 }

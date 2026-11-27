@@ -111,7 +111,7 @@ suffix_mask = "?d?d"
 - **并行**：固定大小 worker 池，按清单顺序取任务，结果按清单顺序汇总；线程预算启动前校验，超过可用 CPU 只警告。
 - **复用**：默认关闭；`reuse_found` / `--reuse-found` 开启、任务级 `reuse_found=false` 可关闭。复用阶段在断点创建前测试内存缓存（已完成/已耗尽的任务也会先复用），不写水位、不影响索引；只有 `FOUND`（引擎已完整复核）的密码进入缓存，退出即清空。并行时按任务启动快照，只对之后启动的任务生效；需要确定性复用请 `--max-parallel 1`（CLI 会警告）。
 - **命令**：`acx batch jobs.toml [--max-parallel N] [--reuse-found] [--fail-fast] [--dry-run]`；退出码按“停止 4 > 失败 3 > 校验 2 > 有命中 0 > 全未命中 1”。
-- **编码/严格模式（W2-006 扩展）**：任务级支持 `encoding_variants`、`strict`、`rar_no_fast_reject`、`report_stats`；批量输出每任务 `[id] Stats:` 行。
+- **编码/严格模式（W2-006 扩展）**：任务级支持 `encoding_variants`、`strict`、`rar_no_fast_reject`、`report_stats`；仅 `report_stats=true` 的任务输出 `[id] Stats:` 行。
 - **测试**：150 core / 83 CLI passed（1 ignored）/ 2 FFI；批量端到端 14 个（四种模式 dry-run、三任务失败隔离、并行全命中、断点独立续跑、复用开关/已完成断点复用、fail-fast、清单错误、缺归档、超 `usize`/空字典校验、dry-run 线程预算、单任务参数混用）。
 - **跨平台**：Windows x64 已验证；Linux/macOS 由 CI 编译/单测覆盖，Ctrl+C 停止传播未在非 Windows 验证。
 

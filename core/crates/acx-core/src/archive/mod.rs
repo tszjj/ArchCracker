@@ -43,6 +43,7 @@ pub trait ArchiveSession: Send {
 pub struct ArchiveStats {
     pub fast_rejected: u64,
     pub external_confirmed: u64,
+    pub encoding_skipped: u64,
 }
 
 /// Opens independent sessions for scheduler workers.

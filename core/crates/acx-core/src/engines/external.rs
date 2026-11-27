@@ -405,6 +405,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn raw_non_utf8_password_passes_through() {
+        assert_eq!(
+            encode_password(&[0x82]).expect("raw bytes").as_ref(),
+            &[0x82]
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn cancel_kills_a_running_child() {

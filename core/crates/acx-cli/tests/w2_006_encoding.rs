@@ -372,6 +372,86 @@ fn explicit_encoding_variant_is_rejected_for_7z() {
 }
 
 #[test]
+fn batch_default_does_not_print_stats() {
+    let temp = TempDir::new("batch-no-stats");
+    let zip = temp.join("gbk.zip");
+    let dict = temp.join("d.txt");
+    let (gbk, _, _) = encoding_rs::GBK.encode("中文密码");
+    write_zipcrypto_zip_bytes(&zip, gbk.as_ref());
+    write_dictionary(&dict, &["中文密码"]);
+    std::fs::write(
+        temp.join("jobs.toml"),
+        r#"
+[[jobs]]
+id = "gbk"
+archive = "gbk.zip"
+mode = "dict"
+dictionary = "d.txt"
+"#,
+    )
+    .expect("write manifest");
+
+    let output = acx()
+        .arg("batch")
+        .arg(temp.join("jobs.toml"))
+        .output()
+        .expect("run acx batch");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "stdout: {stdout}");
+    assert!(!stdout.contains("[gbk] Stats:"), "stdout: {stdout}");
+}
+
+#[test]
+fn batch_reuse_prepass_is_not_counted_as_tried_or_stats() {
+    let temp = TempDir::new("batch-reuse-stats");
+    let zip = temp.join("shared.zip");
+    let dict_a = temp.join("a.txt");
+    let dict_b = temp.join("b.txt");
+    write_zipcrypto_zip_bytes(&zip, b"shared");
+    write_dictionary(&dict_a, &["shared"]);
+    write_dictionary(&dict_b, &["other"]);
+    std::fs::write(
+        temp.join("jobs.toml"),
+        r#"
+max_parallel = 1
+reuse_found = true
+checkpoint_root = "runs"
+
+[[jobs]]
+id = "a"
+archive = "shared.zip"
+mode = "dict"
+dictionary = "a.txt"
+
+[[jobs]]
+id = "b"
+archive = "shared.zip"
+mode = "dict"
+dictionary = "b.txt"
+report_stats = true
+"#,
+    )
+    .expect("write manifest");
+
+    let output = acx()
+        .arg("batch")
+        .arg(temp.join("jobs.toml"))
+        .output()
+        .expect("run acx batch");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "stdout: {stdout}");
+    assert!(
+        stdout.contains("[b] FOUND: shared (reused)"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("[b] Stats: encoding attempts=0 (candidates=0"),
+        "stdout: {stdout}"
+    );
+    assert!(!stdout.contains("tried 1/1"), "stdout: {stdout}");
+}
+
+#[test]
 fn batch_manifest_carries_encoding_and_stats_fields() {
     let temp = TempDir::new("batch");
     let zip = temp.join("gbk.zip");

@@ -665,12 +665,22 @@ fn job_estimate_from_hybrid(
     }
 }
 
-fn job_stats(counters: &EncodingCounters, factory: &Arc<dyn ArchiveSessionFactory>) -> JobStats {
+fn job_stats(
+    counters: &EncodingCounters,
+    factory: &Arc<dyn ArchiveSessionFactory>,
+    baseline: crate::archive::ArchiveStats,
+) -> JobStats {
     let archive = factory.stats();
+    let mut encoding = counters.snapshot();
+    encoding.variants_skipped += archive
+        .encoding_skipped
+        .saturating_sub(baseline.encoding_skipped);
     JobStats {
-        encoding: counters.snapshot(),
-        fast_rejected: archive.fast_rejected,
-        external_confirmed: archive.external_confirmed,
+        encoding,
+        fast_rejected: archive.fast_rejected.saturating_sub(baseline.fast_rejected),
+        external_confirmed: archive
+            .external_confirmed
+            .saturating_sub(baseline.external_confirmed),
     }
 }
 
@@ -715,7 +725,7 @@ pub fn run_job(
             "archive is not encrypted or has no file entries".to_string(),
         ));
     }
-    let factory = build_factory(&info, &spec.archive, spec)?;
+    let archive_factory = build_factory(&info, &spec.archive, spec)?;
     let source = ArchiveSource::resolve(&spec.archive)?;
     let archive_fingerprint = ArchiveFingerprint::from_source(&source)?;
 
@@ -748,11 +758,17 @@ pub fn run_job(
         )?;
     }
 
-    let encoding_counters = Arc::new(EncodingCounters::default());
-    let factory: Arc<dyn ArchiveSessionFactory> = Arc::new(EncodingFactory::new(
-        factory,
+    let prepass_counter = Arc::new(EncodingCounters::default());
+    let prepass_factory: Arc<dyn ArchiveSessionFactory> = Arc::new(EncodingFactory::new(
+        Arc::clone(&archive_factory),
         prepared.encoding.clone(),
-        Arc::clone(&encoding_counters),
+        Arc::clone(&prepass_counter),
+    ));
+    let scheduler_counters = Arc::new(EncodingCounters::default());
+    let factory: Arc<dyn ArchiveSessionFactory> = Arc::new(EncodingFactory::new(
+        archive_factory,
+        prepared.encoding.clone(),
+        Arc::clone(&scheduler_counters),
     ));
     let stats_factory = Arc::clone(&factory);
 
@@ -765,15 +781,13 @@ pub fn run_job(
     });
 
     let mut warnings = Vec::new();
-    let mut prepass_tried = 0u64;
     if !prepass.is_empty() {
-        let mut session = factory.open()?;
+        let mut session = prepass_factory.open()?;
         session.set_cancel_token(control.cancel_token());
         for password in prepass {
             if control.is_stopping() {
                 break;
             }
-            prepass_tried += 1;
             match session.test_password(password)? {
                 PasswordTest::Hit => {
                     if let Err(error) = store.remove() {
@@ -783,20 +797,22 @@ pub fn run_job(
                         status: JobStatus::Found,
                         password: Some(password.clone()),
                         reused: true,
-                        tried: prepass_tried,
+                        tried: 0,
                         completed_through: start_index as u64,
                         total: prepared.total as u64,
                         elapsed: started.elapsed(),
                         checkpoint: spec.checkpoint.clone(),
                         error: None,
                         warnings,
-                        stats: job_stats(&encoding_counters, &stats_factory),
+                        stats: JobStats::default(),
                     });
                 }
                 PasswordTest::Miss => {}
             }
         }
     }
+
+    let archive_baseline = stats_factory.stats();
 
     if prepared.total == 0 {
         return Err(AcxError::Attack(
@@ -819,7 +835,7 @@ pub fn run_job(
             checkpoint: spec.checkpoint.clone(),
             error: None,
             warnings,
-            stats: job_stats(&encoding_counters, &stats_factory),
+            stats: job_stats(&scheduler_counters, &stats_factory, archive_baseline),
         });
     }
 
@@ -878,14 +894,14 @@ pub fn run_job(
                 status: JobStatus::Found,
                 password: Some(hit.password),
                 reused: false,
-                tried: prepass_tried + hit.tried,
+                tried: hit.tried,
                 completed_through: progress.completed_through,
                 total,
                 elapsed,
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
-                stats: job_stats(&encoding_counters, &stats_factory),
+                stats: job_stats(&scheduler_counters, &stats_factory, archive_baseline),
             })
         }
         Ok(RunOutcome::Exhausted) => {
@@ -896,14 +912,14 @@ pub fn run_job(
                 status: JobStatus::NotFound,
                 password: None,
                 reused: false,
-                tried: prepass_tried + progress.tried,
+                tried: progress.tried,
                 completed_through: total,
                 total,
                 elapsed,
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
-                stats: job_stats(&encoding_counters, &stats_factory),
+                stats: job_stats(&scheduler_counters, &stats_factory, archive_baseline),
             })
         }
         Ok(RunOutcome::Stopped(progress)) => {
@@ -921,14 +937,14 @@ pub fn run_job(
                 status: JobStatus::Stopped,
                 password: None,
                 reused: false,
-                tried: prepass_tried + progress.tried,
+                tried: progress.tried,
                 completed_through: progress.completed_through,
                 total,
                 elapsed,
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
-                stats: job_stats(&encoding_counters, &stats_factory),
+                stats: job_stats(&scheduler_counters, &stats_factory, archive_baseline),
             })
         }
         Err(error) => {
@@ -950,14 +966,14 @@ pub fn run_job(
                 status: JobStatus::Failed,
                 password: None,
                 reused: false,
-                tried: prepass_tried + progress.tried,
+                tried: progress.tried,
                 completed_through: progress.completed_through,
                 total,
                 elapsed,
                 checkpoint: checkpoint_path,
                 error: Some(error),
                 warnings,
-                stats: job_stats(&encoding_counters, &stats_factory),
+                stats: job_stats(&scheduler_counters, &stats_factory, archive_baseline),
             })
         }
     }

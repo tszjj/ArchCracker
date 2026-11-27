@@ -30,7 +30,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 156、CLI 93（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
+| 测试 | core 157、CLI 96（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
 | CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；最近代码 PR #30 6/6（2026-11-27），W2-006 PR 待跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
@@ -161,6 +161,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-004 混合/规则](tasks/W2-004-hybrid-rules.md) | 规则语法、字典×变体二维候选源、复合指纹、schema v2 复用 | 首版完成（PR #28） |
 | [W2-005 批量任务/包间复用](tasks/W2-005-batch-jobs.md) | 任务清单、失败隔离、独立断点、有限并行、授权密码复用 | 首版完成（PR #30 已合并） |
 | [W2-006 编码变体与严格模式](tasks/W2-006-encoding-strict.md) | 非 ASCII 编码变体、严格模式开关、编码/快筛计数 | 首版完成（PR #33） |
+| [W2-007 CPU 快筛补全](tasks/W2-007-cpu-fast-filters.md) | 统一快筛接口、ZIP/7z 判据、RAR4 可行性、严格模式全覆盖、快筛计数 | 设计目标已定义（实现未开始） |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -178,7 +179,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 |---|---|---|---|
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
-| **W2 引擎/攻击** | **进行中** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量任务、W2-006 编码/严格模式（PR #33） | CPU 快筛补全（W2-007）；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
+| **W2 引擎/攻击** | **进行中** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量任务、W2-006 编码/严格模式（PR #33） | CPU 快筛补全（[W2-007](tasks/W2-007-cpu-fast-filters.md) 设计目标已定义、实现未开始）、W2-008 语料/差分；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
 | **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
@@ -237,7 +238,7 @@ cargo run -p acx-cli -- batch jobs.toml --max-parallel 2 --reuse-found
 
 - PKZIP spanned `.z01/.z02`（明确报不支持）；
 - 异常 SFX 布局、stub 超过 32 MiB；
-- CPU 快筛补全（W2-007）；
+- CPU 快筛补全（[W2-007](tasks/W2-007-cpu-fast-filters.md)，设计目标已定义、实现未开始）；
 - `--mask-file`、`?b`、`--export-dictionary`、`--increment`；
 - 跨运行跳过已命中的批量任务（首版无批量状态文件；中断任务按各自断点续跑）；
 - GPU/hashcat 加速（W2-001 Deferred，W2 不启动）；
