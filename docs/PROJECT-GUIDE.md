@@ -23,15 +23,15 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 当前阶段 | **W2 进行中** | W1 signoff 2026-11-26；W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则（PR #23/#26/#28）、W2-005 批量（PR #30）已实现；W2-001 GPU Deferred；GUI 未开始 |
-| 已完成切片 | W1-001…W1-010；W2-002、W2-003、W2-003a、W2-004、W2-005 | W1 PR #10–#15；W2 PR #23、#26、#28；W2-005 PR #30 待合并 |
+| 当前阶段 | **W2 进行中** | W1 signoff 2026-11-26；W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则（PR #23/#26/#28）、W2-005 批量（PR #30）已合入；W2-001 GPU Deferred；GUI 未开始 |
+| 已完成切片 | W1-001…W1-010；W2-002、W2-003、W2-003a、W2-004、W2-005 | W1 PR #10–#15；W2 PR #23、#26、#28、#30 已合入 `main` |
 | 内核能力 | ZIP、7z、RAR（外部）、RAR5 check 快筛、分卷、SFX、流式字典、掩码/暴力/混合候选源、规则链、空间估算、批量任务编排、多线程调度、运行控制/检查点 | W1-009 RAR5 快筛 completed（reviewer APPROVE + 法务复核附条件通过）；W1-006/007、W2-002/003/003a/004 reviewer APPROVE；W1-008 三格式 1M×1GB 实测 |
 | CLI | 单任务：字典/掩码/暴力/混合；批量：`acx batch <manifest>` | 退出码 0/1/2/3/4；`--estimate` 输出时间 + 空间估算；批量退出码停止 4 > 失败 3 > 校验 2 > 有命中 0 > 全未命中 1 |
 | C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
 | GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
 | 测试 | core 150、CLI 83（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
-| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；最近代码 PR #28 6/6（2026-11-27），PR #30 待跑 |
+| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；PR #30 6/6 全绿（2026-11-27） |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
 > 最近一次全绿：`main` CI 6/6（PR #28，2026-11-27；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
@@ -159,7 +159,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-003 暴力/键空间](tasks/W2-003-brute-keyspace.md) | 字符集 + 长度区间、短密码优先、`usize` 决策、schema v2 复用 | 首版完成（PR #26） |
 | [W2-003a 空间估算](tasks/W2-003a-space-estimate.md) | 水位位图/在飞批次/峰值估算、mask/brute 回填、hybrid 复用 | 首版完成（PR #28） |
 | [W2-004 混合/规则](tasks/W2-004-hybrid-rules.md) | 规则语法、字典×变体二维候选源、复合指纹、schema v2 复用 | 首版完成（PR #28） |
-| [W2-005 批量任务/包间复用](tasks/W2-005-batch-jobs.md) | 任务清单、失败隔离、独立断点、有限并行、授权密码复用 | 首版完成（PR #30） |
+| [W2-005 批量任务/包间复用](tasks/W2-005-batch-jobs.md) | 任务清单、失败隔离、独立断点、有限并行、授权密码复用 | 首版完成（PR #30 已合并） |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -313,7 +313,7 @@ W1 已完成签核（[W1-SIGNOFF](W1-SIGNOFF.md)，2026-11-26）；W2 按 [W2 �
 6. **W1-009：RAR5 快速校验（已完成：reviewer + 法务复核）**
    - 进程内 check 快筛，外部 `UnRAR t` 复核；报告见 [W1-009](benchmarks/W1-009.md)。
 7. **W1-010：准出硬化** — ✅ 已完成：ZIP 10⁷、暂停/停止矩阵、当前窗口复测、PR 签核；见 [W1-010](tasks/W1-010-w1-hardening.md) 与 [W1-SIGNOFF](W1-SIGNOFF.md)。
-8. **W2：CPU 攻击面（进行中）** — W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量已完成（PR #23/#26/#28，W2-005 PR #30 待合并）；下一步 W2-006 编码/严格模式、W2-007 快筛；W2-001 GPU Deferred。
+8. **W2：CPU 攻击面（进行中）** — W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量已完成（PR #23/#26/#28/#30）；下一步 W2-006 编码/严格模式、W2-007 快筛；W2-001 GPU Deferred。
 9. **W3：C ABI v1 + Avalonia GUI**；之后 W4 Full 安装包、W5 Beta。
 
 ## 7. 开发工作流
