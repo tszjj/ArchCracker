@@ -8,6 +8,7 @@ version = "0.0.1"
 dependencies = [
  "acx-core",
  "clap",
+ "encoding_rs",
  "sevenz-rust2",
  "windows-sys",
  "zip",

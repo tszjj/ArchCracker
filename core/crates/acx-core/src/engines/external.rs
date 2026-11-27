@@ -294,9 +294,11 @@ pub fn encode_password(input: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Globalization::{GetOEMCP, WideCharToMultiByte, WC_NO_BEST_FIT_CHARS};
 
-    let text = std::str::from_utf8(input).map_err(|_| {
-        AcxError::Unsupported("RAR external engine only accepts UTF-8 candidate text".to_string())
-    })?;
+    let Ok(text) = std::str::from_utf8(input) else {
+        // A caller may pass an already-OEM/raw byte variant; forward it
+        // unchanged instead of failing the whole attack.
+        return Ok(Cow::Borrowed(input));
+    };
     // SAFETY: `GetOEMCP` has no preconditions and returns the process OEM code
     // page without dereferencing any caller-provided pointer.
     let code_page = unsafe { GetOEMCP() };

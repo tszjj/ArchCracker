@@ -112,6 +112,8 @@ W2 前段（W2-002/003/004）有两种做法：
 
 ### W2-006 编码变体与严格模式
 
+> **状态（2026-11-27）**：编码变体（ZIP UTF-8/GBK/CP437、RAR4 UTF-8/OEM、7z 内部 UTF-16LE）、`--strict`/`--rar-no-fast-reject`、统计与批量字段已实现（PR 待合并）。详见 [W2-006 任务文档](tasks/W2-006-encoding-strict.md) §8。
+
 **实现目标（参考）**
 
 - ZIP 无 UTF-8 标志的 CP437/GBK 变体；RAR4 OEM/UTF-8；7z UTF-8；

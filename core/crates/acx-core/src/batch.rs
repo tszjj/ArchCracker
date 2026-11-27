@@ -8,6 +8,7 @@
 //! reused inside the batch only when the manifest/CLI explicitly enables it,
 //! and the cache is memory-only.
 
+use crate::encoding::EncodingSelection;
 use crate::error::{AcxError, Result};
 use crate::job::{
     estimate_job, run_job, validate_job, AttackConfig, JobEstimate, JobReport, JobSpec, JobStatus,
@@ -67,6 +68,10 @@ struct JobEntry {
     custom_charset3: Option<String>,
     custom_charset4: Option<String>,
     reuse_found: Option<bool>,
+    encoding_variants: Option<String>,
+    strict: Option<bool>,
+    rar_no_fast_reject: Option<bool>,
+    report_stats: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +185,11 @@ pub fn load_manifest(path: &Path) -> Result<BatchConfig> {
         }
         max_threads = max_threads.max(entry.threads);
         let attack = attack_from_entry(&entry, &base)?;
+        let encoding = match entry.encoding_variants.as_deref() {
+            Some(spec) => EncodingSelection::parse(spec)
+                .map_err(|error| AcxError::Batch(format!("job `{}`: {error}", entry.id)))?,
+            None => EncodingSelection::Auto,
+        };
         let checkpoint = checkpoint_root.join(format!("{}.acx-checkpoint", entry.id));
         jobs.push(BatchJob {
             id: entry.id.clone(),
@@ -190,6 +200,10 @@ pub fn load_manifest(path: &Path) -> Result<BatchConfig> {
                 threads: entry.threads,
                 checkpoint,
                 resume: false,
+                encoding,
+                strict: entry.strict.unwrap_or(false),
+                rar_no_fast_reject: entry.rar_no_fast_reject.unwrap_or(false),
+                report_stats: entry.report_stats.unwrap_or(false),
             },
             reuse_found: entry.reuse_found,
         });

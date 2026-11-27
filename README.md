@@ -2,14 +2,14 @@
 
 跨平台压缩包密码恢复工具：**Rust 内核 + 原生前端**，目标覆盖 Windows、Linux、macOS、Android、HarmonyOS。
 
-> **状态：W1 已签核（2026-11-26），W2 进行中**。ZIP/7z/RAR4/RAR5、分卷/SFX、字典、流式、暂停/停止/`--resume`、RAR5 check 快筛均已交付；W1 1M×1GB 基准、ZIP 10M 负例、1GB 暂停/停止矩阵完成。W2 已合入：掩码（#23）、暴力（#26）、空间估算（#28）、混合/规则（#28）；W2-005 批量任务（`acx batch jobs.toml`，失败隔离/独立断点/有限并行/内存内命中复用）已合入 PR #30——单任务 CLI 支持 `--mask`/`--brute`/`--rule`/`--prefix-mask`/`--suffix-mask`，`--estimate` 同时输出时间与内存（水位位图/峰值）；W2-001 GPU/hashcat 仍 Deferred；后续按 [W2-PLAN](docs/W2-PLAN.md) 推进（下一步 W2-006 编码/严格模式、W2-007 快筛）。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
+> **状态：W1 已签核（2026-11-26），W2 进行中**。ZIP/7z/RAR4/RAR5、分卷/SFX、字典、流式、暂停/停止/`--resume`、RAR5 check 快筛均已交付；W1 1M×1GB 基准、ZIP 10M 负例、1GB 暂停/停止矩阵完成。W2 已合入：掩码（#23）、暴力（#26）、空间估算（#28）、混合/规则（#28）；W2-005 批量任务（`acx batch jobs.toml`，失败隔离/独立断点/有限并行/内存内命中复用）已合入 PR #30；W2-006 编码变体与严格模式（`--encoding-variants`/`--strict`/`--rar-no-fast-reject`/`--report-stats`，ZIP GBK/CP437、7z 中文、RAR4 OEM）PR 待合并；W2-001 GPU/hashcat 仍 Deferred；后续按 [W2-PLAN](docs/W2-PLAN.md) 推进（下一步 W2-007 CPU 快筛）。Windows 只做**单一 Full 版本**：W4 随包未修改的 `UnRAR.exe` 与 hashcat 二进制；hashcat 仅外部进程，不作为 Rust 依赖；无 hashcat/GPU 时 CPU 多线程路径完整可用。Linux/macOS/Android/HarmonyOS 接口保留但**后续排期**。项目结构与文档地图见 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。
 >
 > **合法使用**：仅用于恢复你本人拥有或已获明确授权的归档密码。不得用于未授权访问、撞库或规避他人安全措施。
 
 ## 目标
 
 - **格式**：7z（AES-256、可选头加密；7-Zip 26.04 差分）、ZIP（ZipCrypto、WinZip AES-128/192/256；7-Zip 差分待补）、RAR4/RAR5（Full 版随包未修改的 `UnRAR.exe`，仅进程调用；解压 RAR 本身符合 unRAR 许可，许可边界见 `docs/licensing.md`），以及分卷、SFX。
-- **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、混合（字典 × 最小规则链/前后缀掩码）；`--estimate` 输出 keyspace、ETA、24h 容量与内存估算；通用规则引擎为 P2；字典批量可选 hashcat GPU 后端。
+- **攻击方式**：字典、掩码、暴力（数字/大小写字母/符号/自定义字符集 + 长度区间）、混合（字典 × 最小规则链/前后缀掩码）；非 ASCII 密码支持编码变体（UTF-8/GBK/CP437/OEM）与 `--strict` 可信回退；`--estimate` 输出 keyspace、ETA、24h 容量、内存估算与变体倍数；通用规则引擎为 P2；字典批量可选 hashcat GPU 后端。
 - **性能**：每 worker 复用归档会话、只测最小加密条目、首块快速判错、命中后内置引擎/外部 UnRAR 完整解压复核；CPU 多线程为基线，hashcat/GPU 为可选加速，缺失时自动回落。
 - **形态**：同一 Rust 内核 + C ABI；Windows 用 Avalonia 12；CLI 可独立运行。Android/HarmonyOS 前端后续再做。
 - **隐私**：默认零网络、无遥测、无强制更新。

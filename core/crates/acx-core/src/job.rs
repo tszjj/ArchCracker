@@ -19,9 +19,13 @@ use crate::candidates::{
 use crate::checkpoint::{
     ArchiveFingerprint, AttackFingerprint, Checkpoint, CheckpointStore, FileFingerprint,
 };
+use crate::encoding::{
+    EncodingCounters, EncodingFactory, EncodingPlan, EncodingSelection, EncodingStats,
+};
 use crate::error::{AcxError, Result};
 use crate::estimate::{estimate_space, SpaceEstimate, SpaceInput};
 use crate::scheduler::{self, RunContext, RunControl, RunOutcome};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -63,6 +67,10 @@ pub struct JobSpec {
     pub threads: usize,
     pub checkpoint: PathBuf,
     pub resume: bool,
+    pub encoding: EncodingSelection,
+    pub strict: bool,
+    pub rar_no_fast_reject: bool,
+    pub report_stats: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +81,8 @@ pub struct JobEstimate {
     pub space: SpaceEstimate,
     pub detail: EstimateDetail,
     pub warnings: Vec<String>,
+    /// Maximum number of encoding variants a single candidate may try.
+    pub encoding_variants: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +135,13 @@ pub enum JobStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JobStats {
+    pub encoding: EncodingStats,
+    pub fast_rejected: u64,
+    pub external_confirmed: u64,
+}
+
 #[derive(Debug)]
 pub struct JobReport {
     pub status: JobStatus,
@@ -137,6 +154,7 @@ pub struct JobReport {
     pub checkpoint: PathBuf,
     pub error: Option<AcxError>,
     pub warnings: Vec<String>,
+    pub stats: JobStats,
 }
 
 impl JobReport {
@@ -152,6 +170,7 @@ impl JobReport {
             checkpoint,
             error: Some(error),
             warnings: Vec::new(),
+            stats: JobStats::default(),
         }
     }
 
@@ -167,6 +186,7 @@ impl JobReport {
             checkpoint,
             error: None,
             warnings: Vec::new(),
+            stats: JobStats::default(),
         }
     }
 }
@@ -197,6 +217,12 @@ pub fn validate_job(spec: &JobSpec) -> Result<()> {
         )));
     }
     std::fs::File::open(&spec.archive)?;
+    // If the magic is readable, reject format-inapplicable encoding variants
+    // before any task starts. A corrupt archive is left to run_job so one bad
+    // package cannot abort the whole batch.
+    if let Ok(format) = archive::detect_format(&spec.archive) {
+        spec.encoding.resolve(format)?;
+    }
     match &spec.attack {
         AttackConfig::Dictionary { dictionary } => {
             let stream = DictionaryStream::open(dictionary, 0).map_err(dictionary_error)?;
@@ -278,6 +304,8 @@ pub fn estimate_job(spec: &JobSpec) -> Result<JobEstimate> {
 }
 
 fn estimate_attack(spec: &JobSpec, info: &ArchiveInfo) -> Result<JobEstimate> {
+    let encoding = spec.encoding.resolve(info.format)?;
+    let encoding_variants = encoding.max_variants();
     match &spec.attack {
         AttackConfig::Dictionary { dictionary } => {
             let stream = DictionaryStream::open(dictionary, 0)?;
@@ -290,6 +318,7 @@ fn estimate_attack(spec: &JobSpec, info: &ArchiveInfo) -> Result<JobEstimate> {
                 space,
                 detail: EstimateDetail::Dictionary,
                 warnings: Vec::new(),
+                encoding_variants,
             })
         }
         AttackConfig::Mask { masks, custom } => {
@@ -309,6 +338,7 @@ fn estimate_attack(spec: &JobSpec, info: &ArchiveInfo) -> Result<JobEstimate> {
                     .iter()
                     .map(std::string::ToString::to_string)
                     .collect(),
+                encoding_variants,
             })
         }
         AttackConfig::Brute {
@@ -335,6 +365,7 @@ fn estimate_attack(spec: &JobSpec, info: &ArchiveInfo) -> Result<JobEstimate> {
                     .iter()
                     .map(std::string::ToString::to_string)
                     .collect(),
+                encoding_variants,
             })
         }
         AttackConfig::Hybrid {
@@ -366,6 +397,7 @@ fn estimate_attack(spec: &JobSpec, info: &ArchiveInfo) -> Result<JobEstimate> {
                     .iter()
                     .map(std::string::ToString::to_string)
                     .collect(),
+                encoding_variants,
             })
         }
     }
@@ -387,6 +419,36 @@ struct PreparedAttack {
     estimate: JobEstimate,
     dictionary: Option<FileFingerprint>,
     attack: AttackFingerprint,
+    encoding: EncodingPlan,
+}
+
+fn finalize_attack(
+    base: AttackFingerprint,
+    mode: &str,
+    spec: &JobSpec,
+    encoding: &EncodingPlan,
+) -> AttackFingerprint {
+    if spec.encoding.is_auto() && !spec.strict && !spec.rar_no_fast_reject {
+        return base;
+    }
+    let material = format!(
+        "{}\nencoding={}\nstrict={}\nrar_no_fast_reject={}",
+        base.signature,
+        encoding.signature_label(),
+        spec.strict,
+        spec.rar_no_fast_reject
+    );
+    AttackFingerprint::new(mode, &hex_sha256(material.as_bytes()))
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 fn prepare_attack(
@@ -394,6 +456,8 @@ fn prepare_attack(
     info: &ArchiveInfo,
     start_index: usize,
 ) -> Result<PreparedAttack> {
+    let encoding = spec.encoding.resolve(info.format)?;
+    let encoding_variants = encoding.max_variants();
     match &spec.attack {
         AttackConfig::Dictionary { dictionary } => {
             let fingerprint = FileFingerprint::from_path(dictionary).map_err(dictionary_error)?;
@@ -407,13 +471,16 @@ fn prepare_attack(
                 space: dictionary_space(total as u128, stream.max_line_bytes(), spec.threads),
                 detail: EstimateDetail::Dictionary,
                 warnings: Vec::new(),
+                encoding_variants,
             };
+            let attack = finalize_attack(AttackFingerprint::dictionary(), "dict", spec, &encoding);
             Ok(PreparedAttack {
                 source: Box::new(stream),
                 total,
                 estimate,
                 dictionary: Some(fingerprint),
-                attack: AttackFingerprint::dictionary(),
+                attack,
+                encoding,
             })
         }
         AttackConfig::Mask { masks, custom } => {
@@ -425,15 +492,21 @@ fn prepare_attack(
                     estimate.keyspace
                 )));
             }
-            let attack = AttackFingerprint::new("mask", set.signature());
+            let attack = finalize_attack(
+                AttackFingerprint::new("mask", set.signature()),
+                "mask",
+                spec,
+                &encoding,
+            );
             let source = set.into_source(start_index)?;
             let total = source.total();
             Ok(PreparedAttack {
                 source: Box::new(source),
                 total,
-                estimate: job_estimate_from_mask(info, estimate, masks),
+                estimate: job_estimate_from_mask(info, estimate, masks, encoding_variants),
                 dictionary: None,
                 attack,
+                encoding,
             })
         }
         AttackConfig::Brute {
@@ -450,15 +523,28 @@ fn prepare_attack(
                     estimate.keyspace
                 )));
             }
-            let attack = AttackFingerprint::new("brute", set.signature());
+            let attack = finalize_attack(
+                AttackFingerprint::new("brute", set.signature()),
+                "brute",
+                spec,
+                &encoding,
+            );
             let source = set.into_source(start_index)?;
             let total = source.total();
             Ok(PreparedAttack {
                 source: Box::new(source),
                 total,
-                estimate: job_estimate_from_brute(info, estimate, charset, *min_len, *max_len),
+                estimate: job_estimate_from_brute(
+                    info,
+                    estimate,
+                    charset,
+                    *min_len,
+                    *max_len,
+                    encoding_variants,
+                ),
                 dictionary: None,
                 attack,
+                encoding,
             })
         }
         AttackConfig::Hybrid {
@@ -484,15 +570,21 @@ fn prepare_attack(
                     estimate.total
                 )));
             }
-            let attack = AttackFingerprint::new("hybrid", set.signature());
+            let attack = finalize_attack(
+                AttackFingerprint::new("hybrid", set.signature()),
+                "hybrid",
+                spec,
+                &encoding,
+            );
             let source = set.into_source(start_index)?;
             let total = source.total();
             Ok(PreparedAttack {
                 source: Box::new(source),
                 total,
-                estimate: job_estimate_from_hybrid(info, estimate),
+                estimate: job_estimate_from_hybrid(info, estimate, encoding_variants),
                 dictionary: Some(fingerprint),
                 attack,
+                encoding,
             })
         }
     }
@@ -502,6 +594,7 @@ fn job_estimate_from_mask(
     info: &ArchiveInfo,
     estimate: crate::candidates::MaskEstimate,
     masks: &[String],
+    encoding_variants: usize,
 ) -> JobEstimate {
     JobEstimate {
         info: info.clone(),
@@ -517,6 +610,7 @@ fn job_estimate_from_mask(
             .iter()
             .map(std::string::ToString::to_string)
             .collect(),
+        encoding_variants,
     }
 }
 
@@ -526,6 +620,7 @@ fn job_estimate_from_brute(
     charset: &str,
     min_len: usize,
     max_len: usize,
+    encoding_variants: usize,
 ) -> JobEstimate {
     JobEstimate {
         info: info.clone(),
@@ -543,12 +638,14 @@ fn job_estimate_from_brute(
             .iter()
             .map(std::string::ToString::to_string)
             .collect(),
+        encoding_variants,
     }
 }
 
 fn job_estimate_from_hybrid(
     info: &ArchiveInfo,
     estimate: crate::candidates::HybridEstimate,
+    encoding_variants: usize,
 ) -> JobEstimate {
     JobEstimate {
         info: info.clone(),
@@ -564,22 +661,38 @@ fn job_estimate_from_hybrid(
             .iter()
             .map(std::string::ToString::to_string)
             .collect(),
+        encoding_variants,
     }
 }
 
-fn build_factory(info: &ArchiveInfo, archive: &Path) -> Result<Arc<dyn ArchiveSessionFactory>> {
+fn job_stats(counters: &EncodingCounters, factory: &Arc<dyn ArchiveSessionFactory>) -> JobStats {
+    let archive = factory.stats();
+    JobStats {
+        encoding: counters.snapshot(),
+        fast_rejected: archive.fast_rejected,
+        external_confirmed: archive.external_confirmed,
+    }
+}
+
+fn build_factory(
+    info: &ArchiveInfo,
+    archive: &Path,
+    spec: &JobSpec,
+) -> Result<Arc<dyn ArchiveSessionFactory>> {
     match info.format {
         ArchiveFormat::Zip => Ok(Arc::new(ZipFactory {
             path: archive.to_path_buf(),
         })),
-        ArchiveFormat::SevenZ => Ok(Arc::new(SevenZFactory::from_info(
-            archive.to_path_buf(),
-            info.clone(),
-        )?)),
-        ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => Ok(Arc::new(RarFactory::from_info(
-            archive.to_path_buf(),
-            info.clone(),
-        )?)),
+        ArchiveFormat::SevenZ => {
+            let factory = SevenZFactory::from_info(archive.to_path_buf(), info.clone())?
+                .with_strict(spec.strict);
+            Ok(Arc::new(factory))
+        }
+        ArchiveFormat::Rar4 | ArchiveFormat::Rar5 => {
+            let factory = RarFactory::from_info(archive.to_path_buf(), info.clone())?
+                .with_fast_filter(!spec.strict && !spec.rar_no_fast_reject);
+            Ok(Arc::new(factory))
+        }
     }
 }
 
@@ -602,7 +715,7 @@ pub fn run_job(
             "archive is not encrypted or has no file entries".to_string(),
         ));
     }
-    let factory = build_factory(&info, &spec.archive)?;
+    let factory = build_factory(&info, &spec.archive, spec)?;
     let source = ArchiveSource::resolve(&spec.archive)?;
     let archive_fingerprint = ArchiveFingerprint::from_source(&source)?;
 
@@ -634,6 +747,14 @@ pub fn run_job(
             prepared.total as u64,
         )?;
     }
+
+    let encoding_counters = Arc::new(EncodingCounters::default());
+    let factory: Arc<dyn ArchiveSessionFactory> = Arc::new(EncodingFactory::new(
+        factory,
+        prepared.encoding.clone(),
+        Arc::clone(&encoding_counters),
+    ));
+    let stats_factory = Arc::clone(&factory);
 
     observer.prepared(&JobPreview {
         estimate: prepared.estimate.clone(),
@@ -669,6 +790,7 @@ pub fn run_job(
                         checkpoint: spec.checkpoint.clone(),
                         error: None,
                         warnings,
+                        stats: job_stats(&encoding_counters, &stats_factory),
                     });
                 }
                 PasswordTest::Miss => {}
@@ -697,6 +819,7 @@ pub fn run_job(
             checkpoint: spec.checkpoint.clone(),
             error: None,
             warnings,
+            stats: job_stats(&encoding_counters, &stats_factory),
         });
     }
 
@@ -762,6 +885,7 @@ pub fn run_job(
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
+                stats: job_stats(&encoding_counters, &stats_factory),
             })
         }
         Ok(RunOutcome::Exhausted) => {
@@ -779,6 +903,7 @@ pub fn run_job(
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
+                stats: job_stats(&encoding_counters, &stats_factory),
             })
         }
         Ok(RunOutcome::Stopped(progress)) => {
@@ -803,6 +928,7 @@ pub fn run_job(
                 checkpoint: checkpoint_path,
                 error: None,
                 warnings,
+                stats: job_stats(&encoding_counters, &stats_factory),
             })
         }
         Err(error) => {
@@ -831,6 +957,7 @@ pub fn run_job(
                 checkpoint: checkpoint_path,
                 error: Some(error),
                 warnings,
+                stats: job_stats(&encoding_counters, &stats_factory),
             })
         }
     }
