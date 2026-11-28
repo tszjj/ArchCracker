@@ -10,7 +10,7 @@
 >
 > 2026-11-28 更新：三项前置阻塞已修复：CORE-02 已修复 ZIP full verify 截断误判，CORE-03 已修复 STOPPED 时 checkpoint 保存失败升级整体错误，CORE-15 已通过新增 `acx_inspect` 提供结构化归档预检；剩余 P2 按本文分类执行。
 >
-> 远端验收：PR #40 run `46122505245` **7/7 全绿**，包含 `ffi smoke + Avalonia shell (C/C++/C#/.NET)`。该 run 覆盖连续运行 bug 修复前的版本；修复后新增 3 个回归测试，本地 35 tests 全绿，远端需重跑确认。
+> 远端验收：PR #40 run `46141238867` **7/7 全绿**，覆盖连续运行 bug 修复后的版本，包含 `ffi smoke + Avalonia shell (C/C++/C#/.NET)` 与新增的 3 个回归测试。
 
 ## 1. 目标
 
@@ -273,5 +273,5 @@ STATUS: accepted（本地与 PR #40 CI 7/7 通过；reviewer/architect/release �
 BRANCH: windows-gui
 ROLE: frontend-engineer + core-engineer + qa-engineer
 NEXT: W3-004 攻击模式扩展（掩码/暴力/混合、encoding、strict、resume）
-RISKS: 连续运行 bug 修复后远端 CI 需重跑；本机 GUI 测试使用 core/target/debug/acx.dll、无 hash pin，正式包需 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
+RISKS: 连续运行 bug 已由 run `46141238867` 远端覆盖；本机 GUI 测试使用 core/target/debug/acx.dll、无 hash pin，正式包需 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
 ```

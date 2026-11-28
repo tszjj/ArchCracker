@@ -169,7 +169,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W3 阶段目标划分](W3-PLAN.md) | W3-001…W3-006 切片、准出标准、角色与 W4 边界 | 计划稿（2026-11-28）；W3-001 已完成；分支 `windows-gui` |
 | [W3-001 C ABI v1](tasks/W3-001-cabi-v1.md) | `acx.h` v1、FFI 薄层、回调/状态/错误、C/C# smoke | 本地验证完成（2026-11-28） |
 | [W3-002 Avalonia 工程与 NativeBridge](tasks/W3-002-avalonia-shell.md) | .NET 10/Avalonia 12、MVVM、NativeBridge、主题/i18n、16 个 shell 测试 | 本地与 CI 验证完成（2026-11-28） |
-| [W3-003 Setup/Run/Result](tasks/W3-003-setup-run-result.md) | ZIP 字典垂直切片、运行控制、审计 P2 影响分析 | 已验收（2026-11-28），35 tests + PR #40 CI 7/7；连续运行 bug 已修复 |
+| [W3-003 Setup/Run/Result](tasks/W3-003-setup-run-result.md) | ZIP 字典垂直切片、运行控制、审计 P2 影响分析 | 已验收（2026-11-28），35 tests + PR #40 CI 7/7（run `46141238867`）；连续运行 bug 已修复 |
 | [CL-W3-001](CL-W3-001.md) | W3-001 变更说明、影响范围、风险与回滚方案 | 已创建，随评审修复更新 |
 | [W3 Windows GUI 设计大纲](tasks/W3-windows-gui-outline.md) | Avalonia 12 架构、模块、C ABI v1、交互规范、优先级 | 设计大纲（2026-11-28）；分支 `windows-gui` |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
