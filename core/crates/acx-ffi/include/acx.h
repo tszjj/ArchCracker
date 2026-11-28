@@ -3,9 +3,11 @@
  *
  * ArchCracker C ABI v1 for desktop, Android (JNI) and HarmonyOS (NAPI).
  * All pointers are borrowed unless documented otherwise: the native side
- * copies strings during the call that receives them. Returned `const char*`
- * strings are owned by the library and remain valid only until the next call
- * on the same handle (or the same thread for handle-less errors).
+ * copies strings during the call that receives them. Static metadata strings
+ * remain valid for the process lifetime. `acx_last_error` copies its message
+ * into a caller-thread buffer; the pointer is valid only until the next
+ * `acx_last_error` call or failing call on that thread, so bindings must copy
+ * it immediately.
  */
 #ifndef ACX_H
 #define ACX_H
@@ -186,6 +188,8 @@ ACX_API AcxStatus acx_resume(AcxHandle* handle);
 ACX_API AcxStatus acx_stop(AcxHandle* handle);
 ACX_API AcxStatus acx_status(AcxHandle* handle, AcxStatusInfo* info);
 ACX_API AcxStatus acx_estimate(const AcxAttackSpec* spec, AcxEstimateInfo* info);
+/* Copy the returned string immediately; do not cache the pointer. When called
+ * from inside a native callback, a static reentrancy diagnostic is returned. */
 ACX_API const char* acx_last_error(AcxHandle* handle);
 
 #ifdef __cplusplus

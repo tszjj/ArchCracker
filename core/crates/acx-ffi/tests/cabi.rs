@@ -102,9 +102,18 @@ unsafe extern "C" fn on_hit(user: *mut c_void, password: *const u8, len: usize) 
     capture.finished.fetch_add(1, Ordering::SeqCst);
 }
 
+static CURRENT_HANDLE: AtomicUsize = AtomicUsize::new(0);
+static REENTRANT_LAST_ERROR: AtomicUsize = AtomicUsize::new(0);
+
 unsafe extern "C" fn on_log(user: *mut c_void, level: i32, message: *const c_char) {
     let _ = level;
     let _ = cstr(message);
+    let raw = CURRENT_HANDLE.load(Ordering::SeqCst);
+    if raw != 0
+        && cstr(unsafe { acx_last_error(raw as *mut AcxHandle) }).contains("native callback")
+    {
+        REENTRANT_LAST_ERROR.fetch_add(1, Ordering::SeqCst);
+    }
     // SAFETY: user pointer is a live Capture until acx_destroy returns.
     unsafe { &*user.cast::<Capture>() }
         .logs
@@ -203,6 +212,8 @@ fn c_abi_v1_runs_dictionary_attack() {
 
     let mut handle: *mut AcxHandle = std::ptr::null_mut();
     assert_eq!(unsafe { acx_create(&config, &mut handle) }, ACX_OK);
+    CURRENT_HANDLE.store(handle as usize, Ordering::SeqCst);
+    REENTRANT_LAST_ERROR.store(0, Ordering::SeqCst);
     assert_eq!(unsafe { acx_start(handle, &spec, &callbacks) }, ACX_OK);
 
     let mut info = AcxStatusInfo {
@@ -256,12 +267,17 @@ fn c_abi_v1_runs_dictionary_attack() {
         capture.progress.load(Ordering::SeqCst) >= 1,
         "final progress snapshot must be delivered"
     );
+    assert!(
+        REENTRANT_LAST_ERROR.load(Ordering::SeqCst) >= 1,
+        "acx_last_error must be safely callable from a native callback"
+    );
     assert_eq!(
         capture.status.load(Ordering::SeqCst),
         ACX_OK as usize,
         "on_finished must be delivered exactly once"
     );
 
+    CURRENT_HANDLE.store(0, Ordering::SeqCst);
     unsafe { acx_destroy(handle) };
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -465,7 +481,13 @@ fn archive_error_maps_to_status() {
         version: 1,
         ..Default::default()
     };
-    assert_eq!(unsafe { acx_status(handle, &mut info) }, ACX_OK);
-    assert_eq!(info.state, ACX_RUN_IDLE);
+    for _ in 0..2 {
+        assert_eq!(unsafe { acx_status(handle, &mut info) }, ACX_OK);
+        assert_eq!(info.state, ACX_RUN_IDLE);
+        assert_eq!(
+            info.last_status, ACX_ERR_IO,
+            "successful status queries must not erase the last failure"
+        );
+    }
     unsafe { acx_destroy(handle) };
 }

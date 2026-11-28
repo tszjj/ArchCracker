@@ -57,6 +57,8 @@ thread_local! {
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
+static LAST_ERROR_REENTRANT: &[u8] = b"acx_last_error cannot be called from a native callback\0";
+
 fn in_callback() -> bool {
     IN_CALLBACK.with(Cell::get)
 }
@@ -124,6 +126,7 @@ fn finish_handle(handle: *mut AcxHandle, result: std::result::Result<(), AcxErro
         if !handle.is_null() {
             // SAFETY: handle was validated in the implementation before this point.
             let handle_ref = unsafe { &*handle };
+            lock_inner(&handle_ref.inner).last_status = status_for_error(error);
             set_handle_error(&handle_ref.inner, &error.to_string());
         }
     }
@@ -1196,12 +1199,17 @@ pub unsafe extern "C" fn acx_status(handle: *mut AcxHandle, info: *mut AcxStatus
 
 /// Last error for the handle, or the thread-local error when handle is null.
 /// The returned pointer is copied into a caller-thread buffer and stays valid
-/// until the next `acx_last_error` call or failing call on this thread.
+/// until the next `acx_last_error` call or failing call on this thread. When
+/// called inside a native callback, a static reentrancy diagnostic is returned
+/// instead. NativeBridge implementations must copy the string immediately.
 ///
 /// # Safety
 /// `handle` must be null or a live handle from `acx_create`.
 #[no_mangle]
 pub unsafe extern "C" fn acx_last_error(handle: *mut AcxHandle) -> *const c_char {
+    if in_callback() {
+        return LAST_ERROR_REENTRANT.as_ptr().cast();
+    }
     let message = if handle.is_null() {
         LAST_ERROR.with(|slot| slot.borrow().to_string_lossy().into_owned())
     } else {

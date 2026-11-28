@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 ArchCracker contributors
 
-using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace ArchCracker.Desktop.FfiSmoke;
 
@@ -13,9 +13,6 @@ internal static partial class Native
 
     [LibraryImport(Library, EntryPoint = "acx_abi_version")]
     internal static partial uint AbiVersion();
-
-    [LibraryImport(Library, EntryPoint = "acx_status_name", StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial IntPtr StatusName(int status);
 
     [LibraryImport(Library, EntryPoint = "acx_create")]
     internal static partial int Create(in AcxConfig config, out IntPtr handle);
@@ -32,7 +29,7 @@ internal static partial class Native
     [LibraryImport(Library, EntryPoint = "acx_destroy")]
     internal static partial void Destroy(IntPtr handle);
 
-    [LibraryImport(Library, EntryPoint = "acx_last_error", StringMarshalling = StringMarshalling.Utf8)]
+    [LibraryImport(Library, EntryPoint = "acx_last_error")]
     internal static partial IntPtr LastError(IntPtr handle);
 }
 
@@ -135,10 +132,26 @@ internal unsafe struct AcxEstimateInfo
 internal sealed class CallbackState
 {
     public int Finished;
+    public int Progress;
+    public int Hits;
+    public int Logs;
+    public string? Password;
 }
 
 internal static class Program
 {
+    private const string Password = "P@ssw0rd123";
+    private const string Plaintext = "C ABI v1 integration fixture";
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ProgressDelegate(IntPtr user, ulong tried, ulong total, double rate, ulong etaSec);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void HitDelegate(IntPtr user, IntPtr password, nuint len);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void LogDelegate(IntPtr user, int level, IntPtr message);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void FinishedDelegate(IntPtr user, int status);
 
@@ -171,70 +184,56 @@ internal static class Program
             root = Path.Combine(AppContext.BaseDirectory, $"acx-ffi-smoke-{Guid.NewGuid():N}");
             Directory.CreateDirectory(root);
         }
+
         try
         {
-            var source = Path.Combine(root, "source");
-            Directory.CreateDirectory(source);
-            File.WriteAllText(Path.Combine(source, "hello.txt"), "hello");
-            var archive = Path.Combine(root, "plain.zip");
-            ZipFile.CreateFromDirectory(source, archive, CompressionLevel.NoCompression, false);
+            var archive = Path.Combine(root, "zipcrypto.zip");
             var dictionary = Path.Combine(root, "dict.txt");
-            File.WriteAllText(dictionary, "wrong\n");
+            WriteZipCrypto(archive, Password, "hello.txt", Plaintext);
+            File.WriteAllText(dictionary, $"wrong\n{Password}\n");
 
-            var unmanaged = RunJob(root, archive, dictionary, CallbackModel.UnmanagedCallersOnly);
-            var delegateModel = RunJob(root, archive, dictionary, CallbackModel.Delegate);
+            var unmanaged = RunHit(root, archive, dictionary, CallbackModel.UnmanagedCallersOnly);
+            var delegateModel = RunHit(root, archive, dictionary, CallbackModel.Delegate);
+            var errorPath = RunMissingArchiveError(root);
             Console.WriteLine(
-                $"ABI=1 UCO={unmanaged} delegate={delegateModel} " +
+                $"ABI=1 hit_uco={unmanaged} hit_delegate={delegateModel} error={errorPath} " +
                 "chosen=UnmanagedCallersOnly");
-            return unmanaged && delegateModel ? 0 : 1;
+            return unmanaged && delegateModel && errorPath ? 0 : 1;
         }
         finally
         {
-            Directory.Delete(root, true);
+            if (Environment.GetEnvironmentVariable("ACX_SMOKE_KEEP") == "1")
+            {
+                Console.Error.WriteLine($"smoke fixtures kept at {root}");
+            }
+            else
+            {
+                Directory.Delete(root, true);
+            }
         }
     }
 
-    private static unsafe bool RunJob(string root, string archive, string dictionary, CallbackModel model)
+    private static unsafe bool RunHit(string root, string archive, string dictionary, CallbackModel model)
     {
-        var checkpoint = Path.Combine(root, $"checkpoint-{model}.acx-checkpoint");
+        var checkpoint = Path.Combine(root, $"hit-checkpoint-{model}.acx-checkpoint");
         var archivePtr = Marshal.StringToCoTaskMemUTF8(archive);
         var dictionaryPtr = Marshal.StringToCoTaskMemUTF8(dictionary);
         var checkpointPtr = Marshal.StringToCoTaskMemUTF8(checkpoint);
         var state = new CallbackState();
         var gcHandle = GCHandle.Alloc(state);
-        FinishedDelegate? keptDelegate = null;
+        ProgressDelegate? keptProgress = null;
+        HitDelegate? keptHit = null;
+        LogDelegate? keptLog = null;
+        FinishedDelegate? keptFinished = null;
 
         try
         {
-            var input = new AcxInput
+            var spec = MakeSpec(archivePtr, dictionaryPtr, checkpointPtr);
+            var estimate = new AcxEstimateInfo { StructSize = (uint)sizeof(AcxEstimateInfo), Version = 1 };
+            if (Native.Estimate(spec, ref estimate) != 0 || estimate.TotalLow < 2)
             {
-                StructSize = (uint)sizeof(AcxInput),
-                Version = 1,
-                Kind = 0,
-                Path = archivePtr,
-                Fd = -1,
-                Uri = IntPtr.Zero,
-            };
-            var spec = new AcxAttackSpec
-            {
-                StructSize = (uint)sizeof(AcxAttackSpec),
-                Version = 1,
-                Input = input,
-                Mode = 0,
-                DictionaryPath = dictionaryPtr,
-                Threads = 1,
-                CheckpointPath = checkpointPtr,
-                ReportStats = 1,
-            };
-
-            var estimate = new AcxEstimateInfo
-            {
-                StructSize = (uint)sizeof(AcxEstimateInfo),
-                Version = 1,
-            };
-            if (Native.Estimate(spec, ref estimate) != 0 || estimate.TotalLow < 1)
-            {
-                Console.Error.WriteLine($"acx_estimate failed for {model}");
+                Console.Error.WriteLine(
+                    $"acx_estimate failed for {model}: {Read(Native.LastError(IntPtr.Zero))}");
                 return false;
             }
 
@@ -248,12 +247,21 @@ internal static class Program
             {
                 if (model == CallbackModel.UnmanagedCallersOnly)
                 {
+                    callbacks.OnProgress = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, ulong, ulong, double, ulong, void>)&OnProgress;
+                    callbacks.OnHit = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, nuint, void>)&OnHit;
+                    callbacks.OnLog = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, IntPtr, void>)&OnLog;
                     callbacks.OnFinished = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, void>)&OnFinished;
                 }
                 else
                 {
-                    keptDelegate = OnFinishedDelegateModel;
-                    callbacks.OnFinished = Marshal.GetFunctionPointerForDelegate(keptDelegate);
+                    keptProgress = OnProgressDelegateModel;
+                    keptHit = OnHitDelegateModel;
+                    keptLog = OnLogDelegateModel;
+                    keptFinished = OnFinishedDelegateModel;
+                    callbacks.OnProgress = Marshal.GetFunctionPointerForDelegate(keptProgress);
+                    callbacks.OnHit = Marshal.GetFunctionPointerForDelegate(keptHit);
+                    callbacks.OnLog = Marshal.GetFunctionPointerForDelegate(keptLog);
+                    callbacks.OnFinished = Marshal.GetFunctionPointerForDelegate(keptFinished);
                 }
             }
 
@@ -264,10 +272,11 @@ internal static class Program
                 return false;
             }
 
-            if (Native.Start(handle, spec, callbacks) != 0)
+            var startStatus = Native.Start(handle, spec, callbacks);
+            if (startStatus != 0)
             {
+                Console.Error.WriteLine($"acx_start failed for {model}: {startStatus} {Read(Native.LastError(handle))}");
                 Native.Destroy(handle);
-                Console.Error.WriteLine($"acx_start failed for {model}");
                 return false;
             }
 
@@ -277,22 +286,32 @@ internal static class Program
             {
                 if (Native.Status(handle, ref info) != 0)
                 {
+                    Console.Error.WriteLine($"acx_status failed for {model}: {Read(Native.LastError(handle))}");
                     Native.Destroy(handle);
                     return false;
                 }
                 if (info.State is not (1 or 2)) break;
                 if (DateTime.UtcNow > deadline)
                 {
-                    Native.Destroy(handle);
                     Console.Error.WriteLine($"timeout for {model}");
+                    Native.Destroy(handle);
                     return false;
                 }
                 Thread.Sleep(25);
             }
 
             Native.Destroy(handle);
-            GC.KeepAlive(keptDelegate);
-            return state.Finished > 0 && info.State is 3 or 4 or 5;
+            GC.KeepAlive(keptProgress);
+            GC.KeepAlive(keptHit);
+            GC.KeepAlive(keptLog);
+            GC.KeepAlive(keptFinished);
+            return state.Hits == 1
+                && state.Password == Password
+                && state.Progress >= 1
+                && state.Logs >= 1
+                && state.Finished == 1
+                && info.State == 4
+                && info.LastStatus == 0;
         }
         finally
         {
@@ -301,6 +320,193 @@ internal static class Program
             Marshal.FreeCoTaskMem(dictionaryPtr);
             Marshal.FreeCoTaskMem(checkpointPtr);
         }
+    }
+
+    private static unsafe bool RunMissingArchiveError(string root)
+    {
+        var missing = Path.Combine(root, "missing.zip");
+        var dictionary = Path.Combine(root, "error-dict.txt");
+        var checkpoint = Path.Combine(root, "error-checkpoint.acx-checkpoint");
+        File.WriteAllText(dictionary, "wrong\n");
+        var missingPtr = Marshal.StringToCoTaskMemUTF8(missing);
+        var dictionaryPtr = Marshal.StringToCoTaskMemUTF8(dictionary);
+        var checkpointPtr = Marshal.StringToCoTaskMemUTF8(checkpoint);
+
+        try
+        {
+            var spec = MakeSpec(missingPtr, dictionaryPtr, checkpointPtr);
+            var config = new AcxConfig { StructSize = (uint)sizeof(AcxConfig), Version = 1 };
+            if (Native.Create(config, out var handle) != 0 || handle == IntPtr.Zero)
+            {
+                Console.Error.WriteLine("acx_create failed for error path");
+                return false;
+            }
+
+            var noCallbacks = new AcxCallbacks
+            {
+                StructSize = (uint)sizeof(AcxCallbacks),
+                Version = 1,
+            };
+            var startStatus = Native.Start(handle, spec, noCallbacks);
+            var lastError = Read(Native.LastError(handle));
+            var info = new AcxStatusInfo { StructSize = (uint)sizeof(AcxStatusInfo), Version = 1 };
+            var statusResult = Native.Status(handle, ref info);
+            Native.Destroy(handle);
+            return startStatus == 2
+                && statusResult == 0
+                && info.State == 0
+                && info.LastStatus == 2
+                && !string.IsNullOrEmpty(lastError);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(missingPtr);
+            Marshal.FreeCoTaskMem(dictionaryPtr);
+            Marshal.FreeCoTaskMem(checkpointPtr);
+        }
+    }
+
+    private static unsafe AcxAttackSpec MakeSpec(IntPtr archivePtr, IntPtr dictionaryPtr, IntPtr checkpointPtr)
+    {
+        return new AcxAttackSpec
+        {
+            StructSize = (uint)sizeof(AcxAttackSpec),
+            Version = 1,
+            Input = new AcxInput
+            {
+                StructSize = (uint)sizeof(AcxInput),
+                Version = 1,
+                Kind = 0,
+                Path = archivePtr,
+                Fd = -1,
+                Uri = IntPtr.Zero,
+            },
+            Mode = 0,
+            DictionaryPath = dictionaryPtr,
+            Threads = 1,
+            CheckpointPath = checkpointPtr,
+            ReportStats = 1,
+        };
+    }
+
+    private static void WriteZipCrypto(string path, string password, string entryName, string plaintext)
+    {
+        var name = Encoding.UTF8.GetBytes(entryName);
+        var data = Encoding.UTF8.GetBytes(plaintext);
+        var crc = Crc32(data);
+        var encrypted = EncryptZipCrypto(data, password, crc);
+        var localHeaderSize = 30u + (uint)name.Length;
+        var descriptorSize = 16u;
+        var centralOffset = localHeaderSize + (uint)encrypted.Length + descriptorSize;
+        var centralSize = 46u + (uint)name.Length;
+
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(0x04034b50u);
+        writer.Write((ushort)20);
+        writer.Write((ushort)9); // encrypted + data descriptor
+        writer.Write((ushort)0); // stored
+        writer.Write((ushort)0); // time
+        writer.Write((ushort)0x21); // date: 1980-01-01
+        writer.Write(0u); // CRC in descriptor
+        writer.Write(0u); // compressed size in descriptor
+        writer.Write(0u); // uncompressed size in descriptor
+        writer.Write((ushort)name.Length);
+        writer.Write((ushort)0);
+        writer.Write(name);
+        writer.Write(encrypted);
+
+        writer.Write(0x08074b50u);
+        writer.Write(crc);
+        writer.Write((uint)encrypted.Length);
+        writer.Write((uint)data.Length);
+
+        writer.Write(0x02014b50u);
+        writer.Write((ushort)20);
+        writer.Write((ushort)20);
+        writer.Write((ushort)9);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0); // time
+        writer.Write((ushort)0x21); // date
+        writer.Write(crc);
+        writer.Write((uint)encrypted.Length);
+        writer.Write((uint)data.Length);
+        writer.Write((ushort)name.Length);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+        writer.Write(0u);
+        writer.Write(0u); // relative offset of this entry's local header
+        writer.Write(name);
+
+        writer.Write(0x06054b50u);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+        writer.Write((ushort)1);
+        writer.Write((ushort)1);
+        writer.Write(centralSize);
+        writer.Write(centralOffset);
+        writer.Write((ushort)0);
+    }
+
+    private static byte[] EncryptZipCrypto(byte[] data, string password, uint crc)
+    {
+        uint key0 = 0x12345678, key1 = 0x23456789, key2 = 0x34567890;
+        foreach (var value in Encoding.ASCII.GetBytes(password))
+        {
+            UpdateKey(value);
+        }
+
+        var result = new byte[12 + data.Length];
+        for (var index = 0; index < 11; index++)
+        {
+            result[index] = Encrypt((byte)index);
+        }
+        // General-purpose bit 3 is set, so validators use the high byte of
+        // the MS-DOS modification time; it is zero in this deterministic fixture.
+        result[11] = Encrypt(0);
+        for (var index = 0; index < data.Length; index++)
+        {
+            result[12 + index] = Encrypt(data[index]);
+        }
+        return result;
+
+        byte Encrypt(byte plaintext)
+        {
+            var temp = key2 | 2;
+            var cipher = (byte)(((temp * (temp ^ 1)) >> 8) & 0xff);
+            UpdateKey(plaintext);
+            return (byte)(plaintext ^ cipher);
+        }
+
+        void UpdateKey(byte value)
+        {
+            key0 = Crc32Step(key0, value);
+            key1 = unchecked((key1 + (key0 & 0xff)) * 134775813 + 1);
+            key2 = Crc32Step(key2, (byte)(key1 >> 24));
+        }
+    }
+
+    private static uint Crc32(byte[] data)
+    {
+        var crc = 0xffffffffu;
+        foreach (var value in data)
+        {
+            crc = Crc32Step(crc, value);
+        }
+        return crc ^ 0xffffffffu;
+    }
+
+    private static uint Crc32Step(uint crc, byte value)
+    {
+        crc ^= value;
+        for (var bit = 0; bit < 8; bit++)
+        {
+            crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xedb88320u : crc >> 1;
+        }
+        return crc;
     }
 
     private static void ValidateSizes()
@@ -321,23 +527,68 @@ internal static class Program
         if (!condition) throw new InvalidOperationException($"bad layout size: {name}");
     }
 
+    private static string Read(IntPtr ptr) =>
+        ptr == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(ptr) ?? string.Empty;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnProgress(IntPtr user, ulong tried, ulong total, double rate, ulong etaSec)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is not null) Interlocked.Increment(ref state.Progress);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe void OnHit(IntPtr user, IntPtr password, nuint len)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is null) return;
+        var bytes = new byte[(int)len];
+        Marshal.Copy(password, bytes, 0, bytes.Length);
+        state.Password = Encoding.UTF8.GetString(bytes);
+        Interlocked.Increment(ref state.Hits);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnLog(IntPtr user, int level, IntPtr message)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is not null) Interlocked.Increment(ref state.Logs);
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnFinished(IntPtr user, int status)
     {
-        _ = status;
         var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
         if (state is not null) Interlocked.Increment(ref state.Finished);
+    }
+
+    private static void OnProgressDelegateModel(IntPtr user, ulong tried, ulong total, double rate, ulong etaSec)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is not null) Interlocked.Increment(ref state.Progress);
+    }
+
+    private static unsafe void OnHitDelegateModel(IntPtr user, IntPtr password, nuint len)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is null) return;
+        var bytes = new byte[(int)len];
+        Marshal.Copy(password, bytes, 0, bytes.Length);
+        state.Password = Encoding.UTF8.GetString(bytes);
+        Interlocked.Increment(ref state.Hits);
+    }
+
+    private static void OnLogDelegateModel(IntPtr user, int level, IntPtr message)
+    {
+        var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
+        if (state is not null) Interlocked.Increment(ref state.Logs);
     }
 
     private static void OnFinishedDelegateModel(IntPtr user, int status)
     {
-        _ = status;
         var state = (CallbackState?)GCHandle.FromIntPtr(user).Target;
         if (state is not null) Interlocked.Increment(ref state.Finished);
     }
-
-    private static string Read(IntPtr ptr) =>
-        ptr == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(ptr) ?? string.Empty;
 
     private enum CallbackModel
     {

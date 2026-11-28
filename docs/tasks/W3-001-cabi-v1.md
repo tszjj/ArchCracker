@@ -1,6 +1,6 @@
 # W3-001：C ABI v1 冻结 — 实现记录
 
-- 状态：完成（2026-11-28，`windows-gui`；本地验证通过；reviewer/architect/release 最终复审 APPROVE）
+- 状态：完成（2026-11-28，`windows-gui`；本地验证通过；reviewer/architect/release 最终复审 APPROVE；后续审计修复另见 `docs/CL-W3-001.md`）
 - 角色：core-engineer（FFI）、frontend-engineer（C# smoke）、architect（ABI 边界）、reviewer/release（复核通过）
 - 分支：`windows-gui`
 - 依赖：W2 已签核（`docs/W2-SIGNOFF.md`）；`acx-core` 的 `run_job`/`validate_job`/`RunControl`/W2 攻击与统计能力
@@ -51,7 +51,7 @@
 | `cargo build --workspace --release --locked` | 通过 |
 | `gcc -std=c99 -Wall -Wextra -Werror ... header_smoke.c` | 通过 |
 | `g++ -std=c++17 -Wall -Wextra -Werror ... header_smoke.c` | 通过 |
-| `dotnet run --project frontends/desktop/tests/AcxFfiSmoke ... acx.dll` | 输出 `ABI=1 state=0 status=ACX_OK` |
+| `dotnet run --project frontends/desktop/tests/AcxFfiSmoke ... acx.dll` | 输出 `ABI=1 hit_uco=True hit_delegate=True error=True chosen=UnmanagedCallersOnly`；覆盖命中、进度、日志、终态与错误路径 |
 
 ## 影响范围与风险
 
@@ -70,7 +70,7 @@ CHANGED: core/crates/acx-ffi/{include/acx.h,src/lib.rs,tests/header_smoke.c,test
          core/crates/acx-core/src/job.rs、
          frontends/desktop/tests/AcxFfiSmoke/*、
          docs/architecture.md、docs/W3-PLAN.md、docs/PROJECT-GUIDE.md、本文
-ROLE: core-engineer + frontend-engineer；architect/release 复核待下一次评审
+ROLE: core-engineer + frontend-engineer；reviewer/architect/release 复审 APPROVE
 NEXT: W3-002 Avalonia 工程与 NativeBridge
 RISKS: 回调模型 C# 实测选择、fd/uri 后续 JNI/NAPI 生命周期、v1 冻结后的兼容性门禁
 ```
