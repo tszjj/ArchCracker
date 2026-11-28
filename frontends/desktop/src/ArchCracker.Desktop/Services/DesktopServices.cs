@@ -19,8 +19,11 @@ public sealed class DesktopServices : IDisposable
         Callbacks = new NativeCallbackRouter(UiDispatcher);
         Kernel = new KernelService();
         CallbackBridge = new AcxCallbackBridge(Callbacks);
+        FilePicker = new AvaloniaFilePickerService();
+        Shell = new DesktopShellService();
         Sidecar = SidecarOptions.Load();
-        MainWindow = new MainWindowViewModel(Kernel, Localization, Theme, Callbacks, Sidecar);
+        MainWindow = new MainWindowViewModel(
+            Kernel, Localization, Theme, Callbacks, CallbackBridge, FilePicker, Shell, Sidecar);
     }
 
     public ILocalizationService Localization { get; }
@@ -29,6 +32,8 @@ public sealed class DesktopServices : IDisposable
     public NativeCallbackRouter Callbacks { get; }
     public IKernelService Kernel { get; }
     public AcxCallbackBridge CallbackBridge { get; }
+    public IFilePickerService FilePicker { get; }
+    public IShellService Shell { get; }
     public SidecarOptions Sidecar { get; }
     public MainWindowViewModel MainWindow { get; }
 

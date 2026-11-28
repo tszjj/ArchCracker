@@ -61,16 +61,15 @@ public sealed class KernelService : IKernelService
         }
     }
 
-    public AcxInspectionInfo Inspect(string path)
+    public ArchiveInspectionResult Inspect(string path)
     {
         var info = AcxInspectionInfo.Create();
-        var status = AcxNative.Inspect(path, ref info);
-        if (status != (int)AcxStatusKind.Ok)
-        {
-            var message = AcxNative.CopyUtf8(AcxNative.LastError(IntPtr.Zero));
-            throw new InvalidOperationException($"acx_inspect failed ({status}): {message}");
-        }
-        return info;
+        var code = AcxNative.Inspect(path, ref info);
+        var status = AcxStatusMap.FromCode(code);
+        var error = status == AcxStatusKind.Ok
+            ? string.Empty
+            : AcxNative.CopyUtf8(AcxNative.LastError(IntPtr.Zero));
+        return new ArchiveInspectionResult(status == AcxStatusKind.Ok, status, info, error);
     }
 
     public AcxJobHandle CreateHandle()

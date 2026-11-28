@@ -91,9 +91,9 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Build acx-ffi
+      - name: Build acx-ffi and acx-cli
         working-directory: core
-        run: cargo build -p acx-ffi --locked
+        run: cargo build -p acx-ffi -p acx-cli --locked
 
       - name: C99 header smoke
         working-directory: core

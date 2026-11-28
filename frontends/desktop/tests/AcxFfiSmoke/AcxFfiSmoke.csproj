@@ -11,5 +11,6 @@
 
   <ItemGroup>
     <Compile Include="../../../shared/dotnet/AcxBindings.cs" Link="Native/AcxBindings.cs" />
+    <Compile Include="../../../shared/dotnet/ZipCryptoFixture.cs" Link="Fixtures/ZipCryptoFixture.cs" />
   </ItemGroup>
 </Project>

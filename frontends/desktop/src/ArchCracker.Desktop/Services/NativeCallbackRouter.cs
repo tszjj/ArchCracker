@@ -20,8 +20,15 @@ public sealed class NativeCallbackRouter : INativeCallbackSink
 
     public NativeCallbackRouter(IUiDispatcher dispatcher) => _dispatcher = dispatcher;
 
+    public void Reset()
+    {
+        _lastProgress = null;
+        _progressThrottle.Reset();
+    }
+
     public event Action<ProgressSnapshot>? Progress;
     public event Action<string>? Hit;
+    public event Action<byte[]>? HitBytes;
     public event Action<string>? Log;
     public event Action<int>? Finished;
 
@@ -35,9 +42,14 @@ public sealed class NativeCallbackRouter : INativeCallbackSink
 
     public void OnHit(byte[] password)
     {
-        var full = Convert.ToHexString(password);
+        var copy = password.ToArray();
+        var full = Convert.ToHexString(copy);
         var display = full.Length <= 16 ? full : $"{full[..16]}…";
-        _dispatcher.Post(() => Hit?.Invoke(display));
+        _dispatcher.Post(() =>
+        {
+            Hit?.Invoke(display);
+            HitBytes?.Invoke(copy);
+        });
     }
 
     public void OnLog(int level, string message) =>

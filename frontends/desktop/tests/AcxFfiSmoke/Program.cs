@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using ArchCracker.Desktop.Native;
+using ArchCracker.Shared.Testing;
 
 namespace ArchCracker.Desktop.FfiSmoke;
 
@@ -97,7 +98,7 @@ internal static class Program
         {
             var archive = Path.Combine(root, "zipcrypto.zip");
             var dictionary = Path.Combine(root, "dict.txt");
-            WriteZipCrypto(archive, Password, "hello.txt", Plaintext);
+            ZipCryptoFixture.Write(archive, Password, "hello.txt", Plaintext);
             File.WriteAllText(dictionary, $"wrong\n{Password}\n");
 
             var unmanaged = RunHit(root, archive, dictionary, CallbackModel.UnmanagedCallersOnly);
@@ -308,126 +309,6 @@ internal static class Program
             CheckpointPath = checkpointPtr,
             ReportStats = 1,
         };
-    }
-
-    private static void WriteZipCrypto(string path, string password, string entryName, string plaintext)
-    {
-        var name = Encoding.UTF8.GetBytes(entryName);
-        var data = Encoding.UTF8.GetBytes(plaintext);
-        var crc = Crc32(data);
-        var encrypted = EncryptZipCrypto(data, password, crc);
-        var localHeaderSize = 30u + (uint)name.Length;
-        var descriptorSize = 16u;
-        var centralOffset = localHeaderSize + (uint)encrypted.Length + descriptorSize;
-        var centralSize = 46u + (uint)name.Length;
-
-        using var stream = File.Create(path);
-        using var writer = new BinaryWriter(stream);
-
-        writer.Write(0x04034b50u);
-        writer.Write((ushort)20);
-        writer.Write((ushort)9); // encrypted + data descriptor
-        writer.Write((ushort)0); // stored
-        writer.Write((ushort)0); // time
-        writer.Write((ushort)0x21); // date: 1980-01-01
-        writer.Write(0u); // CRC in descriptor
-        writer.Write(0u); // compressed size in descriptor
-        writer.Write(0u); // uncompressed size in descriptor
-        writer.Write((ushort)name.Length);
-        writer.Write((ushort)0);
-        writer.Write(name);
-        writer.Write(encrypted);
-
-        writer.Write(0x08074b50u);
-        writer.Write(crc);
-        writer.Write((uint)encrypted.Length);
-        writer.Write((uint)data.Length);
-
-        writer.Write(0x02014b50u);
-        writer.Write((ushort)20);
-        writer.Write((ushort)20);
-        writer.Write((ushort)9);
-        writer.Write((ushort)0);
-        writer.Write((ushort)0); // time
-        writer.Write((ushort)0x21); // date
-        writer.Write(crc);
-        writer.Write((uint)encrypted.Length);
-        writer.Write((uint)data.Length);
-        writer.Write((ushort)name.Length);
-        writer.Write((ushort)0);
-        writer.Write((ushort)0);
-        writer.Write((ushort)0);
-        writer.Write((ushort)0);
-        writer.Write(0u);
-        writer.Write(0u); // relative offset of this entry's local header
-        writer.Write(name);
-
-        writer.Write(0x06054b50u);
-        writer.Write((ushort)0);
-        writer.Write((ushort)0);
-        writer.Write((ushort)1);
-        writer.Write((ushort)1);
-        writer.Write(centralSize);
-        writer.Write(centralOffset);
-        writer.Write((ushort)0);
-    }
-
-    private static byte[] EncryptZipCrypto(byte[] data, string password, uint crc)
-    {
-        uint key0 = 0x12345678, key1 = 0x23456789, key2 = 0x34567890;
-        foreach (var value in Encoding.ASCII.GetBytes(password))
-        {
-            UpdateKey(value);
-        }
-
-        var result = new byte[12 + data.Length];
-        for (var index = 0; index < 11; index++)
-        {
-            result[index] = Encrypt((byte)index);
-        }
-        // General-purpose bit 3 is set, so validators use the high byte of
-        // the MS-DOS modification time; it is zero in this deterministic fixture.
-        result[11] = Encrypt(0);
-        for (var index = 0; index < data.Length; index++)
-        {
-            result[12 + index] = Encrypt(data[index]);
-        }
-        return result;
-
-        byte Encrypt(byte plaintext)
-        {
-            var temp = key2 | 2;
-            var cipher = (byte)(((temp * (temp ^ 1)) >> 8) & 0xff);
-            UpdateKey(plaintext);
-            return (byte)(plaintext ^ cipher);
-        }
-
-        void UpdateKey(byte value)
-        {
-            key0 = Crc32Step(key0, value);
-            key1 = unchecked((key1 + (key0 & 0xff)) * 134775813 + 1);
-            key2 = Crc32Step(key2, (byte)(key1 >> 24));
-        }
-    }
-
-    private static uint Crc32(byte[] data)
-    {
-        var crc = 0xffffffffu;
-        foreach (var value in data)
-        {
-            crc = Crc32Step(crc, value);
-        }
-        return crc ^ 0xffffffffu;
-    }
-
-    private static uint Crc32Step(uint crc, byte value)
-    {
-        crc ^= value;
-        for (var bit = 0; bit < 8; bit++)
-        {
-            crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xedb88320u : crc >> 1;
-        }
-        return crc;
     }
 
     private static void ValidateSizes()

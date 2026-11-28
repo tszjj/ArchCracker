@@ -7,7 +7,12 @@ namespace ArchCracker.Desktop.Native;
 
 public sealed class AcxJobHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
-    internal AcxJobHandle(IntPtr handle) : base(ownsHandle: true) => SetHandle(handle);
+    internal AcxJobHandle(IntPtr handle) : this(handle, ownsHandle: true) { }
+
+    private AcxJobHandle(IntPtr handle, bool ownsHandle) : base(ownsHandle) => SetHandle(handle);
+
+    /// <summary>Non-owning handle for headless view-model tests.</summary>
+    internal static AcxJobHandle CreateTestHandle() => new((IntPtr)1, ownsHandle: false);
 
     protected override bool ReleaseHandle()
     {

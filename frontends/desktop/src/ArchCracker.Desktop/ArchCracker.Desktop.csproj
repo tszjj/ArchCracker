@@ -11,6 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>ArchCracker.Desktop.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.2.0" />
     <PackageReference Include="Avalonia.Desktop" Version="12.2.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.2.0" />
@@ -18,6 +24,7 @@
 
   <ItemGroup>
     <Compile Include="../../../shared/dotnet/AcxBindings.cs" Link="Native/AcxBindings.cs" />
+    <Compile Include="../../../shared/dotnet/AcxCodes.cs" Link="Shared/AcxCodes.cs" />
     <Compile Include="../../../shared/dotnet/AcxStatusMap.cs" Link="Shared/AcxStatusMap.cs" />
     <Content Include="../../../shared/i18n/*.json" Link="i18n/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

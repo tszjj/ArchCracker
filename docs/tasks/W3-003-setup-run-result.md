@@ -1,8 +1,8 @@
 # W3-003：Setup → Run → Result 垂直切片 — 设计目标
 
-- 状态：设计目标定稿（2026-11-28），尚未实现
+- 状态：实现完成（2026-11-28，`windows-gui`；本地验证通过，待复审）
 - 分支：`windows-gui`（W3-001 C ABI v1、W3-002 Avalonia 骨架已完成并复审）
-- 前置基线：`windows-gui @ a77cfd0`；PR #40 CI 7/7 通过（run `46111999727`）
+- 前置基线：`windows-gui @ ad10639`；PR #40 此前 CI 7/7 通过（run `46117028594`）
 - 角色：frontend-engineer 主责，core-engineer 支持 ABI/归档预检，qa-engineer 负责 GUI↔CLI 差分，architect/release 评审
 - 依据：`docs/W3-PLAN.md` §3、`docs/tasks/W3-windows-gui-outline.md`、`docs/AUDIT-backend-W3-2026-11-28.md`
 
@@ -135,7 +135,7 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 | 差分 | GUI 与 CLI 同归档/字典 | FOUND/MISS/error 分类一致 |
 | ABI | `acx_inspect` 布局与错误码 | struct_size/version、C/C# smoke |
 
-测试不得依赖工具版本，不得静默跳过；skip 必须显式报告（`AUDIT-CLI-07`）。断言使用结构化 ABI 字段，不用 stdout 子串（`AUDIT-CLI-08`）。
+测试不得依赖工具版本，不得静默跳过；skip 必须显式报告（`AUDIT-CLI-07`）。GUI 侧断言使用结构化 ABI 字段与 ViewModel 终态，CLI 侧使用稳定退出码（0 found / 1 not found / 3 archive error），不依赖 stdout 子串（`AUDIT-CLI-08`）。
 
 ## 6. 审计 P2 影响分析
 
@@ -197,7 +197,7 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 | ENG-07 | MSRV job 覆盖偏窄 | 约束 | W3-003 PR 继续跑完整本地门禁，远端 job 补强另排 |
 | ENG-08 | ffi-smoke 依赖 runner 工具 | 不影响（当前 run 7/7） | 后续显式安装工具 |
 | ENG-11 | core README 过时 | 不影响 | 文档清理 |
-| ENG-02 | CI 绿灯 | 已关闭 | PR #40 run `46111999727` 7/7 |
+| ENG-02 | CI 绿灯 | 基线已关闭，新增代码待重跑 | PR #40 基线 run `46117028594` 7/7；W3-003 新增 acx-cli 构建与差分测试需远端重跑 |
 | ENG-03/04/09/10/12 | 已降 P3 | 不影响 | 不进入 W3-003 门禁 |
 
 ### 6.5 总体判断
@@ -206,6 +206,7 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 - **作为设计约束保留**：FFI-03/04/07/10/14/16/17、CORE-04、CLI-07/08/13、ENG-07。
 - **可安全延后**：7z/RAR、统计导出、encoding、batch、sidecar 真进程、发布 strip、工具链统一。
 - **不影响 W3-003 开发启动的结论**：其余 P2 不阻塞；但上述三项关闭前不得宣称 W3-003 验收通过。
+- **设置界面同步性**：W3-003 仅支持 ZIP，预检为本地元数据操作；同步调用不会引入外部进程等待。若后续接入 RAR 或网络路径，必须改为异步预检。
 
 ## 7. 验收条件（切片级）
 
@@ -218,19 +219,51 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 7. 所有测试显式执行或显式 skip；CI 全绿；
 8. `acx_inspect` 经 architect/release 复审，不破坏 v1 布局。
 
+## 7.1 阶段进度记录
+
+| 里程碑 | 状态 | 阶段成果 |
+|---|---|---|
+| M1 Setup | 完成 | 归档选择/拖放、`acx_inspect` 预检、结构化错误、字典与线程配置、开始按钮门禁 |
+| M2 Run/控制 | 完成 | 后台启动、10 Hz 进度、暂停/继续/停止、SafeHandle 生命周期、终态补发进度 |
+| M3 Result | 完成 | 命中/未找到/停止/失败四态、密码字节 UTF-8 显示与 hex 兜底、复制、打开目录、重新开始 |
+| M4 差分与验证 | 完成（本地） | 13 个 Wizard VM 测试 + 3 个真实 native GUI↔CLI 差分（found / not found / unencrypted）；32 个桌面测试全绿 |
+
+## 7.2 实现交付物
+
+- `frontends/desktop/src/ArchCracker.Desktop/Views/MainWindow.axaml`：Setup / Run / Result 三屏；
+- `ViewModels/MainWindowViewModel.cs`：状态机、命令、终态判定与日志；
+- `Services/{IFilePickerService,AvaloniaFilePickerService,IShellService,DesktopShellService,AttackSpecFactory,TempCheckpoint}.cs`；
+- `Native/AcxJobHandle.cs`：non-owning test handle 仅供 xUnit 程序集；
+- `frontends/shared/dotnet/{AcxCodes,ZipCryptoFixture}.cs` 与中英文词条；
+- CI `ffi-smoke` job 增加 `acx-cli` 构建，支撑 GUI↔CLI 差分。
+
+## 7.3 本地验证结果
+
+| 命令 | 结果 |
+|---|---|
+| `cargo fmt --all -- --check` | 通过 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | 通过 |
+| `cargo test --workspace --locked` | core 168，各 crate 全绿 |
+| `cargo +1.89 test --workspace --locked` | 通过 |
+| `cargo deny check licenses bans sources` | 通过 |
+| `cargo build --workspace --release --locked` | 通过 |
+| C99/C++17 header smoke | 通过 |
+| `ArchCracker.Desktop.Tests` | 32 passed / 0 failed / 0 skipped |
+| `AcxFfiSmoke` | `ABI=1 hit_uco=True hit_delegate=True inspect=True error=True chosen=UnmanagedCallersOnly` |
+
 ## 8. 回滚方案
 
 - 未推送：`git reset --hard <W3-002 commit>`；
 - 已推送：`git revert <W3-003 commit>`；
 - ABI 回滚：保留 v1 结构体，仅移除新增 `acx_inspect`/`AcxInspectionInfo` 与 GUI 调用；
-- 数据影响：临时 checkpoint 与本地日志删除；无 schema/落盘格式变化。
+- 数据影响：临时 checkpoint 尽力删除（被占用或权限异常时可能残留）；本地 UI 日志不清持久化数据；无 schema/落盘格式变化。
 
 ## 9. 交接格式
 
 ```text
-STATUS: planned（设计目标定稿，未实现）
+STATUS: implemented（本地验证通过，待 reviewer/architect/release 复审）
 BRANCH: windows-gui
 ROLE: frontend-engineer + core-engineer + qa-engineer
-NEXT: M0 ABI 预检复审 → M1 Setup → M2 Run/控制 → M3 Result/复制 → M4 GUI↔CLI 差分
-RISKS: CORE-02/03/15 未关闭前不得验收；统计与 encoding 延后到 W3-004/005
+NEXT: 独立复审 → 提交并推送 PR #40 → W3-004 攻击模式扩展
+RISKS: W3-003 新增 CI job 改动需远端重跑；Release 不复制 debug acx.dll、W4 需提供 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
 ```

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/ArchCracker.Desktop/ArchCracker.Desktop.csproj" />
+    <Compile Include="../../../shared/dotnet/ZipCryptoFixture.cs" Link="Fixtures/ZipCryptoFixture.cs" />
     <Content Include="../../../shared/i18n/*.json" Link="i18n/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

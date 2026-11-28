@@ -11,7 +11,7 @@ public interface IKernelService
 {
     string LibraryPath { get; }
     KernelProbeResult Probe();
-    AcxInspectionInfo Inspect(string path);
+    ArchiveInspectionResult Inspect(string path);
     AcxJobHandle CreateHandle();
     void DestroyHandle(AcxJobHandle handle);
     JobStatusSnapshot GetStatus(AcxJobHandle handle);

@@ -17,6 +17,8 @@ public sealed class ProgressThrottle
         _clock = clock ?? Stopwatch.GetTimestamp;
     }
 
+    public void Reset() => Interlocked.Exchange(ref _lastTicks, long.MinValue);
+
     public bool ShouldEmit()
     {
         var now = _clock();

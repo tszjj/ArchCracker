@@ -3,6 +3,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using ArchCracker.Desktop.Services;
 
 namespace ArchCracker.Desktop.Native;
 
@@ -18,7 +19,7 @@ public interface INativeCallbackSink
 /// Owns the unmanaged function pointers and the GCHandle used as callback user
 /// data. This type does not reference Avalonia; UI marshalling is a service.
 /// </summary>
-public sealed unsafe class AcxCallbackBridge : IDisposable
+public sealed unsafe class AcxCallbackBridge : IDisposable, INativeCallbackProvider
 {
     private const int MaxHitBytes = 4096;
 

@@ -32,7 +32,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 |---|---|---|
 | W3-001 C ABI v1 | **已完成（本地验证）** | `acx.h` v1、句柄/攻击参数/回调/错误码/panic 隔离；见 `docs/tasks/W3-001-cabi-v1.md` |
 | W3-002 Avalonia 骨架 | **已完成（本地验证）** | .NET 10 工程、MVVM、NativeBridge、主题/i18n 基础；见 `docs/tasks/W3-002-avalonia-shell.md` |
-| W3-003 垂直切片 | 设计目标已定稿（2026-11-28），待实现 | Setup/Run/Result、ZIP 字典攻击、暂停/停止/命中复制；见 `docs/tasks/W3-003-setup-run-result.md` |
+| W3-003 垂直切片 | **本地实现完成（待复审）** | Setup/Run/Result、ZIP 字典攻击、暂停/停止/命中复制；32 个桌面测试全绿；见 `docs/tasks/W3-003-setup-run-result.md` |
 | W3-004 攻击模式扩展 | 待启动 | 掩码/暴力/混合、编码变体、strict/resume、估算 |
 | W3-005 报告与体验 | 待启动 | 统计/报告导出、错误分类、键盘/高 DPI/脱敏日志 |
 | W3-006 稳定与签核 | 待启动 | sidecar 开关预留、性能与 UI 冒烟、W3-SIGNOFF；W3-001 的 CI ffi-smoke 前置已完成 |
