@@ -39,6 +39,20 @@ public sealed class AcxStructLayoutTests
     }
 
     [Fact]
+    public void InspectionInfoLayoutMatchesV1()
+    {
+        unsafe
+        {
+            Assert.Equal(72, sizeof(AcxInspectionInfo));
+        }
+        Assert.Equal(0, (int)Marshal.OffsetOf<AcxInspectionInfo>(nameof(AcxInspectionInfo.StructSize)));
+        Assert.Equal(16, (int)Marshal.OffsetOf<AcxInspectionInfo>(nameof(AcxInspectionInfo.EntryCount)));
+        Assert.Equal(24, (int)Marshal.OffsetOf<AcxInspectionInfo>(nameof(AcxInspectionInfo.SelectedIndex)));
+        Assert.Equal(32, (int)Marshal.OffsetOf<AcxInspectionInfo>(nameof(AcxInspectionInfo.WholeArchive)));
+        Assert.Equal(40, (int)Marshal.OffsetOf<AcxInspectionInfo>(nameof(AcxInspectionInfo.Reserved)));
+    }
+
+    [Fact]
     public void FactoryMethodsSetStructSizeAndVersion()
     {
         unsafe

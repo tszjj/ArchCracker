@@ -21,6 +21,7 @@ ASSERT_SIZE(AcxAttackSpec, 296);
 ASSERT_SIZE(AcxCallbacks, 80);
 ASSERT_SIZE(AcxStatusInfo, 88);
 ASSERT_SIZE(AcxEstimateInfo, 112);
+ASSERT_SIZE(AcxInspectionInfo, 72);
 
 static void noop_progress(void* user, uint64_t tried, uint64_t total,
                           double rate, uint64_t eta_sec) {
@@ -46,6 +47,7 @@ int acx_header_smoke(void) {
     AcxCallbacks callbacks;
     AcxStatusInfo status;
     AcxEstimateInfo estimate;
+    AcxInspectionInfo inspection;
     AcxHandle* handle = 0;
     int rc;
 
@@ -98,12 +100,16 @@ int acx_header_smoke(void) {
     status.version = 1;
     estimate.struct_size = (uint32_t)sizeof(estimate);
     estimate.version = 1;
+    inspection.struct_size = (uint32_t)sizeof(inspection);
+    inspection.version = 1;
 
     /* Exercise pointer types without linking the native library. */
     (void)&spec;
     (void)&callbacks;
     (void)&status;
     (void)&estimate;
+    (void)&inspection;
+    (void)&acx_inspect;
 
     rc = acx_abi_version() == ACX_ABI_VERSION ? 0 : 1;
     if (rc != 0) return rc;

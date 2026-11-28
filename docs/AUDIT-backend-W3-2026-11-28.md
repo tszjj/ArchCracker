@@ -23,7 +23,7 @@
    - CLI single 未调用 `job::validate_job`；
    - CLI `Stopped`/`Cancelled` 退出与输出语义不完整。
 3. **核心正确性 P2**：ZIP/7z full verify 把 I/O 截断误判为 Miss、STOPPED 时 checkpoint 保存失败升级为整体错误、checkpoint 非原子替换、编码统计瞬时不一致。
-4. **条件性阻塞**：`windows-gui` 尚无远端 CI 绿灯；GNU/MSVC DLL 产物口径未统一。前者阻塞 W3 正式签核，后者阻塞 W4 打包，但不阻塞 Avalonia 骨架编码。
+4. **条件性阻塞**：审计基线 `f890924` 当时 `windows-gui` 尚无远端 CI 绿灯；后续 PR #40 run `46111999727` 已 7/7 通过。GNU/MSVC DLL 产物口径未统一，仍阻塞 W4 打包，不阻塞 W3-003 编码。
 5. 架构边界总体正确：GUI 应只通过 `acx-ffi` 的 C ABI 访问内核，不得直接调用 `acx-core`，也不得解析 CLI stdout。
 6. 许可边界总体安全：hashcat、UnRAR/CUDA/HIP/OpenCL 均非 Cargo 依赖；RAR 仍仅走外部进程；未发现新增不兼容许可。
 
@@ -223,6 +223,7 @@
 - **修复影响**：影响 ZIP full verify、统计和错误呈现；不改断点。
 - **是否修复**：需要。
 - **建议**：`InvalidData/InvalidInput` 可作 Miss，`UnexpectedEof` 返回 Truncated/IO。
+- **修复状态（本轮）**：**已修复**。`is_candidate_rejection` 仅保留 `InvalidData/InvalidInput`；ZipCrypto 与 AES 两条 full-verify 路径的短读/`UnexpectedEof` 均返回 `AcxError::Truncated`；补分类单测与真实 AES 截断 E2E。
 
 ### AUDIT-CORE-03 原 P1：STOPPED 分支 checkpoint 保存失败升级整体错误
 
@@ -231,6 +232,7 @@
 - **修复影响**：影响 CLI/FFI 停止状态、warnings 和续跑可用性。
 - **是否修复**：需要。
 - **建议**：保存失败写 warning，始终返回 `JobStatus::Stopped`。
+- **修复状态（本轮）**：**已修复**。抽出 `save_checkpoint_or_warn`，STOPPED 与 FAILED 分支统一降级为 warning，并补失败目录回归测试。
 
 ### AUDIT-CORE-04 原 P1：checkpoint save 先删后改非原子
 
@@ -324,6 +326,7 @@
 - **修复影响**：core error、FFI ABI、GUI 错误映射。
 - **是否修复**：W3 Result 需精确分类时修复。
 - **建议**：core 增加 `error_kind/code`，ABI v2 暴露，v1 常量保持兼容。
+- **修复状态（本轮）**：**已通过附加 v1 接口部分修复**。新增 `acx_inspect`/`AcxInspectionInfo` 提供格式、加密、条目、目标可通过预检与结构化错误；不提升 ABI 版本、不改冻结结构布局。运行期细粒度 `error_kind` 仍留待 ABI v2。
 
 ### AUDIT-CORE-16 原 P2：魔数与参数数量
 
@@ -464,6 +467,7 @@
 - **修复影响**：PR、签核文档、状态同步。
 - **是否修复**：需要。
 - **建议**：push `windows-gui` 开 PR，取得 7/7 绿灯后回填 run id。
+- **修复状态（后续）**：**已修复**。PR #40 run `46111999727` 7/7 通过。
 
 ### AUDIT-ENG-03 原 P1：`AGENTS.md` 阶段状态滞后
 
@@ -591,3 +595,4 @@
 - **NativeBridge 实质联调前，应先关闭第 5.1 节四项。**
 - **W3 正式签核前，必须关闭第 5.3 节条件阻塞。**
 - 原评审报告整体方向正确，但严重程度普遍偏高；本次逐项核实后，未确认任何契约内可触发 P0。
+- 后续修复状态：第 5.1 节四项已关闭；W3-003 三项前置（CORE-02、CORE-03、CORE-15）也已关闭。

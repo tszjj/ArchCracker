@@ -27,7 +27,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | 已完成切片 | W1-001…W1-010；W2-002…W2-008（W2-001 Deferred） | W1 PR #10–#15；W2 PR #23/#26/#28/#30/#33/#36、W2-008 PR #38/#39 已合入 `main` |
 | 内核能力 | ZIP、7z、RAR（外部）、RAR5 check 快筛、分卷、SFX、流式字典、掩码/暴力/混合候选源、规则链、空间估算、批量任务编排、编码变体/严格模式、多线程调度、运行控制/检查点 | W1-009 RAR5 快筛 completed（reviewer APPROVE + 法务复核附条件通过）；W1-006/007、W2-002/003/003a/004 reviewer APPROVE；W1-008 三格式 1M×1GB 实测 |
 | CLI | 单任务：字典/掩码/暴力/混合；批量：`acx batch <manifest>` | `--encoding-variants`/`--strict`/`--rar-no-fast-reject`/`--report-stats`；退出码 0/1/2/3/4；`--estimate` 输出时间 + 空间 + 变体倍数；批量退出码停止 4 > 失败 3 > 校验 2 > 有命中 0 > 全未命中 1 |
-| C ABI | `acx.h` ABI v1：句柄/攻击/回调/状态/估算/`path|fd|uri` | W3-001 已实现并复审；Windows `path` 可用，fd/uri 预留 |
+| C ABI | `acx.h` ABI v1：句柄/攻击/回调/状态/估算/`path|fd|uri` + 附加 `acx_inspect` | W3-001 已实现并复审；`acx_inspect` 为 W3-003 前置修复，Windows `path` 可用，fd/uri 预留 |
 | GUI / 前端 | W3-002 Avalonia 骨架已落地（MVVM/NativeBridge/主题/i18n） | Android/HarmonyOS 工程尚未创建；W3-003 三屏未开始 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
 | 测试 | core 165、CLI 含 W2-008 差分 5、FFI 8 单元 + 5 E2E、Avalonia shell 15 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；C/C++/C# smoke 与 Avalonia shell 本地全绿 |

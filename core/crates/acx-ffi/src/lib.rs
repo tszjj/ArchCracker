@@ -52,6 +52,12 @@ pub const ACX_FORMAT_SEVEN_Z: u32 = 1;
 pub const ACX_FORMAT_RAR4: u32 = 2;
 pub const ACX_FORMAT_RAR5: u32 = 3;
 
+pub const ACX_ENCRYPTION_NONE: u32 = 0;
+pub const ACX_ENCRYPTION_ZIPCRYPTO: u32 = 1;
+pub const ACX_ENCRYPTION_AES: u32 = 2;
+pub const ACX_ENCRYPTION_RAR: u32 = 3;
+pub const ACX_NO_SELECTED_ENTRY: u64 = u64::MAX;
+
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
@@ -153,6 +159,16 @@ fn format_code(format: acx_core::archive::ArchiveFormat) -> u32 {
     }
 }
 
+fn encryption_code(encryption: acx_core::archive::Encryption) -> u32 {
+    use acx_core::archive::Encryption;
+    match encryption {
+        Encryption::None => ACX_ENCRYPTION_NONE,
+        Encryption::ZipCrypto => ACX_ENCRYPTION_ZIPCRYPTO,
+        Encryption::Aes => ACX_ENCRYPTION_AES,
+        Encryption::Rar => ACX_ENCRYPTION_RAR,
+    }
+}
+
 fn measured_rate(format: acx_core::archive::ArchiveFormat) -> f64 {
     use acx_core::archive::ArchiveFormat;
     match format {
@@ -163,8 +179,63 @@ fn measured_rate(format: acx_core::archive::ArchiveFormat) -> f64 {
     }
 }
 
+#[repr(C)]
+#[derive(Default)]
+pub struct AcxInspectionInfo {
+    pub struct_size: u32,
+    pub version: u32,
+    pub format: u32,
+    pub encryption: u32,
+    pub entry_count: u64,
+    pub selected_index: u64,
+    pub whole_archive: u8,
+    pub header_encrypted: u8,
+    pub has_verification_target: u8,
+    pub reserved8: u8,
+    pub reserved: [u64; 4],
+}
+
 fn saturating_u128(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn inspect_impl(
+    path: *const c_char,
+    out: *mut AcxInspectionInfo,
+) -> std::result::Result<(), AcxError> {
+    if in_callback() {
+        return Err(reject_reentrant("acx_inspect"));
+    }
+    if path.is_null() || out.is_null() {
+        return Err(AcxError::Attack(
+            "inspect path or output is null".to_string(),
+        ));
+    }
+    // SAFETY: caller supplies a valid output struct for the duration of this call.
+    let native = unsafe { &mut *out };
+    validate_layout(
+        native.struct_size,
+        native.version,
+        size_of::<AcxInspectionInfo>(),
+    )?;
+    let path = PathBuf::from(unsafe { read_cstr(path, "path")? });
+    let info = acx_core::archive::preflight(&path)?;
+    if info.encryption == acx_core::archive::Encryption::None || !info.has_verification_target() {
+        return Err(AcxError::Unsupported(
+            "archive is not encrypted or has no verification target".to_string(),
+        ));
+    }
+
+    native.format = format_code(info.format);
+    native.encryption = encryption_code(info.encryption);
+    native.entry_count = info.entries.len() as u64;
+    native.selected_index = info
+        .selected
+        .map_or(ACX_NO_SELECTED_ENTRY, |index| index as u64);
+    native.whole_archive = u8::from(info.whole_archive);
+    native.header_encrypted = u8::from(info.header_encrypted);
+    native.has_verification_target = u8::from(info.has_verification_target());
+    Ok(())
 }
 
 fn estimate_impl(
@@ -222,6 +293,17 @@ pub extern "C" fn acx_product() -> *const c_char {
 #[no_mangle]
 pub extern "C" fn acx_version() -> *const c_char {
     version_c().as_ptr()
+}
+
+/// Inspect archive metadata without starting a job. Additive v1 endpoint;
+/// does not change `ACX_ABI_VERSION` or any frozen struct layout.
+///
+/// # Safety
+/// `path` must be a valid NUL-terminated UTF-8 string; `info` must be a valid
+/// writable `AcxInspectionInfo` with `struct_size`/`version` initialized.
+#[no_mangle]
+pub unsafe extern "C" fn acx_inspect(path: *const c_char, info: *mut AcxInspectionInfo) -> i32 {
+    guard("acx_inspect", || finish(inspect_impl(path, info)))
 }
 
 /// Stable name for a status code. Unknown codes return `ACX_ERR_UNKNOWN`.

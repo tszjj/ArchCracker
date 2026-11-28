@@ -153,6 +153,28 @@ typedef struct AcxStatusInfo {
     uint64_t reserved[4];
 } AcxStatusInfo;
 
+typedef enum AcxEncryption {
+    ACX_ENCRYPTION_NONE = 0,
+    ACX_ENCRYPTION_ZIPCRYPTO = 1,
+    ACX_ENCRYPTION_AES = 2,
+    ACX_ENCRYPTION_RAR = 3
+} AcxEncryption;
+
+/* Additive v1 metadata only: no password, plaintext entry, or log output. */
+typedef struct AcxInspectionInfo {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t format;        /* AcxFormat */
+    uint32_t encryption;    /* AcxEncryption */
+    uint64_t entry_count;
+    uint64_t selected_index; /* UINT64_MAX when no verification target */
+    uint8_t whole_archive;
+    uint8_t header_encrypted;
+    uint8_t has_verification_target;
+    uint8_t reserved8;
+    uint64_t reserved[4];
+} AcxInspectionInfo;
+
 typedef struct AcxEstimateInfo {
     uint32_t struct_size;
     uint32_t version;
@@ -175,6 +197,8 @@ typedef struct AcxEstimateInfo {
 typedef struct AcxHandle AcxHandle;
 
 ACX_API uint32_t acx_abi_version(void);
+/* Additive v1 endpoint: inspect archive metadata before starting a job. */
+ACX_API AcxStatus acx_inspect(const char* path, AcxInspectionInfo* info);
 ACX_API const char* acx_product(void);
 ACX_API const char* acx_version(void);
 ACX_API const char* acx_status_name(int32_t status);

@@ -776,6 +776,16 @@ fn build_factory(
     }
 }
 
+fn save_checkpoint_or_warn(
+    store: &CheckpointStore,
+    checkpoint: &Checkpoint,
+    warnings: &mut Vec<String>,
+) {
+    if let Err(error) = store.save(checkpoint) {
+        warnings.push(format!("could not save checkpoint: {error}"));
+    }
+}
+
 /// Run one job to completion, a stop request, or a failure.
 ///
 /// `prepass` contains already-confirmed passwords (batch reuse). It is tried
@@ -1019,7 +1029,7 @@ pub fn run_job_with_progress(
                 progress.tried,
                 progress.total,
             );
-            store.save(&checkpoint)?;
+            save_checkpoint_or_warn(&store, &checkpoint, &mut warnings);
             Ok(JobReport {
                 status: JobStatus::Stopped,
                 password: None,
@@ -1045,9 +1055,7 @@ pub fn run_job_with_progress(
                     progress.tried,
                     progress.total,
                 );
-                if let Err(save_error) = store.save(&checkpoint) {
-                    warnings.push(format!("could not save checkpoint: {save_error}"));
-                }
+                save_checkpoint_or_warn(&store, &checkpoint, &mut warnings);
             }
             Ok(JobReport {
                 status: JobStatus::Failed,
@@ -1100,4 +1108,56 @@ fn start_checkpoint_monitor(
             break;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_save_failure_becomes_warning() {
+        let name = format!(
+            "acx-job-checkpoint-fail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        );
+        let preferred = std::env::temp_dir().join(&name);
+        let dir = if std::fs::create_dir_all(&preferred).is_ok() {
+            preferred
+        } else {
+            let mut fallback = std::env::current_exe().unwrap_or_default();
+            fallback.pop();
+            fallback.pop();
+            fallback.push("acx-test-tmp");
+            fallback.push(name);
+            std::fs::create_dir_all(&fallback).expect("create checkpoint failure directory");
+            fallback
+        };
+        let checkpoint_path = dir.join("checkpoint.acx-checkpoint");
+        std::fs::create_dir_all(&checkpoint_path).expect("checkpoint path must be unwritable");
+        let checkpoint = Checkpoint::new(
+            ArchiveFingerprint {
+                format: "zip".to_string(),
+                parts: Vec::new(),
+            },
+            None,
+            AttackFingerprint::dictionary(),
+            1,
+            1,
+            1,
+            2,
+        );
+        let mut warnings = Vec::new();
+        save_checkpoint_or_warn(
+            &CheckpointStore::new(checkpoint_path),
+            &checkpoint,
+            &mut warnings,
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("could not save checkpoint"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

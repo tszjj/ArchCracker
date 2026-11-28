@@ -72,7 +72,7 @@ W3-001 C ABI v1 ──► W3-002 Avalonia 骨架 ──► W3-003 Setup/Run/Resu
 
 ### W3-003：Setup → Run → Result 垂直切片
 
-> 设计目标与审计 P2 影响分析见 [`docs/tasks/W3-003-setup-run-result.md`](tasks/W3-003-setup-run-result.md)。前置条件 CORE-02、CORE-03、CORE-15（`acx_inspect`）关闭前不得验收。
+> 设计目标与审计 P2 影响分析见 [`docs/tasks/W3-003-setup-run-result.md`](tasks/W3-003-setup-run-result.md)。三项前置阻塞 CORE-02、CORE-03、CORE-15 已修复，待独立复审确认。
 
 - Role: frontend-engineer + qa-engineer
 - Branch: `windows-gui`

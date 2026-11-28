@@ -4,10 +4,12 @@
 //! End-to-end C ABI v1 test: create → start → status → callbacks → destroy.
 
 use acx::{
-    acx_abi_version, acx_create, acx_destroy, acx_estimate, acx_last_error, acx_pause, acx_resume,
-    acx_start, acx_status, acx_stop, AcxAttackSpec, AcxCallbacks, AcxConfig, AcxEstimateInfo,
-    AcxHandle, AcxInput, AcxStatusInfo, ACX_ERR_INVALID_ARG, ACX_ERR_IO, ACX_OK, ACX_RUN_FINISHED,
-    ACX_RUN_IDLE, ACX_RUN_PAUSED, ACX_RUN_RUNNING, ACX_RUN_STOPPED,
+    acx_abi_version, acx_create, acx_destroy, acx_estimate, acx_inspect, acx_last_error, acx_pause,
+    acx_resume, acx_start, acx_status, acx_stop, AcxAttackSpec, AcxCallbacks, AcxConfig,
+    AcxEstimateInfo, AcxHandle, AcxInput, AcxInspectionInfo, AcxStatusInfo,
+    ACX_ENCRYPTION_ZIPCRYPTO, ACX_ERR_INVALID_ARG, ACX_ERR_IO, ACX_ERR_UNSUPPORTED, ACX_FORMAT_ZIP,
+    ACX_NO_SELECTED_ENTRY, ACX_OK, ACX_RUN_FINISHED, ACX_RUN_IDLE, ACX_RUN_PAUSED, ACX_RUN_RUNNING,
+    ACX_RUN_STOPPED,
 };
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::io::Write;
@@ -377,6 +379,44 @@ fn wait_for_state(handle: *mut AcxHandle, wanted: u32) -> AcxStatusInfo {
         assert!(Instant::now() < deadline, "state {wanted} not reached");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn inspect_reports_zipcrypto_metadata_and_rejects_plain_zip() {
+    let job = test_job();
+    let mut info = AcxInspectionInfo {
+        struct_size: std::mem::size_of::<AcxInspectionInfo>() as u32,
+        version: 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        unsafe { acx_inspect(job.archive.as_ptr(), &mut info) },
+        ACX_OK
+    );
+    assert_eq!(info.format, ACX_FORMAT_ZIP);
+    assert_eq!(info.encryption, ACX_ENCRYPTION_ZIPCRYPTO);
+    assert_eq!(info.entry_count, 1);
+    assert_ne!(info.selected_index, ACX_NO_SELECTED_ENTRY);
+    assert_eq!(info.selected_index, 0);
+    assert_eq!(info.whole_archive, 0);
+    assert_eq!(info.header_encrypted, 0);
+    assert_eq!(info.has_verification_target, 1);
+
+    let dir = scratch_dir();
+    let plain = dir.join("plain.zip");
+    let file = std::fs::File::create(&plain).expect("create plain zip");
+    let mut writer = zip::ZipWriter::new(file);
+    writer
+        .start_file("hello.txt", zip::write::SimpleFileOptions::default())
+        .expect("start plain entry");
+    writer.write_all(HELLO).expect("write plain entry");
+    writer.finish().expect("finish plain zip");
+    let plain_c = CString::new(plain.to_string_lossy().as_bytes()).expect("plain cstr");
+    assert_eq!(
+        unsafe { acx_inspect(plain_c.as_ptr(), &mut info) },
+        ACX_ERR_UNSUPPORTED
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

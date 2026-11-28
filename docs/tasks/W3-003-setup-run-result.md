@@ -7,6 +7,8 @@
 - 依据：`docs/W3-PLAN.md` §3、`docs/tasks/W3-windows-gui-outline.md`、`docs/AUDIT-backend-W3-2026-11-28.md`
 
 > 本文定义 W3-003 的设计目标与审计 P2 影响分析，不是准出标准。W3 准出仍只按 `docs/W3-PLAN.md` §4 与 `docs/W3-SIGNOFF.md`。
+>
+> 2026-11-28 更新：三项前置阻塞已修复：CORE-02 已修复 ZIP full verify 截断误判，CORE-03 已修复 STOPPED 时 checkpoint 保存失败升级整体错误，CORE-15 已通过新增 `acx_inspect` 提供结构化归档预检；剩余 P2 按本文分类执行。
 
 ## 1. 目标
 
@@ -45,7 +47,7 @@
 typedef struct {
   uint32_t struct_size;
   uint32_t version;
-  uint32_t format;          /* 1 zip, 2 7z, 3 rar4, 4 rar5 */
+  uint32_t format;          /* 0 zip, 1 7z, 2 rar4, 3 rar5 */
   uint32_t encryption;      /* 0 none, 1 zipcrypto, 2 aes, 3 rar */
   uint64_t entry_count;
   uint64_t selected_index;

@@ -69,7 +69,7 @@ frontends/
 |---|---|
 | `dotnet build ... -c Release` | 通过，0 error + 1 条预期 warning（Release 不复制 debug `acx.dll`，W4 需提供哈希 pin 的 release DLL） |
 | `dotnet run --project ...ArchCracker.Desktop.Tests -c Release` | 15 passed / 0 failed |
-| `dotnet run --project ...AcxFfiSmoke -c Release -- core/target/debug/acx.dll` | `ABI=1 hit_uco=True hit_delegate=True error=True` |
+| `dotnet run --project ...AcxFfiSmoke -c Release -- core/target/debug/acx.dll` | `ABI=1 hit_uco=True hit_delegate=True inspect=True error=True chosen=UnmanagedCallersOnly` |
 | GUI launch smoke（`ArchCracker.exe`，加载 `scripts/env.ps1` 设置 `DOTNET_ROOT`） | 进程保持运行，窗口标题 `ArchCracker`；stderr 中 `GAMEPP-IPC-OVERLAY` 注入器噪声与本应用无关 |
 | CI | `ffi-smoke` job 增加 Avalonia build + tests 步骤 |
 

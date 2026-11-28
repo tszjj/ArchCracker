@@ -122,6 +122,29 @@ public unsafe struct AcxStatusInfo
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public unsafe struct AcxInspectionInfo
+{
+    public uint StructSize;
+    public uint Version;
+    public uint Format;
+    public uint Encryption;
+    public ulong EntryCount;
+    public ulong SelectedIndex;
+    public byte WholeArchive;
+    public byte HeaderEncrypted;
+    public byte HasVerificationTarget;
+    public byte Reserved8;
+    public fixed ulong Reserved[4];
+
+    public static AcxInspectionInfo Create() => new()
+    {
+        StructSize = (uint)sizeof(AcxInspectionInfo),
+        Version = 1,
+        SelectedIndex = ulong.MaxValue,
+    };
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct AcxEstimateInfo
 {
     public uint StructSize;

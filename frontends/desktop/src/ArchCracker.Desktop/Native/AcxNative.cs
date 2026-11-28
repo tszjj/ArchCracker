@@ -95,6 +95,9 @@ public static partial class AcxNative
     [LibraryImport(Library, EntryPoint = "acx_version")]
     public static partial IntPtr Version();
 
+    [LibraryImport(Library, EntryPoint = "acx_inspect", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int Inspect(string path, ref AcxInspectionInfo info);
+
     [LibraryImport(Library, EntryPoint = "acx_create")]
     public static partial int Create(in AcxConfig config, out IntPtr handle);
 

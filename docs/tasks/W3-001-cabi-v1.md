@@ -51,7 +51,7 @@
 | `cargo build --workspace --release --locked` | 通过 |
 | `gcc -std=c99 -Wall -Wextra -Werror ... header_smoke.c` | 通过 |
 | `g++ -std=c++17 -Wall -Wextra -Werror ... header_smoke.c` | 通过 |
-| `dotnet run --project frontends/desktop/tests/AcxFfiSmoke ... acx.dll` | 输出 `ABI=1 hit_uco=True hit_delegate=True error=True chosen=UnmanagedCallersOnly`；覆盖命中、进度、日志、终态与错误路径 |
+| `dotnet run --project frontends/desktop/tests/AcxFfiSmoke ... acx.dll` | 输出 `ABI=1 hit_uco=True hit_delegate=True inspect=True error=True chosen=UnmanagedCallersOnly`；覆盖命中、进度、日志、终态、归档预检与错误路径 |
 
 ## 影响范围与风险
 

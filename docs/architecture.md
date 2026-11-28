@@ -139,6 +139,8 @@ W1-003 已实现 `engines::external` + `archive::rar`：当前按 `ACX_UNRAR` �
 typedef struct AcxHandle AcxHandle;
 
 uint32_t    acx_abi_version(void);
+/* Additive v1 endpoint; no ABI version bump or frozen-struct layout change. */
+AcxStatus   acx_inspect(const char* path, AcxInspectionInfo* info);
 const char* acx_product(void);
 const char* acx_version(void);
 const char* acx_status_name(int32_t status);

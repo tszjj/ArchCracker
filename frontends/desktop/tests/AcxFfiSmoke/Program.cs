@@ -15,6 +15,9 @@ internal static partial class Native
     [LibraryImport(Library, EntryPoint = "acx_abi_version")]
     internal static partial uint AbiVersion();
 
+    [LibraryImport(Library, EntryPoint = "acx_inspect", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int Inspect(string path, ref AcxInspectionInfo info);
+
     [LibraryImport(Library, EntryPoint = "acx_create")]
     internal static partial int Create(in AcxConfig config, out IntPtr handle);
 
@@ -99,11 +102,12 @@ internal static class Program
 
             var unmanaged = RunHit(root, archive, dictionary, CallbackModel.UnmanagedCallersOnly);
             var delegateModel = RunHit(root, archive, dictionary, CallbackModel.Delegate);
+            var inspectPath = RunInspect(archive);
             var errorPath = RunMissingArchiveError(root);
             Console.WriteLine(
-                $"ABI=1 hit_uco={unmanaged} hit_delegate={delegateModel} error={errorPath} " +
-                "chosen=UnmanagedCallersOnly");
-            return unmanaged && delegateModel && errorPath ? 0 : 1;
+                $"ABI=1 hit_uco={unmanaged} hit_delegate={delegateModel} inspect={inspectPath} " +
+                $"error={errorPath} chosen=UnmanagedCallersOnly");
+            return unmanaged && delegateModel && inspectPath && errorPath ? 0 : 1;
         }
         finally
         {
@@ -225,6 +229,18 @@ internal static class Program
             Marshal.FreeCoTaskMem(dictionaryPtr);
             Marshal.FreeCoTaskMem(checkpointPtr);
         }
+    }
+
+    private static unsafe bool RunInspect(string archive)
+    {
+        var info = AcxInspectionInfo.Create();
+        var status = Native.Inspect(archive, ref info);
+        return status == 0
+            && info.Format == 0
+            && info.Encryption == 1
+            && info.EntryCount == 1
+            && info.SelectedIndex != ulong.MaxValue
+            && info.HasVerificationTarget == 1;
     }
 
     private static unsafe bool RunMissingArchiveError(string root)
@@ -424,6 +440,7 @@ internal static class Program
             Expect(sizeof(AcxCallbacks) == 80, "AcxCallbacks");
             Expect(sizeof(AcxStatusInfo) == 88, "AcxStatusInfo");
             Expect(sizeof(AcxEstimateInfo) == 112, "AcxEstimateInfo");
+            Expect(sizeof(AcxInspectionInfo) == 72, "AcxInspectionInfo");
         }
     }
 
