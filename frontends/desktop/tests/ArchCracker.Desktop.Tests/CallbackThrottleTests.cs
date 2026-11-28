@@ -50,8 +50,39 @@ public sealed class CallbackThrottleTests
         Assert.Equal(0, Assert.Single(finished));
     }
 
+    [Fact]
+    public void ResetDropsCallbacksAlreadyQueuedFromPreviousJob()
+    {
+        var dispatcher = new QueuedUiDispatcher();
+        var router = new NativeCallbackRouter(dispatcher);
+        var logs = new List<string>();
+        var finished = new List<int>();
+        router.Log += logs.Add;
+        router.Finished += finished.Add;
+
+        router.OnLog(1, "old job");
+        router.OnFinished(0);
+        router.Reset();
+        dispatcher.Drain();
+
+        Assert.Empty(logs);
+        Assert.Empty(finished);
+    }
+
     private sealed class ImmediateUiDispatcher : IUiDispatcher
     {
         public void Post(Action action) => action();
+    }
+
+    private sealed class QueuedUiDispatcher : IUiDispatcher
+    {
+        private readonly Queue<Action> _queue = new();
+
+        public void Post(Action action) => _queue.Enqueue(action);
+
+        public void Drain()
+        {
+            while (_queue.Count > 0) _queue.Dequeue()();
+        }
     }
 }

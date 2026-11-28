@@ -122,10 +122,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             var next = Math.Clamp(value, 0, 2);
             if (_stageIndex == next) return;
+            // Returning to Setup from a terminal result is equivalent to
+            // pressing Reset. Without this, the old handle/outcome keep
+            // CanStart false even though the user is back on the Setup form.
+            // Reset clears _terminalLocked before assigning StageIndex = 0,
+            // which is what terminates this re-entrant setter path.
+            if (next == 0 && _stageIndex != 0 && _terminalLocked)
+            {
+                Reset();
+                return;
+            }
             _stageIndex = next;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsRunStage));
             RaisePropertyChanged(nameof(IsResultStage));
+            RaisePropertyChanged(nameof(CanOpenSetup));
         }
     }
 
@@ -173,6 +184,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IReadOnlyList<int> ThreadOptions => Enumerable.Range(1, MaxThreads).ToArray();
     public bool IsRunStage => _stageIndex == 1;
     public bool IsResultStage => _stageIndex == 2;
+    public bool CanOpenSetup => _handle is null || _terminalLocked;
     public double ProgressPercent => _progress is null || _progress.Total == 0
         ? 0
         : Math.Clamp(100.0 * _progress.Tried / _progress.Total, 0, 100);
@@ -407,6 +419,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Reset()
     {
+        // Drop queued callbacks from the previous job before clearing the
+        // terminal latch; otherwise a late on_finished could re-enter Result.
+        _callbacks.Reset();
         CleanupJob();
         _outcome = JobOutcomeKind.Pending;
         _terminalLocked = false;
@@ -578,7 +593,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                      nameof(AbiText), nameof(LibraryPathText), nameof(KernelStatusText), nameof(ErrorText),
                      nameof(HasError), nameof(IntegrityText), nameof(SidecarText), nameof(StageIndex),
                      nameof(ArchivePath), nameof(DictionaryPath), nameof(Threads), nameof(MaxThreads),
-                     nameof(ThreadOptions), nameof(IsRunStage), nameof(IsResultStage),
+                     nameof(ThreadOptions), nameof(IsRunStage), nameof(IsResultStage), nameof(CanOpenSetup),
                      nameof(ArchiveInfoText), nameof(SetupErrorText), nameof(HasSetupError),
                      nameof(RunStateText), nameof(ProgressText), nameof(ProgressPercent), nameof(ResultText), nameof(PasswordText),
                      nameof(PasswordHex), nameof(HasPassword), nameof(Outcome), nameof(CanStart),

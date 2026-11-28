@@ -121,6 +121,45 @@ public sealed class WizardViewModelTests
     }
 
     [Fact]
+    public void SelectingSetupAfterResultResetsAndAllowsAnotherRun()
+    {
+        var fixture = new TestFixture();
+        var vm = fixture.CreateViewModel();
+        PrepareStarted(vm, fixture);
+        fixture.Kernel.Status = new JobStatusSnapshot(
+            AcxRunStateKind.Finished, 2, 2, 10.0, 0, AcxStatusKind.Ok);
+        fixture.Router.OnHit("ok"u8.ToArray());
+        fixture.Router.OnFinished(0);
+
+        vm.StageIndex = 0;
+
+        Assert.Equal(0, vm.StageIndex);
+        Assert.Equal(JobOutcomeKind.Pending, vm.Outcome);
+        Assert.False(vm.HasPassword);
+        Assert.True(vm.CanStart);
+        Assert.Equal(1, fixture.Kernel.StartCalls);
+
+        ((RelayCommand)vm.StartCommand).Execute(null);
+        Assert.Equal(2, fixture.Kernel.StartCalls);
+        Assert.Equal(1, vm.StageIndex);
+    }
+
+    [Fact]
+    public void SetupTabIsDisabledDuringRunAndEnabledAfterTerminal()
+    {
+        var fixture = new TestFixture();
+        var vm = fixture.CreateViewModel();
+        PrepareStarted(vm, fixture);
+        Assert.False(vm.CanOpenSetup);
+
+        fixture.Kernel.Status = new JobStatusSnapshot(
+            AcxRunStateKind.Stopped, 1, 2, 10.0, 0, AcxStatusKind.Ok);
+        fixture.Router.OnFinished(0);
+
+        Assert.True(vm.CanOpenSetup);
+    }
+
+    [Fact]
     public void ResetClearsResultAndReturnsToSetup()
     {
         var fixture = new TestFixture();

@@ -10,7 +10,7 @@
 >
 > 2026-11-28 更新：三项前置阻塞已修复：CORE-02 已修复 ZIP full verify 截断误判，CORE-03 已修复 STOPPED 时 checkpoint 保存失败升级整体错误，CORE-15 已通过新增 `acx_inspect` 提供结构化归档预检；剩余 P2 按本文分类执行。
 >
-> 远端验收：PR #40 run `46122505245` **7/7 全绿**，包含 `ffi smoke + Avalonia shell (C/C++/C#/.NET)`。本地与远端证据一致，可进入 W3-004。
+> 远端验收：PR #40 run `46122505245` **7/7 全绿**，包含 `ffi smoke + Avalonia shell (C/C++/C#/.NET)`。该 run 覆盖连续运行 bug 修复前的版本；修复后新增 3 个回归测试，本地 35 tests 全绿，远端需重跑确认。
 
 ## 1. 目标
 
@@ -228,7 +228,7 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 | M1 Setup | 完成 | 归档选择/拖放、`acx_inspect` 预检、结构化错误、字典与线程配置、开始按钮门禁 |
 | M2 Run/控制 | 完成 | 后台启动、10 Hz 进度、暂停/继续/停止、SafeHandle 生命周期、终态补发进度 |
 | M3 Result | 完成 | 命中/未找到/停止/失败四态、密码字节 UTF-8 显示与 hex 兜底、复制、打开目录、重新开始 |
-| M4 差分与验证 | 完成（本地） | 13 个 Wizard VM 测试 + 3 个真实 native GUI↔CLI 差分（found / not found / unencrypted）；32 个桌面测试全绿 |
+| M4 差分与验证 | 完成（本地） | 15 个 Wizard VM 测试 + 3 个真实 native GUI↔CLI 差分（found / not found / unencrypted）；35 个桌面测试全绿 |
 
 ## 7.2 实现交付物
 
@@ -239,7 +239,13 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 - `frontends/shared/dotnet/{AcxCodes,ZipCryptoFixture}.cs` 与中英文词条；
 - CI `ffi-smoke` job 增加 `acx-cli` 构建，支撑 GUI↔CLI 差分。
 
-## 7.3 本地验证结果
+## 7.3 连续运行 bug 修复
+
+- 问题：结果页点击 Setup 标签只修改 `StageIndex`，没有清理上个 job 的 handle/outcome，`CanStart` 一直为 false；
+- 修复：从终态返回 Setup 时自动执行与“重新开始”相同的 Reset；运行期间禁用 Setup 标签；Reset 递增 callback generation，丢弃上个 job 已排队但尚未投递的回调；
+- 回归：切回 Setup 后可再次 Start，Setup tab 运行期禁用/终态启用，旧回调被丢弃；桌面测试由 32 增至 35。
+
+## 7.4 本地验证结果
 
 | 命令 | 结果 |
 |---|---|
@@ -250,7 +256,7 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 | `cargo deny check licenses bans sources` | 通过 |
 | `cargo build --workspace --release --locked` | 通过 |
 | C99/C++17 header smoke | 通过 |
-| `ArchCracker.Desktop.Tests` | 32 passed / 0 failed / 0 skipped |
+| `ArchCracker.Desktop.Tests` | 35 passed / 0 failed / 0 skipped（含连续运行 bug 的 3 个回归测试） |
 | `AcxFfiSmoke` | `ABI=1 hit_uco=True hit_delegate=True inspect=True error=True chosen=UnmanagedCallersOnly` |
 
 ## 8. 回滚方案
@@ -267,5 +273,5 @@ STATUS: accepted（本地与 PR #40 CI 7/7 通过；reviewer/architect/release �
 BRANCH: windows-gui
 ROLE: frontend-engineer + core-engineer + qa-engineer
 NEXT: W3-004 攻击模式扩展（掩码/暴力/混合、encoding、strict、resume）
-RISKS: W3-003 新增 CI job 改动需远端重跑；Release 不复制 debug acx.dll、W4 需提供 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
+RISKS: 连续运行 bug 修复后远端 CI 需重跑；本机 GUI 测试使用 core/target/debug/acx.dll、无 hash pin，正式包需 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
 ```
