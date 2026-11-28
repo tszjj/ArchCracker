@@ -168,7 +168,8 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
 | [W3 阶段目标划分](W3-PLAN.md) | W3-001…W3-006 切片、准出标准、角色与 W4 边界 | 计划稿（2026-11-28）；W3-001 已完成；分支 `windows-gui` |
 | [W3-001 C ABI v1](tasks/W3-001-cabi-v1.md) | `acx.h` v1、FFI 薄层、回调/状态/错误、C/C# smoke | 本地验证完成（2026-11-28） |
-| [W3-002 Avalonia 工程与 NativeBridge](tasks/W3-002-avalonia-shell.md) | .NET 10/Avalonia 12、MVVM、NativeBridge、主题/i18n、9 个 shell 测试 | 本地验证完成（2026-11-28） |
+| [W3-002 Avalonia 工程与 NativeBridge](tasks/W3-002-avalonia-shell.md) | .NET 10/Avalonia 12、MVVM、NativeBridge、主题/i18n、15 个 shell 测试 | 本地与 CI 验证完成（2026-11-28） |
+| [W3-003 Setup/Run/Result](tasks/W3-003-setup-run-result.md) | ZIP 字典垂直切片、运行控制、审计 P2 影响分析 | 设计目标定稿（2026-11-28），未实现 |
 | [CL-W3-001](CL-W3-001.md) | W3-001 变更说明、影响范围、风险与回滚方案 | 已创建，随评审修复更新 |
 | [W3 Windows GUI 设计大纲](tasks/W3-windows-gui-outline.md) | Avalonia 12 架构、模块、C ABI v1、交互规范、优先级 | 设计大纲（2026-11-28）；分支 `windows-gui` |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
@@ -189,7 +190,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
 | **W2 引擎/攻击** | **✅ 已签核（2026-11-28）** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量、W2-006 编码/严格模式、W2-007 CPU 快筛、W2-008 语料/差分/基准；CI 6/6 | 未验证项见 [W2-SIGNOFF](W2-SIGNOFF.md)；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
-| **W3 桌面 GUI** | **开发中** | W3-001 C ABI v1、W3-002 Avalonia 骨架已完成；W3-003 未开始 | Setup/Run/Result、进度/暂停、报告导出；不自动解压 |
+| **W3 桌面 GUI** | **开发中** | W3-001 C ABI v1、W3-002 Avalonia 骨架已完成；W3-003 设计目标定稿、待实现 | Setup/Run/Result、进度/暂停、报告导出；不自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
 | **D1–D3 其他平台** | **Deferred** | 接口保留 | Linux/macOS/Android/HarmonyOS 前端与打包 |

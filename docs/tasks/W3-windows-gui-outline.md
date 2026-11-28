@@ -70,11 +70,11 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 
 ## 4. C ABI v1 接口约定（W3 前置）
 
-当前 `core/crates/acx-ffi/include/acx.h` 是 ABI v0，仅 `acx_product`/`acx_version`/`acx_status_name`；攻击 API 只有草案（`docs/architecture.md` §5）。W3 必须先完成并冻结 v1：
+`core/crates/acx-ffi/include/acx.h` 已冻结 ABI v1：句柄/攻击/回调/状态/估算函数与完整 `AcxInput{path|fd|uri}` 均已实现；`docs/W3-PLAN.md` 与 `docs/CL-W3-001.md` 记录实现和评审。W3-003 需按当前 v1 对接，不得引用旧的 v0 草案：
 
 - 结构体带 `struct_size`/`version`；未知字段忽略；破坏性布局变更才提升 ABI 版本。
 - 句柄不透明，`create`/`destroy` 成对；一个 handle 同时只允许一个 `start`；`pause`/`resume`/`stop` 可跨线程调用。
-- 回调：`on_progress`、`on_hit`、`on_log`；`stop` 返回后不再触发回调。
+- 回调：`on_progress`、`on_hit`、`on_log`、`on_finished`；`stop` 返回后不再启动 progress/hit/log，`on_finished` 作为终态通知仍触发一次。
 - **C ABI v1 必须冻结完整 `AcxInput{path|fd|uri}` 抽象**（项目支持多平台）：Windows 桌面主用 `path`，Android 走 `fd`，HarmonyOS 走 `uri`；v1 即定义判别式、字段、生命周期与错误语义，避免后续平台接入时破坏 ABI。
 - 字符串：v1 路径/URI 用 UTF-8 NUL 结尾；二进制密码用 `ptr + len`；fd 用平台原生整数句柄；C# 侧不做隐式截断。
 - Rust panic 必须 `catch_unwind` 转为 `ACX_ERR_PANIC`，不得跨 FFI。
@@ -88,8 +88,8 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 ### 5.1 NativeBridge
 
 - 用 `LibraryImport`/`DllImport` 加载程序目录 `acx.dll`；启动时校验 `acx_version()` 与 ABI v1 兼容，不满足则进入不可用状态并提示。
-- 回调模型（`UnmanagedCallersOnly` 或 `Marshal.GetFunctionPointerForDelegate`）在 W3-001/002 smoke 中按 .NET 10 生命周期、稳定性与性能实测选择，不在设计阶段预先锁定。
-- 持有选定回调模型的生命周期；封送 `AcxAttackSpec` 与回调；把 native `uint8_t*` 密码复制为 `byte[]` 后交 ViewModel。
+- 回调模型已在 W3-001/002 smoke 中实测：生产路径使用 `UnmanagedCallersOnly`，`Marshal.GetFunctionPointerForDelegate` 仅作为 smoke 对照。
+- NativeBridge 持有回调生命周期；封送 `AcxAttackSpec` 与回调；把 native `uint8_t*` 密码复制为 `byte[]` 后交 ViewModel。
 - 所有 native 调用返回统一 `Result<T, ErrorInfo>`；`AcxStatus` → `ErrorInfo` 映射集中在 `frontends/shared/`。
 - 回调线程与 UI 线程解耦；日志默认脱敏，密码只在结果对象中存在。
 
@@ -102,7 +102,7 @@ GUI 不调用 `acx.exe` 文本输出作为主路径；CLI 继续独立存在，�
 
 ### 5.3 运行界面（Run）
 
-- 显示进度条、已试/总数、p/s、ETA、快筛/完整验证/外部调用计数；当前候选默认不显示，开启"显示候选"也需脱敏提示。
+- 显示进度条、已试/总数、p/s、ETA；快筛/完整验证/外部调用计数待 W3-005 的结构化统计 ABI 通道后接入。当前候选默认不显示。
 - 暂停/继续/停止/强制停止；停止须给出明确语义（是否写断点）；取消请求观察 ≤200 ms，外部进程 ≤2 s kill 继承 W1 指标。
 - 日志折叠面板：只记录阶段与错误分类，不记录明文密码。
 - 运行中禁止模态弹窗；错误以横幅/状态栏呈现。
