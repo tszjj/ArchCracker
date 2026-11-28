@@ -72,7 +72,7 @@ for name, stage, fill, border in os_list:
 # frontends
 band(215, 205, "① 前端层", "Frontends · 只做交互与平台胶水")
 fe = [
-    (55, 270, 480, 130, "Desktop · Avalonia 12 (.NET 10)", ["Windows / Linux / macOS", "MVVM · 拖放 · 进度/暂停 · 自动解压"], (234,242,254), (143,180,232)),
+    (55, 270, 480, 130, "Desktop · Avalonia 12 (.NET 10)", ["Windows / Linux / macOS", "MVVM · 拖放 · 进度/暂停 · 报告导出"], (234,242,254), (143,180,232)),
     (555, 270, 370, 130, "Android · Compose", ["Kotlin · SAF/fd · 前台服务", "JNI 薄层 · 按 ABI 打包"], (234,247,239), (134,199,155)),
     (945, 270, 370, 130, "HarmonyOS · ArkUI", ["ArkTS · Picker · 前台/断点", "NAPI 薄层 · HAP 签名"], (244,237,251), (177,151,214)),
     (1335, 270, 400, 130, "CLI · acx", ["Rust · 桌面全平台", "脚本 / CI / 无 UI · 同一内核"], (240,242,245), (174,182,194)),

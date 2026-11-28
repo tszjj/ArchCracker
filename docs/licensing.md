@@ -34,7 +34,8 @@
 | `windows-sys`（仅 Windows） | OEM 代码页转换 | MIT OR Apache-2.0 | 是 | 源码依赖 |
 | `UnRAR.exe`（未修改） | RAR4/RAR5 密码/完整性测试 oracle | UnRAR License（非 OSI） | 是（独立组件，不改变主项目许可） | Full 安装包随包，仅进程 |
 | hashcat（固定版本） | GPU 字典后端 | MIT + 第三方声明 | 是 | Full 安装包随包，仅进程 |
-| Avalonia | 桌面 UI | MIT | 是 | NuGet |
+| Avalonia 12 / Avalonia.Desktop / Avalonia.Themes.Fluent | 桌面 UI | MIT | 是 | NuGet |
+| xunit.v3 | 前端测试（仅开发/测试） | Apache-2.0 | 是 | NuGet，不随包 |
 | .NET Runtime | 桌面运行时 | MIT | 是 | 自包含发布 |
 | `unrar-rs` | RAR 解码（仅本地实验） | Apache-2.0 + unRAR restriction | 受限 | 不是依赖、默认不启用、不分发 |
 | 7-Zip / p7zip（含 RAR） | 差分 oracle | LGPL-2.1+ + unRAR restriction | RAR 部分受限 | 仅本机/CI，不随包 |

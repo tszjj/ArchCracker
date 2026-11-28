@@ -78,7 +78,7 @@ jobs:
             core/crates/acx-ffi/include/acx.h
 
   ffi-smoke:
-    name: ffi smoke (C/C++/C#)
+    name: ffi smoke + Avalonia shell (C/C++/C#/.NET)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +105,12 @@ jobs:
 
       - name: C# P/Invoke smoke
         run: dotnet run --project frontends/desktop/tests/AcxFfiSmoke/AcxFfiSmoke.csproj -c Release -- core/target/debug/acx.dll
+
+      - name: Avalonia shell build
+        run: dotnet build frontends/desktop/src/ArchCracker.Desktop/ArchCracker.Desktop.csproj -c Release
+
+      - name: Avalonia shell tests
+        run: dotnet run --project frontends/desktop/tests/ArchCracker.Desktop.Tests/ArchCracker.Desktop.Tests.csproj -c Release
 
   windows-gnu:
     name: rust (windows-latest, gnu)

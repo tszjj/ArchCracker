@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ArchCracker</AssemblyName>
+    <RootNamespace>ArchCracker.Desktop</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.2.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.2.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../shared/dotnet/AcxBindings.cs" Link="Native/AcxBindings.cs" />
+    <Compile Include="../../../shared/dotnet/AcxStatusMap.cs" Link="Shared/AcxStatusMap.cs" />
+    <Content Include="../../../shared/i18n/*.json" Link="i18n/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- W3-002 local convenience only. W4 packaging must use an explicit,
+       configuration-matched, hash-pinned native library source. -->
+  <Target Name="CopyDebugAcxDllForDesktop" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Debug' And Exists('$(MSBuildProjectDirectory)/../../../core/target/debug/acx.dll')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../../../core/target/debug/acx.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="WarnReleaseNativeLibrarySource" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release'">
+    <Warning Text="Release builds do not copy core/target/debug/acx.dll. W4 must provide a release, hash-pinned acx.dll beside ArchCracker.exe." />
+  </Target>
+</Project>
