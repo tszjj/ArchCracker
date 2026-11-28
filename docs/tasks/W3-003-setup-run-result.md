@@ -9,6 +9,8 @@
 > 本文定义 W3-003 的设计目标与审计 P2 影响分析，不是准出标准。W3 准出仍只按 `docs/W3-PLAN.md` §4 与 `docs/W3-SIGNOFF.md`。
 >
 > 2026-11-28 更新：三项前置阻塞已修复：CORE-02 已修复 ZIP full verify 截断误判，CORE-03 已修复 STOPPED 时 checkpoint 保存失败升级整体错误，CORE-15 已通过新增 `acx_inspect` 提供结构化归档预检；剩余 P2 按本文分类执行。
+>
+> 远端验收：PR #40 run `46122505245` **7/7 全绿**，包含 `ffi smoke + Avalonia shell (C/C++/C#/.NET)`。本地与远端证据一致，可进入 W3-004。
 
 ## 1. 目标
 
@@ -261,9 +263,9 @@ W3-003 只显示 `tried/total/rate/ETA`。`fast_rejected/full_attempted/external
 ## 9. 交接格式
 
 ```text
-STATUS: implemented（本地验证通过，待 reviewer/architect/release 复审）
+STATUS: accepted（本地与 PR #40 CI 7/7 通过；reviewer/architect/release 复审 APPROVE）
 BRANCH: windows-gui
 ROLE: frontend-engineer + core-engineer + qa-engineer
-NEXT: 独立复审 → 提交并推送 PR #40 → W3-004 攻击模式扩展
+NEXT: W3-004 攻击模式扩展（掩码/暴力/混合、encoding、strict、resume）
 RISKS: W3-003 新增 CI job 改动需远端重跑；Release 不复制 debug acx.dll、W4 需提供 release/hash-pinned DLL；统计与 encoding 延后到 W3-004/005；GUI 启动 smoke 仅本地证据
 ```
