@@ -8,4 +8,8 @@
     <AssemblyName>AcxFfiSmoke</AssemblyName>
     <RootNamespace>ArchCracker.Desktop.FfiSmoke</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../shared/dotnet/AcxBindings.cs" Link="Native/AcxBindings.cs" />
+  </ItemGroup>
 </Project>
