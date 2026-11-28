@@ -77,6 +77,41 @@ jobs:
             core/target/release/libacx.dylib
             core/crates/acx-ffi/include/acx.h
 
+  ffi-smoke:
+    name: ffi smoke + Avalonia shell (C/C++/C#/.NET)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build acx-ffi and acx-cli
+        working-directory: core
+        run: cargo build -p acx-ffi -p acx-cli --locked
+
+      - name: C99 header smoke
+        working-directory: core
+        run: gcc -std=c99 -Wall -Wextra -Werror -I crates/acx-ffi/include -c crates/acx-ffi/tests/header_smoke.c -o header_smoke.o
+
+      - name: C++17 header smoke
+        working-directory: core
+        run: c++ -std=c++17 -Wall -Wextra -Werror -I crates/acx-ffi/include -c crates/acx-ffi/tests/header_smoke.c -o header_smoke_cpp.o
+
+      - name: C# P/Invoke smoke
+        run: dotnet run --project frontends/desktop/tests/AcxFfiSmoke/AcxFfiSmoke.csproj -c Release -- core/target/debug/acx.dll
+
+      - name: Avalonia shell build
+        run: dotnet build frontends/desktop/src/ArchCracker.Desktop/ArchCracker.Desktop.csproj -c Release
+
+      - name: Avalonia shell tests
+        run: dotnet run --project frontends/desktop/tests/ArchCracker.Desktop.Tests/ArchCracker.Desktop.Tests.csproj -c Release
+
   windows-gnu:
     name: rust (windows-latest, gnu)
     runs-on: windows-latest

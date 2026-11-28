@@ -27,6 +27,7 @@ $env:Path = ($clean -join ';')
 # Do not override an existing custom toolchain location.
 if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $env:USERPROFILE '.rustup' }
 if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $env:USERPROFILE '.cargo' }
+if (-not $env:DOTNET_ROOT -and (Test-Path $dotnetHome)) { $env:DOTNET_ROOT = $dotnetHome }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 

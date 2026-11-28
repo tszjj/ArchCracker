@@ -46,7 +46,7 @@
 
 1. Rust 内核 + CLI：ZIP/7z/RAR（外部）+ 字典 + 多线程 + 运行控制/断点 + 基准。
 2. W1 已签核：W1-001…W1-010 完成，PR #10–#15 已合并；W2 从 CPU mask/brute 开始（GPU Deferred）。
-3. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、自动解压。
+3. Avalonia 12 桌面：拖放、模式、进度、暂停/停止、结果、报告导出；不自动解压。
 4. Windows 交付：单一 Full 安装包、随包 UnRAR/hashcat、代码签名、崩溃转储、zh/en。
 5. 测试/基准：1M 字典、1GB 归档、缺卷/损坏/未加密分类、CPU/GPU 对照（GPU 仅 W2 退出后重新评估）。
 
@@ -74,8 +74,9 @@ Linux/macOS/Android/HarmonyOS 的架构与契约在此阶段保留，但**不排
 │  ├─ crates/acx-ffi/    # C ABI（cdylib/staticlib）+ acx.h
 │  ├─ crates/acx-jni/    # [计划] Android JNI 薄层
 │  └─ crates/acx-napi/   # [计划] HarmonyOS NAPI 薄层
-├─ frontends/            # 目前只有 README 占位
-│  ├─ desktop/           # [计划] Avalonia 12
+├─ frontends/            # W3 Windows desktop 骨架已落地
+│  ├─ desktop/           # src/ArchCracker.Desktop（Avalonia 12）+ tests/
+│  ├─ shared/            # dotnet ABI/状态映射 + i18n
 │  ├─ android/           # [计划] Kotlin + Compose
 │  └─ harmony/           # [计划] ArkTS/ArkUI
 ├─ docs/

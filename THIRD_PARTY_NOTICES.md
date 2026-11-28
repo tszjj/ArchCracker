@@ -30,12 +30,18 @@
 
 > Full 版只有一个安装包，不分层。UnRAR/hashcat 的版本、来源、SHA-256 记录在 `third_party/manifest.json`；构建/发布按清单获取，运行时不在线更新。hashcat 分发包内的 OpenCL loader/压缩库按其各自许可声明。
 
-## 计划引入（需在 PR 中更新）
+## 已引入的前端依赖
+
+| 组件 | 版本 | 用途 | 许可 | 分发方式 |
+|---|---|---|---|---|
+| Avalonia / Avalonia.Desktop / Avalonia.Themes.Fluent | 12.2.0 | Windows 桌面 UI | MIT | NuGet，随 W4 发布包落地；当前骨架不生成发布包 |
+| .NET Runtime | 10.0.x | 桌面运行时 | MIT | W4 自包含发布 |
+| xunit.v3 | 4.0.3 | 前端测试 runner | Apache-2.0 | 仅测试项目，不随包 |
+
+## 计划引入
 
 | 组件 | 用途 | 许可 | 分发方式 |
 |---|---|---|---|
-| Avalonia | 桌面 UI | MIT | NuGet |
-| .NET Runtime | 桌面运行时 | MIT | 自包含发布 |
 | Jetpack Compose | Android UI | Apache-2.0 | Gradle |
 | HarmonyOS ArkUI/SDK | HarmonyOS UI | 华为条款 | DevEco |
 

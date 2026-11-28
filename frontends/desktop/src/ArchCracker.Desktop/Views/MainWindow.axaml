@@ -1,0 +1,118 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ArchCracker.Desktop.ViewModels"
+        x:Class="ArchCracker.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="1000" Height="700" MinWidth="860" MinHeight="620"
+        DragDrop.AllowDrop="True"
+        Title="ArchCracker">
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24" RowSpacing="16">
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="{Binding TitleText}" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding SubtitleText}" Opacity="0.7" />
+            <TextBlock Text="{Binding KernelStatusText}" Foreground="{DynamicResource SystemControlForegroundAccentBrush}" />
+        </StackPanel>
+
+        <TabControl Grid.Row="1" SelectedIndex="{Binding StageIndex}">
+            <TabItem Header="{Binding SetupHeader}" IsEnabled="{Binding CanOpenSetup}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="14" Margin="8">
+                        <TextBlock Text="ZIP archive and dictionary" FontSize="17" FontWeight="SemiBold" />
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Text="{Binding ArchiveLabel}" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ArchivePath}" PlaceholderText="Select or drop a ZIP archive" />
+                            <Button Grid.Row="0" Grid.Column="2" Content="{Binding BrowseLabel}" Command="{Binding BrowseArchiveCommand}" />
+
+                            <TextBlock Grid.Row="1" Text="{Binding DictionaryLabel}" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding DictionaryPath}" PlaceholderText="Select a dictionary file" />
+                            <Button Grid.Row="1" Grid.Column="2" Content="{Binding BrowseLabel}" Command="{Binding BrowseDictionaryCommand}" />
+
+                            <TextBlock Grid.Row="2" Text="{Binding ThreadsLabel}" VerticalAlignment="Center" />
+                            <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ThreadOptions}" SelectedItem="{Binding Threads}" />
+                            <Button Grid.Row="2" Grid.Column="2" Content="{Binding InspectLabel}" Command="{Binding InspectArchiveCommand}" />
+                        </Grid>
+
+                        <TextBlock Text="{Binding ArchiveInfoText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SetupErrorText}" Foreground="{DynamicResource SystemControlErrorTextForegroundBrush}"
+                                   IsVisible="{Binding HasSetupError}" TextWrapping="Wrap" />
+
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button Content="{Binding StartLabel}" Command="{Binding StartCommand}" Classes="accent" />
+                            <Button Content="{Binding RefreshLabel}" Command="{Binding RefreshCommand}" />
+                            <Button Content="{Binding ThemeLabel}" Command="{Binding ToggleThemeCommand}" />
+                            <Button Content="{Binding LanguageLabel}" Command="{Binding ToggleLanguageCommand}" />
+                        </StackPanel>
+
+                        <Border Padding="12" CornerRadius="8" Background="{DynamicResource ThemeControlLowBrush}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding KernelStatusText}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ProductText}" />
+                                <TextBlock Text="{Binding VersionText}" />
+                                <TextBlock Text="{Binding IntegrityText}" />
+                                <TextBlock Text="{Binding SidecarText}" />
+                                <TextBlock Text="{Binding LibraryPathText}" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="{Binding RunHeader}" IsEnabled="{Binding IsRunStage}">
+                <Grid RowDefinitions="Auto,Auto,*" ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="14" Margin="8">
+                    <StackPanel Grid.ColumnSpan="2" Spacing="8">
+                        <TextBlock Text="{Binding RunStateText}" FontSize="18" FontWeight="SemiBold" />
+                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding ProgressPercent}" Height="10" />
+                        <TextBlock Text="{Binding ProgressText}" />
+                    </StackPanel>
+
+                    <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal">
+                        <Button Content="{Binding PauseLabel}" Command="{Binding PauseCommand}" Margin="0,0,8,8" />
+                        <Button Content="{Binding ResumeLabel}" Command="{Binding ResumeCommand}" Margin="0,0,8,8" />
+                        <Button Content="{Binding StopLabel}" Command="{Binding StopCommand}" Margin="0,0,8,8" />
+                    </WrapPanel>
+
+                    <Border Grid.Row="2" Grid.Column="0" Padding="12" CornerRadius="8" Background="{DynamicResource ThemeControlLowBrush}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding LogLabel}" FontWeight="SemiBold" Margin="0,0,0,8" />
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Log}" />
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Grid.Column="1" Padding="12" CornerRadius="8" Background="{DynamicResource ThemeControlLowBrush}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Run information" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ArchivePath}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DictionaryPath}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ArchiveInfoText}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="{Binding ResultHeader}" IsEnabled="{Binding IsResultStage}">
+                <StackPanel Spacing="14" Margin="8">
+                    <TextBlock Text="{Binding ResultText}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding PasswordText}" FontSize="24" FontWeight="SemiBold"
+                               IsVisible="{Binding HasPassword}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding PasswordHex}" IsVisible="{Binding HasPassword}" TextWrapping="Wrap" Opacity="0.7" />
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="{Binding CopyPasswordLabel}" Command="{Binding CopyPasswordCommand}" Margin="0,0,8,8" />
+                        <Button Content="{Binding OpenFolderLabel}" Command="{Binding OpenFolderCommand}" Margin="0,0,8,8" />
+                        <Button Content="{Binding ResetLabel}" Command="{Binding ResetCommand}" Margin="0,0,8,8" />
+                    </WrapPanel>
+                    <Border Padding="12" CornerRadius="8" Background="{DynamicResource ThemeControlLowBrush}">
+                        <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Log}" />
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="2" Text="{Binding ErrorText}" Foreground="{DynamicResource SystemControlErrorTextForegroundBrush}"
+                   IsVisible="{Binding HasError}" TextWrapping="Wrap" />
+    </Grid>
+</Window>

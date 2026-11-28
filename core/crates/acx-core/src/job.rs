@@ -24,7 +24,7 @@ use crate::encoding::{
 };
 use crate::error::{AcxError, Result};
 use crate::estimate::{estimate_space, SpaceEstimate, SpaceInput};
-use crate::scheduler::{self, RunContext, RunControl, RunOutcome};
+use crate::scheduler::{self, RunContext, RunControl, RunOutcome, RunProgress};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +34,55 @@ use std::time::{Duration, Instant};
 
 /// Maximum worker threads accepted by a job.
 pub const MAX_JOB_THREADS: usize = 256;
+
+/// Interval between progress observations for API consumers such as the C ABI.
+pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Snapshot callback used by presentation layers. It is invoked from a core
+/// background thread and must not call back into the same job synchronously.
+pub type ProgressHook = Arc<dyn Fn(RunProgress) + Send + Sync>;
+
+/// Owns the optional progress thread and stops it on every return path.
+struct ProgressReporter {
+    finished: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+    context: Arc<RunContext>,
+    hook: ProgressHook,
+}
+
+impl ProgressReporter {
+    fn start(context: Arc<RunContext>, hook: ProgressHook) -> Self {
+        let finished = Arc::new(AtomicBool::new(false));
+        let thread_finished = Arc::clone(&finished);
+        let thread_context = Arc::clone(&context);
+        let thread_hook = Arc::clone(&hook);
+        let thread = thread::spawn(move || loop {
+            thread::sleep(PROGRESS_INTERVAL);
+            if thread_finished.load(Ordering::SeqCst) {
+                break;
+            }
+            thread_hook(thread_context.snapshot());
+        });
+        Self {
+            finished,
+            thread: Some(thread),
+            context,
+            hook,
+        }
+    }
+}
+
+impl Drop for ProgressReporter {
+    fn drop(&mut self) {
+        self.finished.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        // Contract: exactly one final snapshot after the reporter stops. The
+        // worker-thread hook cannot race with the final FFI state write.
+        (self.hook)(self.context.snapshot());
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum AttackConfig {
@@ -727,6 +776,16 @@ fn build_factory(
     }
 }
 
+fn save_checkpoint_or_warn(
+    store: &CheckpointStore,
+    checkpoint: &Checkpoint,
+    warnings: &mut Vec<String>,
+) {
+    if let Err(error) = store.save(checkpoint) {
+        warnings.push(format!("could not save checkpoint: {error}"));
+    }
+}
+
 /// Run one job to completion, a stop request, or a failure.
 ///
 /// `prepass` contains already-confirmed passwords (batch reuse). It is tried
@@ -737,6 +796,21 @@ pub fn run_job(
     control: Arc<RunControl>,
     prepass: &[Vec<u8>],
     observer: &mut dyn JobObserver,
+) -> Result<JobReport> {
+    run_job_with_progress(spec, control, prepass, observer, None)
+}
+
+/// [`run_job`] with an optional progress snapshot hook for FFI/GUI consumers.
+///
+/// The hook is called from a dedicated background thread at
+/// [`PROGRESS_INTERVAL`] and once with the final snapshot before returning. It
+/// must be safe to call from a worker thread and must not re-enter the job.
+pub fn run_job_with_progress(
+    spec: &JobSpec,
+    control: Arc<RunControl>,
+    prepass: &[Vec<u8>],
+    observer: &mut dyn JobObserver,
+    progress_hook: Option<ProgressHook>,
 ) -> Result<JobReport> {
     let started = Instant::now();
     let info = archive::preflight(&spec.archive)?;
@@ -889,6 +963,8 @@ pub fn run_job(
         Arc::clone(&finished),
         Arc::clone(&monitor_error),
     );
+    let _progress_reporter =
+        progress_hook.map(|hook| ProgressReporter::start(Arc::clone(&context), hook));
 
     let outcome = scheduler::run_with_source(factory, prepared.source, Arc::clone(&context));
     finished.store(true, Ordering::SeqCst);
@@ -953,7 +1029,7 @@ pub fn run_job(
                 progress.tried,
                 progress.total,
             );
-            store.save(&checkpoint)?;
+            save_checkpoint_or_warn(&store, &checkpoint, &mut warnings);
             Ok(JobReport {
                 status: JobStatus::Stopped,
                 password: None,
@@ -979,9 +1055,7 @@ pub fn run_job(
                     progress.tried,
                     progress.total,
                 );
-                if let Err(save_error) = store.save(&checkpoint) {
-                    warnings.push(format!("could not save checkpoint: {save_error}"));
-                }
+                save_checkpoint_or_warn(&store, &checkpoint, &mut warnings);
             }
             Ok(JobReport {
                 status: JobStatus::Failed,
@@ -1034,4 +1108,56 @@ fn start_checkpoint_monitor(
             break;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_save_failure_becomes_warning() {
+        let name = format!(
+            "acx-job-checkpoint-fail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        );
+        let preferred = std::env::temp_dir().join(&name);
+        let dir = if std::fs::create_dir_all(&preferred).is_ok() {
+            preferred
+        } else {
+            let mut fallback = std::env::current_exe().unwrap_or_default();
+            fallback.pop();
+            fallback.pop();
+            fallback.push("acx-test-tmp");
+            fallback.push(name);
+            std::fs::create_dir_all(&fallback).expect("create checkpoint failure directory");
+            fallback
+        };
+        let checkpoint_path = dir.join("checkpoint.acx-checkpoint");
+        std::fs::create_dir_all(&checkpoint_path).expect("checkpoint path must be unwritable");
+        let checkpoint = Checkpoint::new(
+            ArchiveFingerprint {
+                format: "zip".to_string(),
+                parts: Vec::new(),
+            },
+            None,
+            AttackFingerprint::dictionary(),
+            1,
+            1,
+            1,
+            2,
+        );
+        let mut warnings = Vec::new();
+        save_checkpoint_or_warn(
+            &CheckpointStore::new(checkpoint_path),
+            &checkpoint,
+            &mut warnings,
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("could not save checkpoint"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

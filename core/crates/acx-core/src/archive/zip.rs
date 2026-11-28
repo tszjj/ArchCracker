@@ -231,12 +231,19 @@ impl ZipSession {
                     total += read as u64;
                 }
                 Err(err) if is_candidate_rejection(&err) => return Ok(PasswordTest::Miss),
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Err(AcxError::Truncated(format!(
+                        "ZIP entry data ended after {total} of {declared_size} bytes"
+                    )));
+                }
                 Err(err) => return Err(AcxError::Io(err)),
             }
         }
 
         if total != declared_size {
-            return Ok(PasswordTest::Miss);
+            return Err(AcxError::Truncated(format!(
+                "ZIP entry data ended after {total} of {declared_size} bytes"
+            )));
         }
 
         // Defense in depth against the ZipCrypto 1/256 false header pass: only
@@ -279,12 +286,19 @@ impl ZipSession {
                 Ok(0) => break,
                 Ok(read) => total += read as u64,
                 Err(err) if is_candidate_rejection(&err) => return Ok(PasswordTest::Miss),
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Err(AcxError::Truncated(format!(
+                        "ZIP entry data ended after {total} of {declared_size} bytes"
+                    )));
+                }
                 Err(err) => return Err(AcxError::Io(err)),
             }
         }
 
         if total != declared_size {
-            return Ok(PasswordTest::Miss);
+            return Err(AcxError::Truncated(format!(
+                "ZIP entry data ended after {total} of {declared_size} bytes"
+            )));
         }
 
         // Reaching EOF means the AES reader consumed the authentication code
@@ -297,11 +311,12 @@ impl ZipSession {
 /// is broken". Both ZipCrypto garbage and AES authentication failures surface
 /// through these kinds.
 fn is_candidate_rejection(err: &std::io::Error) -> bool {
+    // Wrong passwords surface as InvalidData/InvalidInput from the decrypting
+    // reader. UnexpectedEof and short reads mean the archive data is truncated,
+    // so they must be reported as archive errors, never as a candidate Miss.
     matches!(
         err.kind(),
-        std::io::ErrorKind::InvalidData
-            | std::io::ErrorKind::InvalidInput
-            | std::io::ErrorKind::UnexpectedEof
+        std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput
     )
 }
 
@@ -544,6 +559,76 @@ mod tests {
                 .test_password(b"definitely-not-the-password")
                 .expect("test password"),
             PasswordTest::Miss
+        );
+    }
+
+    #[test]
+    fn truncated_entry_data_is_not_a_candidate_rejection() {
+        use std::io::{Error, ErrorKind};
+
+        assert!(is_candidate_rejection(&Error::new(
+            ErrorKind::InvalidData,
+            "wrong password"
+        )));
+        assert!(is_candidate_rejection(&Error::new(
+            ErrorKind::InvalidInput,
+            "bad verifier"
+        )));
+        assert!(!is_candidate_rejection(&Error::new(
+            ErrorKind::UnexpectedEof,
+            "truncated entry"
+        )));
+        assert!(!is_candidate_rejection(&Error::other("disk failure")));
+    }
+
+    fn inflate_declared_uncompressed_size(bytes: &mut [u8]) {
+        // AES fixtures use a data descriptor and rely on the central directory.
+        let local_size_offset = 22;
+        if bytes.len() > local_size_offset + 4 {
+            let local_declared = u32::from_le_bytes([
+                bytes[local_size_offset],
+                bytes[local_size_offset + 1],
+                bytes[local_size_offset + 2],
+                bytes[local_size_offset + 3],
+            ]);
+            if local_declared > 0 {
+                bytes[local_size_offset..local_size_offset + 4]
+                    .copy_from_slice(&local_declared.saturating_add(1_000).to_le_bytes());
+            }
+        }
+        let central = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .expect("central directory signature");
+        let size_offset = central + 24; // uncompressed size in central file header
+        let declared = u32::from_le_bytes([
+            bytes[size_offset],
+            bytes[size_offset + 1],
+            bytes[size_offset + 2],
+            bytes[size_offset + 3],
+        ]);
+        bytes[size_offset..size_offset + 4]
+            .copy_from_slice(&declared.saturating_add(1_000).to_le_bytes());
+    }
+
+    #[test]
+    fn truncated_aes_entry_is_not_a_miss() {
+        let mut bytes = aes_zip(
+            &[("hello.txt", HELLO)],
+            CompressionMethod::Stored,
+            AesMode::Aes256,
+        );
+        inflate_declared_uncompressed_size(&mut bytes);
+        let temp = TempArchive::new("truncated-aes-entry");
+        temp.write(&bytes);
+        let mut session =
+            ZipSession::open(temp.path()).expect("preflight must still open the archive");
+        let error = session
+            .test_password(PASSWORD)
+            .expect_err("truncated entry must not be a Miss");
+        assert!(
+            matches!(error, AcxError::Truncated(_) | AcxError::Io(_)),
+            "unexpected error: {error:?}"
         );
     }
 

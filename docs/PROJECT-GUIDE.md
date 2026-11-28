@@ -1,6 +1,6 @@
 # ArchCracker 项目全景与开发指引
 
-> 最后更新：2026-11-28 · 阶段：**W1 已准出并签核；W2 已启动（Windows 全栈优先）；本地开发模式**
+> 最后更新：2026-11-28 · 阶段：**W1/W2 已签核；W3 Windows GUI 开发中（分支 `windows-gui`，W3-001 C ABI v1 与 W3-002 Avalonia 骨架已完成并复审）**
 >
 > 本文是项目结构、文档地图和开发进度的**单一入口**。它不替代架构/许可/任务文档；
 > 具体设计、验收证据和决策以链接文档为准。每次完成一个切片或调整排期时，先更新本文的状态。
@@ -23,15 +23,15 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 
 | 维度 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 当前阶段 | **W2 进行中** | W1 signoff 2026-11-26；W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则（PR #23/#26/#28）、W2-005 批量（PR #30）、W2-006 编码/严格模式（PR #33）已合入；W2-001 GPU Deferred；GUI 未开始 |
-| 已完成切片 | W1-001…W1-010；W2-002、W2-003、W2-003a、W2-004、W2-005、W2-006 | W1 PR #10–#15；W2 PR #23、#26、#28、#30、#33 已合入 `main` |
+| 当前阶段 | **W3 开发中** | W1 2026-11-26、W2 2026-11-28 已签核；W2-001 GPU Deferred；`windows-gui` 分支已完成 W3-001 C ABI v1、W3-002 Avalonia 骨架与 W3-003 Setup/Run/Result 垂直切片（待复审） |
+| 已完成切片 | W1-001…W1-010；W2-002…W2-008（W2-001 Deferred） | W1 PR #10–#15；W2 PR #23/#26/#28/#30/#33/#36、W2-008 PR #38/#39 已合入 `main` |
 | 内核能力 | ZIP、7z、RAR（外部）、RAR5 check 快筛、分卷、SFX、流式字典、掩码/暴力/混合候选源、规则链、空间估算、批量任务编排、编码变体/严格模式、多线程调度、运行控制/检查点 | W1-009 RAR5 快筛 completed（reviewer APPROVE + 法务复核附条件通过）；W1-006/007、W2-002/003/003a/004 reviewer APPROVE；W1-008 三格式 1M×1GB 实测 |
 | CLI | 单任务：字典/掩码/暴力/混合；批量：`acx batch <manifest>` | `--encoding-variants`/`--strict`/`--rar-no-fast-reject`/`--report-stats`；退出码 0/1/2/3/4；`--estimate` 输出时间 + 空间 + 变体倍数；批量退出码停止 4 > 失败 3 > 校验 2 > 有命中 0 > 全未命中 1 |
-| C ABI | 最小 `acx_product` / `acx_version` / `acx_status_name` | `acx.h` ABI v0；攻击 API 未实现 |
-| GUI / 前端 | 只有目录与 README 占位 | Avalonia/JNI/NAPI 工程尚未创建 |
+| C ABI | `acx.h` ABI v1：句柄/攻击/回调/状态/估算/`path|fd|uri` + 附加 `acx_inspect` | W3-001 已实现并复审；`acx_inspect` 为 W3-003 前置修复，Windows `path` 可用，fd/uri 预留 |
+| GUI / 前端 | W3-002 骨架与 W3-003 Setup/Run/Result 已落地 | ZIP+字典垂直切片、暂停/停止、命中复制；Android/HarmonyOS 工程尚未创建 |
 | Full 随包 | 策略已定（ADR-0004），**尚未落地** | 无 `third_party/manifest.json`、无二进制、无安装包 |
-| 测试 | core 157、CLI 96（1 ignored）、FFI 2 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；MSVC 待 CI |
-| CI | `rust (win/linux/mac)`、Windows GNU、MSRV 1.89、cargo-deny | `.github/workflows/ci.yml`；PR #33 6/6 全绿（2026-11-27） |
+| 测试 | core 168、CLI 含 W2-008 差分 5、FFI 8 单元 + 5 E2E、Avalonia shell 35 | 本机 Windows GNU + WinRAR 6.24 + 7-Zip 26.04 oracle；C/C++/C# smoke、真实 wizard↔CLI 差分全绿 |
+| CI | 6 个 Rust/license job + `ffi-smoke`（C99/C++17/.NET 10/acx-cli） | `.github/workflows/ci.yml`；main run `46025110880` 6/6 全绿；windows-gui PR #40 基线 run `46117028594` 7/7，W3-003 新增代码待远端重跑 |
 | 平台 | Windows x64 为唯一排期平台 | Linux/macOS 只保证编译/测试；RAR 运行时未验证；移动端 Deferred |
 
 > 最近一次全绿：`main` CI 6/6（run `46025110880`，仓库转公开后重跑，2026-11-28；W1 签核基线见 [W1-SIGNOFF](W1-SIGNOFF.md)，W2 签核见 [W2-SIGNOFF](W2-SIGNOFF.md)）。本地 fmt/clippy/test、MSRV 1.89 全通过。
@@ -62,14 +62,15 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 │     │  ├─ src/main.rs
 │     │  └─ tests/                        # cli.rs、w1_zip_dict.rs、w1_sevenz.rs、w1_rar_external.rs、w1_volumes_sfx.rs、w1_resume.rs
 │     └─ acx-ffi/                         # 最小 C ABI
-│        ├─ include/acx.h                 # ABI v0，仅 product/version/status
+│        ├─ include/acx.h                 # ABI v1：攻击/回调/状态/估算/input
 │        └─ src/lib.rs
 │
-├─ frontends/                             # 目前只有 README 占位，尚无工程文件
-│  ├─ desktop/                            # [计划] Avalonia 12
+├─ frontends/                             # W3 前端：Windows desktop 骨架已落地
+│  ├─ desktop/src/ArchCracker.Desktop/   # Avalonia 12 / .NET 10 工程
+│  ├─ desktop/tests/                     # AcxFfiSmoke + ArchCracker.Desktop.Tests
 │  ├─ android/                            # [计划] Kotlin + Compose
 │  ├─ harmony/                            # [计划] ArkTS/ArkUI
-│  └─ shared/                             # [计划] token/i18n
+│  └─ shared/                             # dotnet ABI/状态码映射 + i18n 词条
 │
 ├─ docs/
 │  ├─ PROJECT-GUIDE.md                    # 本文：结构/文档地图/进度
@@ -99,9 +100,9 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 ```
 
 **尚未创建但文档中已规划的目录/工程**：`core/crates/acx-jni`、`core/crates/acx-napi`、
-`frontends/desktop` 的实际 .NET 工程、`frontends/android` 的 Gradle 工程、
-`frontends/harmony` 的 DevEco 工程、`tests/corpus`/`vectors`/`differential`/`fuzz`、
-`third_party/manifest.json` 与随包二进制。看到文档里的这些路径时，先确认是否已落地。
+`frontends/android` 的 Gradle 工程、`frontends/harmony` 的 DevEco 工程、
+`third_party/manifest.json` 与随包二进制。`frontends/desktop` 的 .NET 工程与
+`tests/corpus/generate.py` 已落地；看到文档里的规划路径时，先确认是否已实现。
 
 ## 4. 说明文件地图
 
@@ -165,6 +166,12 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | [W2-008 语料/差分/基准](tasks/W2-008-corpus-differential-benchmark.md) | 语料生成脚本、oracle 差分、W2-007 判据证据、1M 基准、Windows 全栈验证 | 本地验证完成（2026-11-28）；证据见 [W2-008 基准](benchmarks/W2-008.md)；CI 待恢复 |
 | [W2 阶段准出规划](W2-EXIT-PLAN.md) | 准出门 G1–G7、阶段 P0–P5、证据映射、两级结论、签核模板 | 规划稿（2026-11-28），正式签核待 CI 恢复 |
 | [开发进度归档（2026-11-28）](DEV-ARCHIVE-2026-11-28.md) | W1→W2-007 冻结快照、本地开发约定、Windows 全栈验证清单 | 本地分支 `docs/local-dev-w2-008`，未推送远端 |
+| [W3 阶段目标划分](W3-PLAN.md) | W3-001…W3-006 切片、准出标准、角色与 W4 边界 | 计划稿（2026-11-28）；W3-001 已完成；分支 `windows-gui` |
+| [W3-001 C ABI v1](tasks/W3-001-cabi-v1.md) | `acx.h` v1、FFI 薄层、回调/状态/错误、C/C# smoke | 本地验证完成（2026-11-28） |
+| [W3-002 Avalonia 工程与 NativeBridge](tasks/W3-002-avalonia-shell.md) | .NET 10/Avalonia 12、MVVM、NativeBridge、主题/i18n、16 个 shell 测试 | 本地与 CI 验证完成（2026-11-28） |
+| [W3-003 Setup/Run/Result](tasks/W3-003-setup-run-result.md) | ZIP 字典垂直切片、运行控制、审计 P2 影响分析 | 已验收（2026-11-28），35 tests + PR #40 CI 7/7（run `46141238867`）；连续运行 bug 已修复 |
+| [CL-W3-001](CL-W3-001.md) | W3-001 变更说明、影响范围、风险与回滚方案 | 已创建，随评审修复更新 |
+| [W3 Windows GUI 设计大纲](tasks/W3-windows-gui-outline.md) | Avalonia 12 架构、模块、C ABI v1、交互规范、优先级 | 设计大纲（2026-11-28）；分支 `windows-gui` |
 | [W2-001 hashcat GPU spike](tasks/W2-001-hashcat-spike.md) | ZIP AES/RAR5 提 hash + 外部 hashcat + CPU 回退 | **Deferred（W2 不启动）** |
 | [docs/benchmarks/w1-zipcrypto.md](benchmarks/w1-zipcrypto.md) | ZIP 字典吞吐非正式基线 | 已记录 |
 | [docs/benchmarks/w1-rar-preflight.md](benchmarks/w1-rar-preflight.md) | RAR 预检缓存前后对比 | 已记录 |
@@ -183,7 +190,7 @@ ArchCracker 是一个**只做授权恢复**的压缩包密码恢复工具：
 | **W0 Bootstrap** | **基本完成** | 仓库、Apache-2.0、CI、用户级工具链脚本、Rust workspace、ADR 0001–0004、最小 C ABI | 语料生成器/校验清单/差分向量（`tests/README` 仍为 P1 计划） |
 | **W1 核心 CLI** | **✅ 已签核** | ZIP/7z/RAR/分卷/SFX/流式/断点/暂停停止/RAR5 快筛 | 已知限制见 [W1-SIGNOFF](W1-SIGNOFF.md)（不阻塞 W2）：RAR5 非 ASCII 回退、7z 停止尾延迟、`-hp` 第三方语料、物理核数默认值 |
 | **W2 引擎/攻击** | **✅ 已签核（2026-11-28）** | W2-002 掩码、W2-003 暴力、W2-003a 空间估算、W2-004 混合/规则、W2-005 批量、W2-006 编码/严格模式、W2-007 CPU 快筛、W2-008 语料/差分/基准；CI 6/6 | 未验证项见 [W2-SIGNOFF](W2-SIGNOFF.md)；**W2-001 GPU 已 Deferred**；见 [W2-PLAN](W2-PLAN.md) |
-| **W3 桌面 GUI** | 未开始 | — | C ABI 攻击 API、Avalonia 工程、进度/暂停、自动解压 |
+| **W3 桌面 GUI** | **开发中** | W3-001 C ABI v1、W3-002 Avalonia 骨架、W3-003 Setup/Run/Result 垂直切片均已完成（待复审） | W3-004 攻击模式扩展、W3-005 报告/统计；不自动解压 |
 | **W4 全栈交付** | 未开始 | ADR-0004 策略 | 单一 Full 安装包、UnRAR/hashcat 随包、签名、崩溃转储、zh/en |
 | **W5 Windows Beta** | 未开始 | — | 性能/模糊/兼容性/AV/文档 |
 | **D1–D3 其他平台** | **Deferred** | 接口保留 | Linux/macOS/Android/HarmonyOS 前端与打包 |
@@ -245,7 +252,7 @@ cargo run -p acx-cli -- batch jobs.toml --max-parallel 2 --reuse-found
 - `--mask-file`、`?b`、`--export-dictionary`、`--increment`；
 - 跨运行跳过已命中的批量任务（首版无批量状态文件；中断任务按各自断点续跑）；
 - GPU/hashcat 加速（W2-001 Deferred，W2 不启动）；
-- GUI、安装包、自动解压；
+- GUI、安装包；项目不实现自动解压；
 - Full 随包 UnRAR/hashcat（W4）；
 - Linux/macOS/Android/HarmonyOS 的实际产品交付。
 
@@ -356,16 +363,17 @@ cargo deny check licenses bans sources
 
 ### 7.4 CI 门禁
 
-`.github/workflows/ci.yml` 当前 6 个 job：
+`.github/workflows/ci.yml` 当前 7 个 job：
 
 1. `rust (windows-latest)`：fmt/clippy/test/release build；
 2. `rust (ubuntu-latest)`：同上 + C header smoke；
 3. `rust (macos-latest)`：同上；
-4. `rust (windows-latest, gnu)`：GNU target 测试；
-5. `rust (msrv 1.89)`：最低 Rust 版本；
-6. `cargo-deny`：licenses/bans/sources。
+4. `ffi-smoke`（W3-001 新增）：C99/C++17 header smoke + .NET 10 P/Invoke smoke；
+5. `rust (windows-latest, gnu)`：GNU target 测试；
+6. `rust (msrv 1.89)`：最低 Rust 版本；
+7. `cargo-deny`：licenses/bans/sources。
 
-> **注意（2026-11-28 起）**：GitHub Actions 计费账户月度额度耗尽，上述 6 个 job 当前均未启动（非代码失败）。后续开发先按 [`docs/DEV-ARCHIVE-2026-11-28.md`](DEV-ARCHIVE-2026-11-28.md) §3 切换到**本地开发模式**：本地分支 + 本地等价门禁 + 本地证据，暂不 push / 开 PR；CI 绿灯待额度恢复或 CI 通道切换后补。跨平台结论只能写"Windows x64 本地验证 / 其他平台未验证"。
+> **状态说明（2026-11-28）**：仓库已转公开，原 6 个 job 的 `main` run `46025110880` 已重跑为 6/6 全绿；`ffi-smoke` 为本分支新增，需随 W3-001 远端验证确认。W3 开发先在 `windows-gui` 分支本地提交，未 push / 开 PR 时不得把本地结果写成远端绿灯。跨平台运行时结论只能写"Windows x64 本地验证 / 其他平台未验证"。
 
 ### 7.5 Definition of Done
 
@@ -399,8 +407,8 @@ roadmap 的复选框保留阶段级口径，切片级完成情况看 §5.2。
    RAR 运行时与 GUI 未验证。
 4. **RAR4 退出码语义**：RAR4 的缺密码/错误密码/部分损坏都可能返回 3；当前 3 按 Miss
    （RAR5 的 3 仍按 External），损坏归档还没有独立状态，W2 继续完善。
-5. **前端缺失**：`frontends/*` 目前只有 README；W3 之前不要按“已有 GUI”排期。
-6. **语料缺失**：没有提交样本归档/字典；`tests/` 仍是计划。正式基准前必须补生成脚本和清单。
+5. **前端边界**：`frontends/desktop` 仅有 W3-002 骨架（探测、句柄生命周期、主题/i18n），没有完整 Setup/Run/Result；不得按“完整 GUI”排期。
+6. **语料脚本**：生成脚本与文档在 `tests/corpus/`，归档/字典只在 `tests/corpus/out/` 本地生成且不入库。
 7. **旧工具样本**：`解密1/2/3` 只做静态分析，禁止执行；已被 `.gitignore` 排除。
 8. **7z 无认证器**：错误密码与损坏 payload 在 CRC 之前不可完全区分；完整 CRC 失败按 Miss，损坏归档可能表现为 `NOT FOUND`，没有独立“损坏”状态。头加密损坏也可能被当作头加密进入字典流程。
 9. **分卷/SFX 边界**：PKZIP spanned `.z01` 明确不支持；最后卷缺失对 ZIP/7z 靠“最后两卷等大”启发式，RAR 单卷靠 archive flags、多卷靠 UnRAR 诊断；SFX 扫描上限 32 MiB，异常偏移的第三方 SFX 未验证；RAR4 SFX `-hp` 未单独验证。

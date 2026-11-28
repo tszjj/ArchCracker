@@ -6,9 +6,9 @@ Planned for P3. Windows first, then Linux/macOS with the same codebase.
 
 - Drag/drop or pick archive; show format/encryption/volume info.
 - Tabs: dictionary / mask / brute / rules.
-- Thread count, fast/strict mode, auto-extract.
+- Thread count, fast/strict mode.
 - Progress, rate, ETA, pause/resume/stop.
-- Result: password, copy, report, auto-extract.
+- Result: password, copy, report; no automatic extraction.
 - Error classification: unencrypted/empty/corrupt/missing volume/unsupported/header-encrypted.
 
 ## Integration
@@ -26,4 +26,4 @@ Planned for P3. Windows first, then Linux/macOS with the same codebase.
 
 ## Status
 
-Not scaffolded yet. M0 only defines the C ABI and docs.
+W3-002 skeleton is implemented on `windows-gui`: Avalonia 12 / .NET 10 app shell, MVVM layers, NativeBridge, ABI probe, safe handle lifecycle, theme/i18n, and 9 in-process tests. See `docs/tasks/W3-002-avalonia-shell.md`. W3-003 will add Setup/Run/Result screens; automatic extraction is out of scope for the project.

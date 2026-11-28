@@ -15,4 +15,4 @@ Core is the source of truth. Frontends must not redefine enums/structs; generate
 
 ## Status
 
-M0: empty placeholder. P3 will add `error-codes.md`, `attack-spec.schema.json`, `i18n/`.
+W3-002: `dotnet/AcxStatusMap.cs` and `i18n/{en,zh}.json` are implemented and linked into the Avalonia desktop project. `error-codes.md` and `attack-spec.schema.json` remain planned; `acx.h` is the single source of truth.
